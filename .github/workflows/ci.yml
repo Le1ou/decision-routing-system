@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Backend (Python)
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend deps
+        run: |
+          if [ -f apps/backend/requirements.txt ]; then
+            pip install -r apps/backend/requirements.txt
+          fi
+
+      # Frontend (Node)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend deps
+        run: |
+          if [ -f apps/frontend/package.json ]; then
+            cd apps/frontend
+            npm install
+            npm run build
+          fi
