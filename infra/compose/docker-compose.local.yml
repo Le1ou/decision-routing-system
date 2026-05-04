@@ -1,0 +1,36 @@
+
+services:
+  db:
+    image: postgres:15
+    container_name: project_db
+
+    restart: always
+
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      
+    ports:
+      - "${DB_PORT}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # backend:
+  #   build: ../../apps/backend
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - db
+
+  # frontend:
+  #   build: ../../apps/frontend
+  #   ports:
+  #     - "5173:5173"
+  #   depends_on:
+  #     - backend
+
+volumes:
+  postgres_data:
+  
