@@ -1,0 +1,7 @@
+{
+    "dep_configs":{
+        "empl_appl_delay": 360,
+        "delegated_to_same_dep": false,
+        "deadline_notification": 25      
+    }
+}
