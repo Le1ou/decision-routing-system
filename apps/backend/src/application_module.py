@@ -81,6 +81,17 @@ class PgDbOperator:
             conn.execute('INSERT INTO priority (name, value' \
                                                         ") VALUES (%s, %s)", (name, value))
     ### Осталось - фото, many-to-many таблицы, уведомления, !!!! Заявка!!!!.   
+
+    #
+    #
+    #Update command
+    #
+    #
+
+    def updateSingleDataInTable(self, table:str, whereCon:str, column:str, newVal):
+        with self.pool.connection() as conn:
+            conn.execute('UPDATE ' + table  + ' SET ' + column + ' = ' + newVal + ' WHERE ' + whereCon )
+
     # 
     # Select command
     # 
@@ -182,7 +193,9 @@ test = PgDbOperator()
 #test.writeNewDepartment("Отдел безопасности", "основное отделение", 1, True, 10)
 #test.deleteDataFromTable("department", "department_id = 1")
 #test.deleteAllDataFromTableCascade("department")
-print(test.getColumnFromTable( "department","department_id" ))
+#print(test.getColumnFromTable( "department","name" ))
+#test.updateSingleDataInTable("department", "department_id = 1", "name" , "'Новый отдел'")
+#print(test.getColumnFromTable( "department","name" ))
 #print(test.getColumnFromTable( "department",'"group"'))
 #print("-----------------------------------------")
 #print(test.getColumnsFromTable("department", ["name", 'department_id'], limit = 3, whereCon="department_id = '1'"))
