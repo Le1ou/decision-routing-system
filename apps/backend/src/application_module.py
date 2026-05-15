@@ -23,6 +23,12 @@ class PgDbOperator:
         self.pool.wait()
         print("connection pool ready")
 
+
+    ######
+    #
+    #Insert command
+    #
+
     def writeNewPost(self, name = "Отдел", is_top = False):
          with self.pool.connection() as conn:
             conn.execute('INSERT INTO post (name, is_top' \
@@ -76,7 +82,7 @@ class PgDbOperator:
                                                         ") VALUES (%s, %s)", (name, value))
     ### Осталось - фото, many-to-many таблицы, уведомления, !!!! Заявка!!!!.   
     # 
-    # 
+    # Select command
     # 
     def getColumnFromTable(self, table:str, column:str, limit:int = None, orderbyDesc:str = None, orderbyAsc:str = None, whereCon:str = None):
        try:
@@ -117,8 +123,36 @@ class PgDbOperator:
             for column in columns:
                 print(column)
             return None
+        
+    #######
+    ##
+    #Delete and truncate command
+    #
+    #
+    #
 
+    def deleteDataFromTable(self, table:str, whereCon:str):
+        try:
+            with self.pool.connection() as conn:
+                conn.execute("DELETE FROM " + table +" WHERE " + whereCon)
+        except:
+            print("cant delete data from " +table +" with condition: " + whereCon)
 
+    def deleteAllDataFromTable(self, table:str):
+        try:
+            with self.pool.connection() as conn:
+                conn.execute("TRUNCATE TABLE " + table)
+        except:
+            print("cant truncate table:" +table)
+
+    def deleteAllDataFromTableCascade(self, table:str):
+        try:
+            with self.pool.connection() as conn:
+                conn.execute("TRUNCATE TABLE " + table +" RESTART IDENTITY CASCADE")
+        except:
+            print("cant truncate table:" +table)
+
+            
 
 def convertPhotoToBase64(photo):
     try:
@@ -145,11 +179,13 @@ def convertBase64ToPhoto(bytePhoto, shouldWriteToFile = False, WriteToDirectory 
 
 
 test = PgDbOperator()
-#test.writeNewDepartment("Отдел безопасности3", "основное отделение", 1, True, 10)
-print(test.getColumnFromTable( "department","name", ))
-print(test.getColumnFromTable( "department",'"group"'))
-print("-----------------------------------------")
-print(test.getColumnsFromTable("department", ["name", 'department_id'], limit = 3, whereCon="department_id = '1'"))
+#test.writeNewDepartment("Отдел безопасности", "основное отделение", 1, True, 10)
+#test.deleteDataFromTable("department", "department_id = 1")
+#test.deleteAllDataFromTableCascade("department")
+print(test.getColumnFromTable( "department","department_id" ))
+#print(test.getColumnFromTable( "department",'"group"'))
+#print("-----------------------------------------")
+#print(test.getColumnsFromTable("department", ["name", 'department_id'], limit = 3, whereCon="department_id = '1'"))
 #test.writeNewPost(name = "Сотрудник", is_top = False)
 #test.tryWriteNewEmployee("Иванов Иван Иванович", 1, 1)
 #test.tryWriteNewTypeOfWork("Починить комп", 1, 1)
