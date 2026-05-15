@@ -74,7 +74,49 @@ class PgDbOperator:
          with self.pool.connection() as conn:
             conn.execute('INSERT INTO priority (name, value' \
                                                         ") VALUES (%s, %s)", (name, value))
-    ### Осталось - фото, many-to-many таблицы, уведомления, !!!! Заявка!!!!.     
+    ### Осталось - фото, many-to-many таблицы, уведомления, !!!! Заявка!!!!.   
+    # 
+    # 
+    # 
+    def getColumnFromTable(self, table:str, column:str, limit:int = None, orderbyDesc:str = None, orderbyAsc:str = None, whereCon:str = None):
+       try:
+            requestString = 'SELECT ' + column
+            requestString += (" FROM " + table )
+            if type(orderbyAsc) == str:
+                requestString += " ORDER BY " + orderbyAsc +" ASC"
+            if type(orderbyDesc) == str:
+                requestString += " ORDER BY " + orderbyDesc +" DESC"
+            if type(whereCon) == str:
+                requestString += " WHERE " + whereCon
+            if type(limit) == int:
+                requestString += " LIMIT " + str(abs(limit))
+            with self.pool.connection() as conn:
+                return conn.execute(requestString).fetchall()
+       except:
+           print("getting column error for table " + table + " in column " + column)
+           return None
+    def getColumnsFromTable(self, table:str, columns:list[str], limit:int = None, orderbyDesc:str = None, orderbyAsc:str = None, whereCon:str = None):
+        try:
+            requestString = 'SELECT '
+            for column in columns:
+                requestString += (column +", ")
+            requestString = requestString[:-2]
+            requestString += (" FROM " + table )
+            if type(orderbyAsc) == str:
+                requestString += " ORDER BY " + orderbyAsc +" ASC"
+            if type(orderbyDesc) == str:
+                requestString += " ORDER BY " + orderbyDesc +" DESC"
+            if type(whereCon) == str:
+                requestString += " WHERE " + whereCon
+            if type(limit) == int:
+                requestString += " LIMIT " + str(abs(limit))
+            with self.pool.connection() as conn:
+                return  conn.execute(requestString).fetchall()
+        except:
+            print("getting columns error for table " + table + " with columns ")
+            for column in columns:
+                print(column)
+            return None
 
 
 
@@ -85,6 +127,7 @@ def convertPhotoToBase64(photo):
             return encoded_string
     except:
         print("cant convert photo")
+        return None
 
 def convertBase64ToPhoto(bytePhoto, shouldWriteToFile = False, WriteToDirectory = (Path(__file__).parent.parent), NameToWrite = "output_image.png"):
     try:
@@ -95,13 +138,18 @@ def convertBase64ToPhoto(bytePhoto, shouldWriteToFile = False, WriteToDirectory 
         return image_data
     except:
         print("cant convert photo from this string")
+        return None
 
 #print(convertPhotoToBase64("test_img.jpg"))
 #print(convertBase64ToPhoto(convertPhotoToBase64("test_img.jpg")))
 
 
-#test = PgDbOperator()
-#test.writeNewDepartment("Отдел безопасности", "основное отделение", 1, True, 10)
+test = PgDbOperator()
+#test.writeNewDepartment("Отдел безопасности3", "основное отделение", 1, True, 10)
+print(test.getColumnFromTable( "department","name", ))
+print(test.getColumnFromTable( "department",'"group"'))
+print("-----------------------------------------")
+print(test.getColumnsFromTable("department", ["name", 'department_id'], limit = 3, whereCon="department_id = '1'"))
 #test.writeNewPost(name = "Сотрудник", is_top = False)
 #test.tryWriteNewEmployee("Иванов Иван Иванович", 1, 1)
 #test.tryWriteNewTypeOfWork("Починить комп", 1, 1)
