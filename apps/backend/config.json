@@ -3,5 +3,20 @@
         "empl_appl_delay": 360,
         "delegated_to_same_dep": false,
         "deadline_notification": 25      
-    }
+    },
+    "AD_auth":{
+        "server_adress":"your_ad_server.yourdomain.local",
+        "Domain":"yourdomain"
+    },
+    "MOCK_USERS_DB": {
+        "ivanov_i": {
+            "password": "SecretPassword!1",
+            "roles": ["IT", "IT_lead"]
+        },
+    "petrov_p": {
+            "password": "Pa$$w0rd",
+            "roles": ["JANITOR"]
+        }
+    },
+    "ROLES":["JANITOR", "IT", "IT_lead"]
 }

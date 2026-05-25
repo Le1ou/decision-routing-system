@@ -6,6 +6,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 import base64
 from psycopg.rows import dict_row
+import ldap3
+
 configPath = Path(__file__).parent.parent / "config.json"
 global configData
 project_timezone = timezone.utc
@@ -13,25 +15,108 @@ with configPath.open() as config_data:
     configData = json.load(config_data)
     config_data.close()
 
+
+class ActiveDirectoryAuth:
+    def __init__(self):
+        pass
+    def authenticate_user_test(username, password):
+        if username not in configData["MOCK_USERS_DB"]:
+            return False
+        stored_password = configData["MOCK_USERS_DB"][username]["password"]
+        if password == stored_password:
+            return True
+            
+        return False
+    def authenticate_user(username, password):
+        # Формируем имя пользователя для LDAP (формат UPN или sAMAccountName)
+        user_dn = f'{username}@{config_data["AD_auth"]["Domain"]}'
+        
+        server = ldap3.Server(config_data["AD_auth"]["server_adress"], get_info=ALL)
+        try:
+            # Подключаемся к серверу
+            conn = ldap3.Connection(server, user=user_dn, password=password, authentication='SIMPLE')
+            
+            # Пытаемся привязаться (bind) к серверу
+            if conn.bind():
+                print("Успешная авторизация!")
+                # conn.entries содержит информацию о пользователе из AD
+                conn.unbind()
+                return True
+        except Exception as e:
+            print(f"Ошибка авторизации: {e}")
+        
+        return False
+
 class PgDbOperator:
     delegated_to_same_dep = configData["dep_configs"]["delegated_to_same_dep"]
     empl_appl_delay = configData["dep_configs"]["empl_appl_delay"]
     deadline_notification = configData["dep_configs"]["deadline_notification"]
-    def __init__(self):
-        conn_info = "dbname=app_db user=postgres password=postgres"
-        self.pool = psycopg_pool.ConnectionPool(conninfo=conn_info, min_size=1, max_size= 10)
-        atexit.register(self.pool.close)
-        self.pool.wait()
-        print("connection pool ready")
+    def __init__(self, user, password):
+        try:
+            conn_info = "dbname=app_db user=" + user + " password=" + password
+            self.pool = psycopg_pool.ConnectionPool(conninfo=conn_info, min_size=1, max_size= 10)
+            atexit.register(self.pool.close)
+            self.pool.wait()
+            print("connection pool ready")
+        except:
+            print("cannot login with said data")
+            print("try creating new role")
 
     def datetime_handler(self, obj):
         if isinstance(obj, datetime):
             return obj.isoformat() 
         raise TypeError("Unknown type")
-    def WriteDataIntoJson(self, data):
-        with open('data.json', 'w', encoding="utf-8") as f:
-            json.dump(data, fp = f, default=self.datetime_handler, ensure_ascii=False)
+    def WriteDataIntoJson(self, data, shouldWriteToFile = False):
+        if shouldWriteToFile:
+            with open('data.json', 'w', encoding="utf-8") as f:
+                json.dump(data, fp = f, default=self.datetime_handler, ensure_ascii=False)
         return json.dumps(data, default=self.datetime_handler, ensure_ascii=False)
+    
+    def createUserRole(self, username, password, roleList):
+         with self.pool.connection() as conn:
+                # try:
+                    conn.execute("""
+                                            DO $$
+                                            BEGIN
+                                                IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '"""+ username+ """') THEN
+                                                    CREATE ROLE """+ username+ """ WITH LOGIN PASSWORD '""" + password +"""';
+                                                END IF;
+                                            END;
+                                            $$;
+                                        """
+                                )
+                    for role in roleList:
+                        conn.execute(
+                          "GRANT " + role + " TO " + username
+                        )
+                    
+                # except :
+                #     print("ошибка создания пользователя")
+                #     conn.rollback() 
+    def fillDbRolesBasedOnADTest(self, roleList):
+        for role in roleList:
+            with self.pool.connection() as conn:
+                try:
+                    conn.execute("""
+                                            DO $$
+                                            BEGIN
+                                                IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '"""+ role+ """') THEN
+                                                    CREATE ROLE """+ role+ """ WITH NOLOGIN;
+                                                    GRANT USAGE ON SCHEMA public TO """+ role+ """;
+                                                    GRANT INSERT, UPDATE ON public.application TO """+ role+ """;
+                                                    GRANT SELECT ON ALL TABLES IN SCHEMA public TO """+ role+ """;
+                                                END IF;
+                                            END;
+                                            $$;
+                                        """
+                                )
+                    if "lead" in role:
+                        conn.execute("GRANT UPDATE ON public.department, public.employee, public.types_of_works TO "+ role )
+                except psycopg.errors.DuplicateObject:
+                    print("Роль уже существует, пропускаем создание.")
+                    conn.rollback() 
+               
+
 
     ######
     #
@@ -39,16 +124,22 @@ class PgDbOperator:
     #
 
     def writeNewPost(self, name = "Должность", is_top = False):
-         with self.pool.connection() as conn:
-            conn.execute('INSERT INTO post (name, is_top' \
-                                                        ") VALUES (%s,%s)", (name, is_top))
+        try:
+            with self.pool.connection() as conn:
+                conn.execute('INSERT INTO post (name, is_top' \
+                                                            ") VALUES (%s,%s)", (name, is_top))
+        except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
             
     def writeNewDepartment(self, name = "Отдел", group = "Основной", value = 0,  delegated_to_same_dep = delegated_to_same_dep, empl_appl_delay = empl_appl_delay, deadline_notification = deadline_notification):
-         with self.pool.connection() as conn:
-            conn.execute('INSERT INTO department ("group", value, name, ' \
+        try:
+            with self.pool.connection() as conn:
+                conn.execute('INSERT INTO department ("group", value, name, ' \
                                                         "delegated_to_same_dep, empl_appl_delay, " \
                                                         "deadline_notification) VALUES (%s,%s,%s,%s,%s,%s)", (group, value, name, delegated_to_same_dep, empl_appl_delay, deadline_notification))
-            
+        except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")  
+                
     def tryWriteNewEmployee(self, fio = "Имя сотрудника", department_id = None, post_grade_id = None):
         now = datetime.now(project_timezone)
         with self.pool.connection() as conn:
@@ -59,6 +150,8 @@ class PgDbOperator:
             except psycopg.errors.ForeignKeyViolation:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewEmployee")
+            except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
 
     def tryWriteNewTypeOfWork(self, name = "Вид работы", department_id = None, complexity_value = 0):
         with self.pool.connection() as conn:
@@ -68,6 +161,8 @@ class PgDbOperator:
             except psycopg.errors.ForeignKeyViolation:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewTypeOfWork")
+            except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
 
     def tryWriteNewPostGrade(self, post_id = None, grade_id = None):
         with self.pool.connection() as conn:
@@ -77,6 +172,8 @@ class PgDbOperator:
             except psycopg.errors.ForeignKeyViolation:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewPostGrade")
+            except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
     
     def tryWriteNewApplication(self, name = "Заявка1", priority_id:int = None, status_id:int =  None, description:str = "Без описания", delegated_id: int = None,
                                 is_unfinished:bool = False, department_id:int = None ,types_of_works:int = None, empl_assigned_complexity:int = None,
@@ -89,6 +186,8 @@ class PgDbOperator:
             except psycopg.errors.ForeignKeyViolation:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewApplication")
+            except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
 
     def tryWriteNewEmployeeToApplication(self, role_id:int = None, application_id:int = None, employee_id:int = None):
         with self.pool.connection() as conn:
@@ -98,27 +197,47 @@ class PgDbOperator:
             except psycopg.errors.ForeignKeyViolation:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewEmployeeToApplication")
+            except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
 
     def writeNewComplexityValue(self, name = "Сложность"):
-         with self.pool.connection() as conn:
-            conn.execute('INSERT INTO complexity_value (name' \
-                                                        ") VALUES (%s)", (name,))
+        try:
+            with self.pool.connection() as conn:
+                conn.execute('INSERT INTO complexity_value (name' \
+                                                            ") VALUES (%s)", (name,))
+        except psycopg.errors.InsufficientPrivilege:
+            print("user dont have privilege for this command")
+    
     def writeNewStatus(self, name = "Состояние"):
+        try:
          with self.pool.connection() as conn:
             conn.execute('INSERT INTO status (name' \
                                                         ") VALUES (%s)", (name,))
+        except psycopg.errors.InsufficientPrivilege:
+            print("user dont have privilege for this command")
+
     def writeNewRole(self, name = "Состояние"):
+        try:
          with self.pool.connection() as conn:
             conn.execute('INSERT INTO role (name' \
                                                         ") VALUES (%s)", (name,))
+        except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
+
     def writeNewGrade(self, name = "Ранг"):
-         with self.pool.connection() as conn:
-            conn.execute('INSERT INTO grade (name' \
-                                                        ") VALUES (%s)", (name,))
+        try:
+            with self.pool.connection() as conn:
+                conn.execute('INSERT INTO grade (name' \
+                                                            ") VALUES (%s)", (name,))
+        except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
     def writeNewPriority(self, name = "Значение приоритета", value = 0):
+        try:
          with self.pool.connection() as conn:
             conn.execute('INSERT INTO priority (name, value' \
                                                         ") VALUES (%s, %s)", (name, value))
+        except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
     ### Осталось - фото, уведомления, delegated
 
     #
@@ -128,8 +247,13 @@ class PgDbOperator:
     #
 
     def updateSingleDataInTable(self, table:str, whereCon:str, column:str, newVal):
-        with self.pool.connection() as conn:
-            conn.execute('UPDATE ' + table  + ' SET ' + column + ' = ' + newVal + ' WHERE ' + whereCon )
+        try:
+            with self.pool.connection() as conn:
+                conn.execute('UPDATE ' + table  + ' SET ' + column + ' = ' + newVal + ' WHERE ' + whereCon )
+        except psycopg.errors.InsufficientPrivilege:
+                print("user dont have privilege for this command")
+        except:
+            print("cant update data in table" + table + " in column " + column)
 
     # 
     # Select command
@@ -271,8 +395,10 @@ def convertBase64ToPhoto(bytePhoto, shouldWriteToFile = False, WriteToDirectory 
 #print(convertPhotoToBase64("test_img.jpg"))
 #print(convertBase64ToPhoto(convertPhotoToBase64("test_img.jpg")))
 
-
-test = PgDbOperator()
+#superTest = PgDbOperator("postgres", "postgres")
+#superTest.fillDbRolesBasedOnADTest(configData["ROLES"])
+#superTest.createUserRole("ivanov_i","SecretPassword!1", configData["MOCK_USERS_DB"]["ivanov_i"]["roles"] )
+test = PgDbOperator("postgres", "postgres")
 #print(datetime.now(project_timezone))
 #test.writeNewDepartment("Отдел безопасности", "основное отделение", 1, True, 10)
 #test.deleteDataFromTable("department", "department_id = 1")
