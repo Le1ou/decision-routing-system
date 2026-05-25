@@ -157,3 +157,8 @@ env/
 # IDE
 .vscode/
 .idea/
+
+# Local planning notes
+skills.md
+plan.md
+backend-notes.md
