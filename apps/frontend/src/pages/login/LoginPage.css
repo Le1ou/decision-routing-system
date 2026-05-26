@@ -1,0 +1,147 @@
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: #f5f7fb;
+  padding: 16px;
+}
+
+.login-card {
+  display: grid;
+  width: min(100%, 650px);
+  min-height: 620px;
+  align-content: start;
+  gap: 42px;
+  border: 1px solid #d5dbe6;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 38px;
+  box-shadow: 0 22px 54px rgba(39, 52, 83, 0.12);
+}
+
+.login-card__header {
+  display: grid;
+  gap: 14px;
+  text-align: center;
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 37px;
+  line-height: 1.1;
+}
+
+.login-card p {
+  margin: 0;
+  color: #111111;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.18;
+}
+
+.login-card__error {
+  border: 1px solid #f5b5ad;
+  border-radius: 6px;
+  background: #fff1ef;
+  color: #b42318;
+  padding: 12px;
+}
+
+.login-field {
+  display: grid;
+  gap: 8px;
+  color: #8a8a8a;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.login-field select,
+.login-field input {
+  width: 100%;
+  border: 0;
+  border-bottom: 2px solid #ccd3df;
+  border-radius: 0;
+  background: transparent;
+  color: #2b2b2b;
+  font-size: 28px;
+  padding: 7px 0 12px;
+}
+
+.login-field select {
+  appearance: none;
+}
+
+.login-card__password {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  border-bottom: 2px solid #ccd3df;
+}
+
+.login-card__password input {
+  border-bottom: 0;
+}
+
+.login-card__eye {
+  position: relative;
+  width: 64px;
+  height: 54px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.login-card__eye::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 16px;
+  width: 44px;
+  height: 24px;
+  border: 4px solid #1d1d1d;
+  border-radius: 50%;
+}
+
+.login-card__eye::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 27px;
+  width: 56px;
+  height: 4px;
+  border-radius: 999px;
+  background: #1d1d1d;
+  transform: rotate(-34deg);
+}
+
+.login-card__eye--open::after {
+  display: none;
+}
+
+.login-card__submit {
+  justify-self: start;
+  margin-top: 52px;
+  border: 0;
+  background: transparent;
+  color: #1685ff;
+  cursor: pointer;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+@media (max-width: 520px) {
+  .login-card {
+    min-height: auto;
+    gap: 32px;
+  }
+
+  .login-card h1 {
+    font-size: 30px;
+  }
+
+  .login-card p,
+  .login-field,
+  .login-card__submit {
+    font-size: 22px;
+  }
+}
