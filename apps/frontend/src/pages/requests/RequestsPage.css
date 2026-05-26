@@ -6,6 +6,10 @@
   overflow-x: hidden;
 }
 
+.requests-page--sidebar-hidden {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
 .requests-sidebar {
   display: grid;
   grid-template-rows: auto auto 1fr;
@@ -13,6 +17,15 @@
   overflow: hidden;
   border-right: 1px solid #d8dee9;
   background: #ffffff;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.requests-page--sidebar-hidden .requests-sidebar {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-100%);
 }
 
 .requests-toolbar {
@@ -95,16 +108,20 @@
 
 .request-row {
   display: grid;
+  width: 100%;
   min-height: 70px;
   align-content: center;
+  border: 0;
   border-bottom: 1px solid #e1e6ef;
   background: #ffffff;
+  cursor: pointer;
   padding: 10px 20px;
   text-align: left;
 }
 
-.request-row:first-child {
+.request-row--active {
   background: #eaf2ff;
+  box-shadow: inset 3px 0 0 #1f6feb;
 }
 
 .request-row strong {
@@ -148,6 +165,19 @@
   color: #666666;
   cursor: pointer;
   font-size: 24px;
+}
+
+.request-card__toggle-list {
+  min-height: 36px;
+  margin-bottom: 14px;
+  border: 1px solid #d8dee9;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1f2a44;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 0 14px;
 }
 
 .request-card__title {

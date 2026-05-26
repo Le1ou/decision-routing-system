@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { departments, positions, requests, workTypes, mockUsers } from "@mocks/mockData";
@@ -18,6 +18,8 @@ export function RequestsPage() {
   const { currentUser } = useAuth();
   const [sortKey, setSortKey] = useState<RequestSortKey>("priority");
   const [filters, setFilters] = useState<RequestFilter>({});
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [isSidebarHidden, setIsSidebarHidden] = useState(false);
 
   const visibleRequests = useMemo(() => {
     if (!currentUser) {
@@ -32,7 +34,18 @@ export function RequestsPage() {
     );
   }, [currentUser, filters, sortKey]);
 
-  const selectedRequest = visibleRequests[0];
+  useEffect(() => {
+    if (visibleRequests.length === 0) {
+      setSelectedRequestId(null);
+      return;
+    }
+
+    if (!selectedRequestId || !visibleRequests.some((request) => request.id === selectedRequestId)) {
+      setSelectedRequestId(visibleRequests[0].id);
+    }
+  }, [selectedRequestId, visibleRequests]);
+
+  const selectedRequest = visibleRequests.find((request) => request.id === selectedRequestId) ?? visibleRequests[0];
   const requestActions = currentUser && selectedRequest ? getAvailableRequestActions(selectedRequest, currentUser) : [];
   const requestDepartment = departments.find((department) => department.id === selectedRequest?.departmentId);
   const requestWorkType = workTypes.find((workType) => workType.id === selectedRequest?.workTypeId);
@@ -53,8 +66,8 @@ export function RequestsPage() {
   }
 
   return (
-    <section className="requests-page">
-      <aside className="requests-sidebar">
+    <section className={isSidebarHidden ? "requests-page requests-page--sidebar-hidden" : "requests-page"}>
+      <aside className="requests-sidebar" aria-hidden={isSidebarHidden}>
         <div className="requests-toolbar">
           <select value={sortKey} onChange={(event) => setSortKey(event.target.value as RequestSortKey)} aria-label="Сортировка">
             <option value="priority">Сортировать по приоритету</option>
@@ -115,10 +128,15 @@ export function RequestsPage() {
         <div className="requests-list">
           {visibleRequests.length > 0 ? (
             visibleRequests.map((request) => (
-              <article className="request-row" key={request.id}>
+              <button
+                className={request.id === selectedRequest?.id ? "request-row request-row--active" : "request-row"}
+                type="button"
+                key={request.id}
+                onClick={() => setSelectedRequestId(request.id)}
+              >
                 <strong>Заявка № {request.number.replace("DRS-", "")}</strong>
                 <span>{request.title}</span>
-              </article>
+              </button>
             ))
           ) : (
             <div className="requests-list__empty">Заявки не найдены</div>
@@ -128,6 +146,13 @@ export function RequestsPage() {
 
       {selectedRequest ? (
       <article className="request-card">
+        <button
+          className="request-card__toggle-list"
+          type="button"
+          onClick={() => setIsSidebarHidden((value) => !value)}
+        >
+          {isSidebarHidden ? "Показать список" : "Скрыть список"}
+        </button>
         <button className="request-card__edit" type="button" aria-label="Редактировать">✎</button>
 
         <header className="request-card__title">
