@@ -13,7 +13,7 @@
             "password": "SecretPassword!1",
             "roles": ["IT", "IT_lead"]
         },
-    "petrov_p": {
+        "petrov_p": {
             "password": "Pa$$w0rd",
             "roles": ["JANITOR"]
         }

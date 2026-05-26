@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 import base64
 from psycopg.rows import dict_row
 import ldap3
+from fastapi import FastAPI, Depends, HTTPException, status, Body
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 configPath = Path(__file__).parent.parent / "config.json"
 global configData
@@ -19,19 +23,26 @@ with configPath.open() as config_data:
 class ActiveDirectoryAuth:
     def __init__(self):
         pass
-    def authenticate_user_test(username, password):
+    def authenticate_user_test(self, username:str, password:str):
         if username not in configData["MOCK_USERS_DB"]:
-            return False
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="User with that username does not exists"
+        )
         stored_password = configData["MOCK_USERS_DB"][username]["password"]
         if password == stored_password:
-            return True
+            return [username, password]
+        else:
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="Password does not match username"
+        )
             
-        return False
-    def authenticate_user(username, password):
+    def authenticate_user(self, username, password):
         # Формируем имя пользователя для LDAP (формат UPN или sAMAccountName)
         user_dn = f'{username}@{config_data["AD_auth"]["Domain"]}'
         
-        server = ldap3.Server(config_data["AD_auth"]["server_adress"], get_info=ALL)
+        server = ldap3.Server(config_data["AD_auth"]["server_adress"], get_info=ldap3.ALL)
         try:
             # Подключаемся к серверу
             conn = ldap3.Connection(server, user=user_dn, password=password, authentication='SIMPLE')
@@ -45,7 +56,6 @@ class ActiveDirectoryAuth:
         except Exception as e:
             print(f"Ошибка авторизации: {e}")
         
-        return False
 
 class PgDbOperator:
     delegated_to_same_dep = configData["dep_configs"]["delegated_to_same_dep"]
@@ -129,6 +139,7 @@ class PgDbOperator:
                 conn.execute('INSERT INTO post (name, is_top' \
                                                             ") VALUES (%s,%s)", (name, is_top))
         except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
             
     def writeNewDepartment(self, name = "Отдел", group = "Основной", value = 0,  delegated_to_same_dep = delegated_to_same_dep, empl_appl_delay = empl_appl_delay, deadline_notification = deadline_notification):
@@ -138,6 +149,7 @@ class PgDbOperator:
                                                         "delegated_to_same_dep, empl_appl_delay, " \
                                                         "deadline_notification) VALUES (%s,%s,%s,%s,%s,%s)", (group, value, name, delegated_to_same_dep, empl_appl_delay, deadline_notification))
         except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")  
                 
     def tryWriteNewEmployee(self, fio = "Имя сотрудника", department_id = None, post_grade_id = None):
@@ -151,18 +163,24 @@ class PgDbOperator:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewEmployee")
             except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
 
     def tryWriteNewTypeOfWork(self, name = "Вид работы", department_id = None, complexity_value = 0):
         with self.pool.connection() as conn:
             try:
-                conn.execute('INSERT INTO types_of_work (name, complexity_value, department_id, ' \
+                conn.execute('INSERT INTO types_of_works (name, complexity_value, department_id ' \
                                                         ") VALUES (%s,%s,%s)", (name, complexity_value , department_id))
+                return True
             except psycopg.errors.ForeignKeyViolation:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewTypeOfWork")
+                return "Error: Foreign key value does not exist for command tryWriteNewTypeOfWork"
+               
             except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
+                return "user dont have privilege for this command"
 
     def tryWriteNewPostGrade(self, post_id = None, grade_id = None):
         with self.pool.connection() as conn:
@@ -173,6 +191,7 @@ class PgDbOperator:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewPostGrade")
             except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
     
     def tryWriteNewApplication(self, name = "Заявка1", priority_id:int = None, status_id:int =  None, description:str = "Без описания", delegated_id: int = None,
@@ -187,6 +206,7 @@ class PgDbOperator:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewApplication")
             except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
 
     def tryWriteNewEmployeeToApplication(self, role_id:int = None, application_id:int = None, employee_id:int = None):
@@ -198,6 +218,7 @@ class PgDbOperator:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewEmployeeToApplication")
             except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
 
     def writeNewComplexityValue(self, name = "Сложность"):
@@ -206,6 +227,7 @@ class PgDbOperator:
                 conn.execute('INSERT INTO complexity_value (name' \
                                                             ") VALUES (%s)", (name,))
         except psycopg.errors.InsufficientPrivilege:
+            conn.rollback()
             print("user dont have privilege for this command")
     
     def writeNewStatus(self, name = "Состояние"):
@@ -214,6 +236,7 @@ class PgDbOperator:
             conn.execute('INSERT INTO status (name' \
                                                         ") VALUES (%s)", (name,))
         except psycopg.errors.InsufficientPrivilege:
+            conn.rollback()
             print("user dont have privilege for this command")
 
     def writeNewRole(self, name = "Состояние"):
@@ -222,6 +245,7 @@ class PgDbOperator:
             conn.execute('INSERT INTO role (name' \
                                                         ") VALUES (%s)", (name,))
         except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
 
     def writeNewGrade(self, name = "Ранг"):
@@ -230,6 +254,7 @@ class PgDbOperator:
                 conn.execute('INSERT INTO grade (name' \
                                                             ") VALUES (%s)", (name,))
         except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
     def writeNewPriority(self, name = "Значение приоритета", value = 0):
         try:
@@ -237,6 +262,7 @@ class PgDbOperator:
             conn.execute('INSERT INTO priority (name, value' \
                                                         ") VALUES (%s, %s)", (name, value))
         except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
     ### Осталось - фото, уведомления, delegated
 
@@ -251,8 +277,10 @@ class PgDbOperator:
             with self.pool.connection() as conn:
                 conn.execute('UPDATE ' + table  + ' SET ' + column + ' = ' + newVal + ' WHERE ' + whereCon )
         except psycopg.errors.InsufficientPrivilege:
+                conn.rollback()
                 print("user dont have privilege for this command")
         except:
+            conn.rollback()
             print("cant update data in table" + table + " in column " + column)
 
     # 
@@ -387,48 +415,3 @@ def convertBase64ToPhoto(bytePhoto, shouldWriteToFile = False, WriteToDirectory 
 
 
 
-
-
-
-
-
-#print(convertPhotoToBase64("test_img.jpg"))
-#print(convertBase64ToPhoto(convertPhotoToBase64("test_img.jpg")))
-
-#superTest = PgDbOperator("postgres", "postgres")
-#superTest.fillDbRolesBasedOnADTest(configData["ROLES"])
-#superTest.createUserRole("ivanov_i","SecretPassword!1", configData["MOCK_USERS_DB"]["ivanov_i"]["roles"] )
-test = PgDbOperator("postgres", "postgres")
-#print(datetime.now(project_timezone))
-#test.writeNewDepartment("Отдел безопасности", "основное отделение", 1, True, 10)
-#test.deleteDataFromTable("department", "department_id = 1")
-#test.deleteAllDataFromTableCascade("department")
-#print(test.getColumnFromTable( "department","name" ))
-#test.updateSingleDataInTable("department", "department_id = 1", "name" , "'Новый отдел'")
-#print(test.getColumnFromTable( "department","name" ))
-#print(test.getColumnFromTable( "department",'"group"'))
-#print("-----------------------------------------")
-#print(test.getColumnsFromTable("department", ["name", 'department_id'], limit = 3, whereCon="department_id = '1'"))
-#test.writeNewPost(name = "Сотрудник", is_top = False)
-
-test.deleteAllDataFromAllTables()
-test.writeNewPost("Уборщик", False)
-test.writeNewPost("Начальник", False)
-test.writeNewGrade("низший")
-test.writeNewGrade("высший")
-test.tryWriteNewPostGrade(1,1)
-test.tryWriteNewPostGrade(1,2)
-test.tryWriteNewPostGrade(2,1)
-test.tryWriteNewPostGrade(2,2)
-test.writeNewDepartment("Отдел безопасности", "основное отделение", 1, True, 10)
-test.tryWriteNewEmployee("Иванов Иван Иванович", 1, 1)
-test.tryWriteNewEmployee("Петров Петр Петрович", 1, 3)
-print(test.getColumnFromTable("post_grade", "post_grade_id"))
-print(test.getColumnFromTable("department", "department_id"))
-print(test.getAllRowsFromTable("employee"))
-print((test.getColumnFromTable("employee", "created_at", limit= 1)))
-test.tryWriteNewApplication()
-print(test.WriteDataIntoJson(test.getAllRowsFromTable("employee")))
-test.deleteAllDataFromAllTables()
-
-#test.tryWriteNewTypeOfWork("Починить комп", 1, 1)
