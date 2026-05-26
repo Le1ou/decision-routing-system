@@ -63,9 +63,60 @@ Database: app_db
 Или через Docker:
 docker exec -it project_db psql -U postgres -d app_db
 
-## Current status
-PostgreSQL через Docker
-Docker Compose настроен
-Переменные окружения описаны
-Backend (в разработке)
-Frontend (в разработке)
+## Как “запаковать” свои файлы в контейнер
+
+Указать путь к .sql в разделе volumes.
+
+Пример:
+volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../apps/backend/sql_decision-routing.sql:/docker-entrypoint-initdb.d/001_init.sql
+
+Важно:
+Postgres выполнит SQL только при первом создании volume.
+Для корекктной работы не использовать serial, а использовать integer
+
+Было:
+application_id serial NOT NULL GENERATED ALWAYS AS IDENTITY
+
+Стало:
+application_id integer NOT NULL GENERATED ALWAYS AS IDENTITY
+
+И это нужно сделать ВО ВСЕХ таблицах
+
+## Что нужно писать в Dockerfile (и порядок)
+
+Dockerfile описывает, КАК собрать приложение в контейнере.
+
+Правильный порядок шагов:
+FROM python:3.11-slim
+
+WORKDIR /app
+1. Сначала зависимости (важно для кеша)
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+2. Потом код
+COPY . .
+3. Открываем порт
+EXPOSE 3000
+4. Запуск приложения
+CMD ["python", "src/application_module.py"]
+
+Порядок важен
+зависимости меняются редко → кешируются
+код меняется часто → не ломает кеш pip install
+
+## Как перенести библиотеки из локального environment в Docker
+
+В Dockerfile перенести зависимости → через requirements.txt
+
+Dockerfile:
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+Пример содержимого requirements.txt:
+fastapi==0.110.0
+uvicorn==0.29.0
+psycopg2-binary==2.9.9
