@@ -91,6 +91,8 @@ export type Request = {
   managerComment?: string;
   resultText?: string;
   delegationId?: string;
+  attachmentNames?: string[];
+  assignedComplexity?: Complexity;
   assignedAt?: string;
   isUnfinished: boolean;
   createdAt: string;

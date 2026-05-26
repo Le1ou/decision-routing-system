@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { departments, positions, requests, workTypes, mockUsers } from "@mocks/mockData";
+import { useRequestsStore } from "@app/providers/RequestsProvider";
+import { attachments, departments, positions, workTypes, mockUsers } from "@mocks/mockData";
+import type { Complexity, Request, RequestAction, RequestStatus } from "@shared/model/domain";
 import { actionLabels, priorityLabels, statusLabels } from "@shared/model/labels";
 import {
   applyRequestFilters,
@@ -16,10 +19,21 @@ import "./RequestsPage.css";
 
 export function RequestsPage() {
   const { currentUser } = useAuth();
+  const { requestItems, updateRequest } = useRequestsStore();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sortKey, setSortKey] = useState<RequestSortKey>("priority");
   const [filters, setFilters] = useState<RequestFilter>({});
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [pendingAction, setPendingAction] = useState<RequestAction | null>(null);
+  const [actionForm, setActionForm] = useState({
+    comment: "",
+    complexity: "medium",
+    departmentId: "it",
+    description: "",
+    executorId: "",
+  });
 
   const visibleRequests = useMemo(() => {
     if (!currentUser) {
@@ -29,21 +43,28 @@ export function RequestsPage() {
     const getExecutorName = (executorId?: string) => mockUsers.find((user) => user.id === executorId)?.fullName ?? "";
 
     return sortRequests(
-      applyRequestFilters(filterRequestsByRole(requests, currentUser), filters, currentUser, { getExecutorName }),
+      applyRequestFilters(filterRequestsByRole(requestItems, currentUser), filters, currentUser, { getExecutorName }),
       sortKey,
     );
-  }, [currentUser, filters, sortKey]);
+  }, [currentUser, filters, requestItems, sortKey]);
 
   useEffect(() => {
+    const requestIdFromUrl = searchParams.get("request");
+
     if (visibleRequests.length === 0) {
       setSelectedRequestId(null);
+      return;
+    }
+
+    if (requestIdFromUrl && visibleRequests.some((request) => request.id === requestIdFromUrl)) {
+      setSelectedRequestId(requestIdFromUrl);
       return;
     }
 
     if (!selectedRequestId || !visibleRequests.some((request) => request.id === selectedRequestId)) {
       setSelectedRequestId(visibleRequests[0].id);
     }
-  }, [selectedRequestId, visibleRequests]);
+  }, [searchParams, selectedRequestId, visibleRequests]);
 
   const selectedRequest = visibleRequests.find((request) => request.id === selectedRequestId) ?? visibleRequests[0];
   const requestActions = currentUser && selectedRequest ? getAvailableRequestActions(selectedRequest, currentUser) : [];
@@ -56,6 +77,54 @@ export function RequestsPage() {
   const authorPosition = positions.find((position) => position.id === author?.positionId);
   const executorDepartment = departments.find((department) => department.id === executor?.departmentId);
   const executorPosition = positions.find((position) => position.id === executor?.positionId);
+  const requestAttachmentNames = [
+    ...attachments.filter((attachment) => attachment.requestId === selectedRequest?.id).map((attachment) => attachment.name),
+    ...(selectedRequest?.attachmentNames ?? []),
+  ];
+
+  const executorsForDepartment = mockUsers.filter(
+    (user) => user.role === "executor" && user.departmentId === selectedRequest?.departmentId && user.isActive,
+  );
+  const actionsWithForm: RequestAction[] = [
+    "assignExecutor",
+    "delegateInternal",
+    "delegateExternal",
+    "editDescription",
+    "returnToNew",
+  ];
+
+  const handleRequestAction = (action: RequestAction) => {
+    if (!selectedRequest || !currentUser) {
+      return;
+    }
+
+    if (actionsWithForm.includes(action)) {
+      setPendingAction(action);
+      setActionForm({
+        comment: "",
+        complexity: selectedRequest.assignedComplexity ?? requestWorkType?.complexity ?? "medium",
+        departmentId: selectedRequest.departmentId,
+        description: selectedRequest.description,
+        executorId: selectedRequest.executorId ?? executorsForDepartment[0]?.id ?? "",
+      });
+      return;
+    }
+
+    applyAction(action);
+  };
+
+  const applyAction = (action: RequestAction, payload: MockActionPayload = {}) => {
+    if (!selectedRequest || !currentUser) {
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+
+    updateRequest(selectedRequest.id, (request) => applyMockAction(request, action, currentUser.id, updatedAt, payload));
+
+    setNotice(getMockActionNotice(action));
+    setPendingAction(null);
+  };
 
   if (!currentUser) {
     return (
@@ -132,7 +201,10 @@ export function RequestsPage() {
                 className={request.id === selectedRequest?.id ? "request-row request-row--active" : "request-row"}
                 type="button"
                 key={request.id}
-                onClick={() => setSelectedRequestId(request.id)}
+                onClick={() => {
+                  setSelectedRequestId(request.id);
+                  setSearchParams({ request: request.id });
+                }}
               >
                 <strong>Заявка № {request.number.replace("DRS-", "")}</strong>
                 <span>{request.title}</span>
@@ -146,6 +218,7 @@ export function RequestsPage() {
 
       {selectedRequest ? (
       <article className="request-card">
+        {notice ? <div className="request-card__notice">{notice}</div> : null}
         <button
           className="request-card__toggle-list"
           type="button"
@@ -153,7 +226,15 @@ export function RequestsPage() {
         >
           {isSidebarHidden ? "Показать список" : "Скрыть список"}
         </button>
-        <button className="request-card__edit" type="button" aria-label="Редактировать">✎</button>
+        <button
+          className="request-card__edit"
+          type="button"
+          aria-label="Редактировать"
+          disabled={!requestActions.includes("editDescription")}
+          onClick={() => handleRequestAction("editDescription")}
+        >
+          ✎
+        </button>
 
         <header className="request-card__title">
           <h1>{requestDepartment?.name ?? "Отдел не указан"} / Заявка № {selectedRequest.number.replace("DRS-", "")}</h1>
@@ -182,9 +263,23 @@ export function RequestsPage() {
             </label>
             <div className="request-card__actions">
               {requestActions.map((action) => (
-                <button type="button" key={action}>{actionLabels[action]}</button>
+                <button type="button" key={action} onClick={() => handleRequestAction(action)}>
+                  {actionLabels[action]}
+                </button>
               ))}
             </div>
+            <section className="request-card__attachments">
+              <h2>Вложения</h2>
+              {requestAttachmentNames.length > 0 ? (
+                <ul>
+                  {requestAttachmentNames.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Файлы не прикреплены</p>
+              )}
+            </section>
           </section>
 
           <aside className="request-card__info">
@@ -235,8 +330,229 @@ export function RequestsPage() {
           <div className="requests-empty">Заявки не найдены. Измените параметры фильтрации.</div>
         </div>
       )}
+      {pendingAction && selectedRequest ? (
+        <div className="request-modal" role="dialog" aria-modal="true" aria-label={actionLabels[pendingAction]}>
+          <form
+            className="request-modal__panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              applyAction(pendingAction, actionForm);
+            }}
+          >
+            <header>
+              <h2>{actionLabels[pendingAction]}</h2>
+              <button type="button" onClick={() => setPendingAction(null)} aria-label="Закрыть">×</button>
+            </header>
+
+            {pendingAction === "assignExecutor" ? (
+              <label>
+                Исполнитель
+                <select
+                  value={actionForm.executorId}
+                  onChange={(event) => setActionForm((current) => ({ ...current, executorId: event.target.value }))}
+                >
+                  {executorsForDepartment.map((user) => (
+                    <option value={user.id} key={user.id}>{user.fullName}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            {pendingAction === "delegateExternal" ? (
+              <label>
+                Новый отдел
+                <select
+                  value={actionForm.departmentId}
+                  onChange={(event) => setActionForm((current) => ({ ...current, departmentId: event.target.value }))}
+                >
+                  {departments
+                    .filter((department) => department.id !== selectedRequest.departmentId)
+                    .map((department) => (
+                      <option value={department.id} key={department.id}>{department.name}</option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
+
+            {pendingAction === "delegateInternal" || pendingAction === "returnToNew" ? (
+              <label>
+                Сложность
+                <select
+                  value={actionForm.complexity}
+                  onChange={(event) => setActionForm((current) => ({ ...current, complexity: event.target.value }))}
+                >
+                  <option value="easy">Легкая</option>
+                  <option value="medium">Средняя</option>
+                  <option value="hard">Высокая</option>
+                  <option value="critical">Критичная</option>
+                </select>
+              </label>
+            ) : null}
+
+            {pendingAction === "editDescription" ? (
+              <label>
+                Описание проблемы
+                <textarea
+                  value={actionForm.description}
+                  onChange={(event) => setActionForm((current) => ({ ...current, description: event.target.value }))}
+                  maxLength={1000}
+                  placeholder="Уточните описание проблемы"
+                />
+              </label>
+            ) : null}
+
+            {pendingAction !== "editDescription" ? (
+            <label>
+              Комментарий
+              <textarea
+                value={actionForm.comment}
+                onChange={(event) => setActionForm((current) => ({ ...current, comment: event.target.value }))}
+                placeholder="Добавьте пояснение для истории заявки"
+              />
+            </label>
+            ) : null}
+
+            <footer>
+              <button type="button" onClick={() => setPendingAction(null)}>Отмена</button>
+              <button type="submit">Подтвердить</button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+type MockActionPayload = {
+  comment?: string;
+  complexity?: string;
+  description?: string;
+  departmentId?: string;
+  executorId?: string;
+};
+
+function applyMockAction(
+  request: Request,
+  action: RequestAction,
+  userId: string,
+  updatedAt: string,
+  payload: MockActionPayload = {},
+): Request {
+  const statusByAction: Partial<Record<RequestAction, RequestStatus>> = {
+    startWork: "inProgress",
+    reject: "rejected",
+    complete: "completed",
+    delegateInternal: "new",
+    delegateExternal: "delegated",
+    returnToNew: "new",
+    confirmExternalDelegation: "new",
+    declineExternalDelegation: "new",
+  };
+
+  if (action === "assignExecutor") {
+    const executor =
+      mockUsers.find((user) => user.id === payload.executorId) ??
+      mockUsers.find((user) => user.role === "executor" && user.departmentId === request.departmentId && user.isActive);
+
+    return {
+      ...request,
+      status: "assigned",
+      executorId: executor?.id ?? request.executorId,
+      assignedAt: updatedAt,
+      updatedAt,
+      managerComment: payload.comment || "Исполнитель назначен вручную в mock-режиме.",
+    };
+  }
+
+  if (action === "editDescription") {
+    return {
+      ...request,
+      updatedAt,
+      description: payload.description?.trim() || request.description,
+    };
+  }
+
+  if (action === "complete") {
+    return {
+      ...request,
+      status: "completed",
+      updatedAt,
+      finishedAt: updatedAt,
+      closedById: userId,
+      resultText: request.resultText ?? "Работы выполнены в mock-режиме.",
+    };
+  }
+
+  if (action === "startWork") {
+    return {
+      ...request,
+      status: "inProgress",
+      startedAt: updatedAt,
+      updatedAt,
+    };
+  }
+
+  if (action === "delegateInternal" || action === "returnToNew") {
+    return {
+      ...request,
+      status: "new",
+      previousExecutorId: request.executorId ?? request.previousExecutorId,
+      executorId: undefined,
+      isUnfinished: true,
+      updatedAt,
+      assignedComplexity: payload.complexity as Complexity | undefined,
+      executorComment: payload.comment || "Заявка возвращена для переназначения в mock-режиме.",
+    };
+  }
+
+  if (action === "delegateExternal") {
+    return {
+      ...request,
+      status: "delegated",
+      delegationId: request.delegationId ?? `delegation-${request.id}`,
+      departmentId: payload.departmentId ?? request.departmentId,
+      updatedAt,
+      executorComment: payload.comment || "Запрошено делегирование в другой отдел.",
+    };
+  }
+
+  return {
+    ...request,
+    status: statusByAction[action] ?? request.status,
+    updatedAt,
+  };
+}
+
+function getMockActionNotice(action: RequestAction) {
+  if (action === "assignExecutor") {
+    return "Исполнитель назначен. Заявка перешла в статус «Назначен исполнитель».";
+  }
+
+  if (action === "startWork") {
+    return "Заявка взята в работу.";
+  }
+
+  if (action === "complete") {
+    return "Заявка завершена.";
+  }
+
+  if (action === "reject") {
+    return "Заявка отклонена.";
+  }
+
+  if (action === "delegateExternal") {
+    return "Заявка отправлена на межотдельное делегирование.";
+  }
+
+  if (action === "delegateInternal" || action === "returnToNew") {
+    return "Заявка возвращена в статус «Новый» для переназначения.";
+  }
+
+  if (action === "confirmExternalDelegation" || action === "declineExternalDelegation") {
+    return "Решение по делегированию зафиксировано.";
+  }
+
+  return "Действие применено в mock-режиме.";
 }
 
 function formatDateTime(value?: string) {

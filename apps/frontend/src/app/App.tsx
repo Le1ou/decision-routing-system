@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
+import { RequestsProvider } from "@app/providers/RequestsProvider";
 import { AppShell } from "@widgets/app-shell";
 import {
   CreateRequestPage,
@@ -27,16 +28,18 @@ export function App() {
 
   return (
     <AppShell>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/requests" element={<RequestsPage />} />
-        <Route path="/requests/new" element={<CreateRequestPage />} />
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/employees" element={<EmployeesPage />} />
-        <Route path="/work-types" element={<WorkTypesPage />} />
-        <Route path="/priority-settings" element={<PrioritySettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <RequestsProvider>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/requests" element={<RequestsPage />} />
+          <Route path="/requests/new" element={<CreateRequestPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/employees" element={<EmployeesPage />} />
+          <Route path="/work-types" element={<WorkTypesPage />} />
+          <Route path="/priority-settings" element={<PrioritySettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </RequestsProvider>
     </AppShell>
   );
 }
