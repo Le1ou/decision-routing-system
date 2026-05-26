@@ -10,10 +10,27 @@ export type RequestStatus =
 
 export type RequestPriority = "low" | "medium" | "high" | "critical";
 
+export type RequestAction =
+  | "editDescription"
+  | "assignExecutor"
+  | "startWork"
+  | "reject"
+  | "complete"
+  | "delegateInternal"
+  | "delegateExternal"
+  | "returnToNew"
+  | "confirmExternalDelegation"
+  | "declineExternalDelegation";
+
+export type Complexity = "easy" | "medium" | "hard" | "critical";
+
 export type Department = {
   id: string;
   name: string;
   value: number;
+  delegatedToSameDepartment: boolean;
+  employeeApplicationDelayMinutes: number;
+  deadlineNotificationRatio: number;
 };
 
 export type Position = {
@@ -29,13 +46,33 @@ export type User = {
   role: UserRole;
   departmentId: string;
   positionId: string;
+  isActive: boolean;
 };
 
 export type WorkType = {
   id: string;
   name: string;
   departmentId: string;
-  complexity: "easy" | "medium" | "hard" | "critical";
+  complexity: Complexity;
+};
+
+export type Attachment = {
+  id: string;
+  requestId: string;
+  name: string;
+  type: "photo" | "document";
+};
+
+export type Delegation = {
+  id: string;
+  requestId: string;
+  delegatedByDepartmentId: string;
+  delegatedFromDepartmentId: string;
+  delegatedToDepartmentId: string;
+  comment: string;
+  createdAt: string;
+  decision?: "confirmed" | "declined";
+  decidedAt?: string;
 };
 
 export type Request = {
@@ -50,11 +87,18 @@ export type Request = {
   authorId: string;
   executorId?: string;
   previousExecutorId?: string;
+  executorComment?: string;
+  managerComment?: string;
+  resultText?: string;
+  delegationId?: string;
+  assignedAt?: string;
   isUnfinished: boolean;
   createdAt: string;
   deadlineAt: string;
+  updatedAt: string;
   startedAt?: string;
   finishedAt?: string;
+  closedById?: string;
 };
 
 export type Notification = {

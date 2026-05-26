@@ -1,13 +1,13 @@
-import type { Department, Notification, Position, Request, User, WorkType } from "@shared/model/domain";
+import type { Attachment, Delegation, Department, Notification, Position, Request, User, WorkType } from "@shared/model/domain";
 
 export const departments: Department[] = [
-  { id: "it", name: "IT-отдел", value: 0.75 },
-  { id: "oge", name: "Отдел главного энергетика", value: 0.82 },
-  { id: "production", name: "Производственный отдел", value: 0.9 },
-  { id: "okk", name: "Отдел контроля качества", value: 0.7 },
-  { id: "ogm", name: "Отдел главного механика", value: 0.86 },
-  { id: "warehouse", name: "Складской отдел", value: 0.58 },
-  { id: "supply", name: "Отдел снабжения", value: 0.64 },
+  { id: "it", name: "IT-отдел", value: 0.75, delegatedToSameDepartment: true, employeeApplicationDelayMinutes: 10, deadlineNotificationRatio: 0.25 },
+  { id: "oge", name: "Отдел главного энергетика", value: 0.82, delegatedToSameDepartment: true, employeeApplicationDelayMinutes: 15, deadlineNotificationRatio: 0.25 },
+  { id: "production", name: "Производственный отдел", value: 0.9, delegatedToSameDepartment: false, employeeApplicationDelayMinutes: 10, deadlineNotificationRatio: 0.25 },
+  { id: "okk", name: "Отдел контроля качества", value: 0.7, delegatedToSameDepartment: true, employeeApplicationDelayMinutes: 5, deadlineNotificationRatio: 0.25 },
+  { id: "ogm", name: "Отдел главного механика", value: 0.86, delegatedToSameDepartment: true, employeeApplicationDelayMinutes: 15, deadlineNotificationRatio: 0.25 },
+  { id: "warehouse", name: "Складской отдел", value: 0.58, delegatedToSameDepartment: false, employeeApplicationDelayMinutes: 10, deadlineNotificationRatio: 0.25 },
+  { id: "supply", name: "Отдел снабжения", value: 0.64, delegatedToSameDepartment: false, employeeApplicationDelayMinutes: 10, deadlineNotificationRatio: 0.25 },
 ];
 
 export const positions: Position[] = [
@@ -24,6 +24,7 @@ export const mockUsers: User[] = [
     role: "author",
     departmentId: "production",
     positionId: "engineer",
+    isActive: true,
   },
   {
     id: "user-executor",
@@ -32,6 +33,7 @@ export const mockUsers: User[] = [
     role: "executor",
     departmentId: "it",
     positionId: "lead-engineer",
+    isActive: true,
   },
   {
     id: "user-manager",
@@ -40,6 +42,16 @@ export const mockUsers: User[] = [
     role: "manager",
     departmentId: "it",
     positionId: "department-head",
+    isActive: true,
+  },
+  {
+    id: "user-executor-2",
+    login: "executor2",
+    fullName: "Морозов Дмитрий Андреевич",
+    role: "executor",
+    departmentId: "it",
+    positionId: "engineer",
+    isActive: false,
   },
 ];
 
@@ -62,9 +74,11 @@ export const requests: Request[] = [
     departmentId: "it",
     workTypeId: "it-hardware-replace",
     authorId: "user-author",
+    managerComment: "Ожидает автоматического распределения.",
     isUnfinished: false,
     createdAt: "2026-05-21T08:30:00.000Z",
     deadlineAt: "2026-05-22T15:00:00.000Z",
+    updatedAt: "2026-05-21T09:00:00.000Z",
   },
   {
     id: "request-2",
@@ -77,9 +91,11 @@ export const requests: Request[] = [
     workTypeId: "it-server-setup",
     authorId: "user-author",
     executorId: "user-executor",
+    assignedAt: "2026-05-22T11:40:00.000Z",
     isUnfinished: false,
     createdAt: "2026-05-22T11:05:00.000Z",
     deadlineAt: "2026-05-24T12:00:00.000Z",
+    updatedAt: "2026-05-22T11:40:00.000Z",
   },
   {
     id: "request-3",
@@ -92,11 +108,68 @@ export const requests: Request[] = [
     workTypeId: "production-repair",
     authorId: "user-manager",
     executorId: "user-executor",
+    previousExecutorId: "user-executor-2",
+    executorComment: "Потребуется согласование с ОКК после диагностики.",
     isUnfinished: true,
     createdAt: "2026-05-23T07:15:00.000Z",
     deadlineAt: "2026-05-23T18:00:00.000Z",
+    updatedAt: "2026-05-23T08:10:00.000Z",
     startedAt: "2026-05-23T08:10:00.000Z",
   },
+  {
+    id: "request-4",
+    number: "DRS-1027",
+    title: "Согласовать замену позиции в поставке",
+    description: "Поставщик предложил аналог комплектующей, нужно проверить возможность замены.",
+    status: "delegated",
+    priority: "medium",
+    departmentId: "it",
+    workTypeId: "it-server-setup",
+    authorId: "user-author",
+    delegationId: "delegation-1",
+    isUnfinished: false,
+    createdAt: "2026-05-24T09:20:00.000Z",
+    deadlineAt: "2026-05-27T12:00:00.000Z",
+    updatedAt: "2026-05-24T10:05:00.000Z",
+  },
+  {
+    id: "request-5",
+    number: "DRS-1028",
+    title: "Закрыть доступ у уволенного сотрудника",
+    description: "Необходимо отключить учетную запись и проверить доступ к сетевым папкам.",
+    status: "completed",
+    priority: "low",
+    departmentId: "it",
+    workTypeId: "it-server-setup",
+    authorId: "user-manager",
+    executorId: "user-executor",
+    closedById: "user-executor",
+    resultText: "Доступы отключены, учетная запись заблокирована.",
+    isUnfinished: false,
+    createdAt: "2026-05-19T10:00:00.000Z",
+    deadlineAt: "2026-05-20T18:00:00.000Z",
+    updatedAt: "2026-05-19T13:30:00.000Z",
+    assignedAt: "2026-05-19T10:15:00.000Z",
+    startedAt: "2026-05-19T10:25:00.000Z",
+    finishedAt: "2026-05-19T13:30:00.000Z",
+  },
+];
+
+export const delegations: Delegation[] = [
+  {
+    id: "delegation-1",
+    requestId: "request-4",
+    delegatedByDepartmentId: "supply",
+    delegatedFromDepartmentId: "supply",
+    delegatedToDepartmentId: "it",
+    comment: "Нужно проверить техническую совместимость позиции.",
+    createdAt: "2026-05-24T10:05:00.000Z",
+  },
+];
+
+export const attachments: Attachment[] = [
+  { id: "attachment-1", requestId: "request-1", name: "station-error.jpg", type: "photo" },
+  { id: "attachment-2", requestId: "request-3", name: "quality-report.pdf", type: "document" },
 ];
 
 export const notifications: Notification[] = [
