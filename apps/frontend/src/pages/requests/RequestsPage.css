@@ -519,6 +519,41 @@
   padding: 10px 12px;
 }
 
+.request-modal__complexity {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.request-modal__complexity > div {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #d8dee9;
+  border-radius: 6px;
+  background: #fbfcfe;
+  padding: 10px 12px;
+}
+
+.request-modal__complexity span {
+  color: #667085;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.request-modal__complexity strong {
+  color: #1f2a44;
+}
+
+.request-modal__error {
+  border: 1px solid #ffd2cc;
+  border-radius: 6px;
+  background: #fff7f5;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 12px;
+}
+
 .request-modal__panel textarea {
   min-height: 110px;
   resize: vertical;
@@ -543,4 +578,10 @@
   border-color: #1f6feb;
   background: #1f6feb;
   color: #ffffff;
+}
+
+@media (max-width: 640px) {
+  .request-modal__complexity {
+    grid-template-columns: 1fr;
+  }
 }

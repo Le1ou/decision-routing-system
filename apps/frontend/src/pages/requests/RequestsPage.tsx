@@ -34,6 +34,7 @@ export function RequestsPage() {
     description: "",
     executorId: "",
   });
+  const [actionError, setActionError] = useState("");
 
   const visibleRequests = useMemo(() => {
     if (!currentUser) {
@@ -100,6 +101,7 @@ export function RequestsPage() {
 
     if (actionsWithForm.includes(action)) {
       setPendingAction(action);
+      setActionError("");
       setActionForm({
         comment: "",
         complexity: selectedRequest.assignedComplexity ?? requestWorkType?.complexity ?? "medium",
@@ -119,10 +121,21 @@ export function RequestsPage() {
     }
 
     const updatedAt = new Date().toISOString();
+    const currentComplexity = selectedRequest.assignedComplexity ?? requestWorkType?.complexity ?? "medium";
+
+    if (
+      (action === "delegateInternal" || action === "returnToNew") &&
+      payload.complexity &&
+      complexityOrder[payload.complexity as Complexity] < complexityOrder[currentComplexity]
+    ) {
+      setActionError("Новая сложность не может быть ниже текущей.");
+      return;
+    }
 
     updateRequest(selectedRequest.id, (request) => applyMockAction(request, action, currentUser.id, updatedAt, payload));
 
     setNotice(getMockActionNotice(action));
+    setActionError("");
     setPendingAction(null);
   };
 
@@ -375,18 +388,27 @@ export function RequestsPage() {
             ) : null}
 
             {pendingAction === "delegateInternal" || pendingAction === "returnToNew" ? (
-              <label>
-                Сложность
-                <select
-                  value={actionForm.complexity}
-                  onChange={(event) => setActionForm((current) => ({ ...current, complexity: event.target.value }))}
-                >
-                  <option value="easy">Легкая</option>
-                  <option value="medium">Средняя</option>
-                  <option value="hard">Высокая</option>
-                  <option value="critical">Критичная</option>
-                </select>
-              </label>
+              <section className="request-modal__complexity">
+                <div>
+                  <span>Текущая сложность</span>
+                  <strong>{complexityLabels[selectedRequest.assignedComplexity ?? requestWorkType?.complexity ?? "medium"]}</strong>
+                </div>
+                <label>
+                  Новая сложность
+                  <select
+                    value={actionForm.complexity}
+                    onChange={(event) => {
+                      setActionForm((current) => ({ ...current, complexity: event.target.value }));
+                      setActionError("");
+                    }}
+                  >
+                    <option value="easy">Легкая</option>
+                    <option value="medium">Средняя</option>
+                    <option value="hard">Высокая</option>
+                    <option value="critical">Критичная</option>
+                  </select>
+                </label>
+              </section>
             ) : null}
 
             {pendingAction === "editDescription" ? (
@@ -412,6 +434,8 @@ export function RequestsPage() {
             </label>
             ) : null}
 
+            {actionError ? <div className="request-modal__error">{actionError}</div> : null}
+
             <footer>
               <button type="button" onClick={() => setPendingAction(null)}>Отмена</button>
               <button type="submit">Подтвердить</button>
@@ -429,6 +453,20 @@ type MockActionPayload = {
   description?: string;
   departmentId?: string;
   executorId?: string;
+};
+
+const complexityOrder: Record<Complexity, number> = {
+  easy: 1,
+  medium: 2,
+  hard: 3,
+  critical: 4,
+};
+
+const complexityLabels: Record<Complexity, string> = {
+  easy: "Легкая",
+  medium: "Средняя",
+  hard: "Высокая",
+  critical: "Критичная",
 };
 
 function applyMockAction(
