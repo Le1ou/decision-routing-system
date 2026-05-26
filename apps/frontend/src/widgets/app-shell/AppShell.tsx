@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { notifications, requests } from "@mocks/mockData";
@@ -9,7 +9,6 @@ import "./AppShell.css";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { currentUser, logout } = useAuth();
-  const location = useLocation();
   const navigate = useNavigate();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [readNotificationIds, setReadNotificationIds] = useState(
@@ -46,13 +45,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     });
   };
 
-  const goBack = () => {
-    if (location.pathname === "/") {
-      navigate("/login");
-      return;
-    }
-
-    navigate(-1);
+  const goHome = () => {
+    navigate("/");
   };
 
   return (
@@ -61,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <button
           className="app-shell__back"
           type="button"
-          onClick={goBack}
+          onClick={goHome}
         >
           Назад
         </button>
