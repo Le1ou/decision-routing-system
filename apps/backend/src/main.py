@@ -1,5 +1,8 @@
 from apps.backend.src.application_module import *
 from fastapi import FastAPI, Depends, Body
+from pydantic import BaseModel, RootModel, field_validator, Field, BeforeValidator
+from typing import Literal
+from typing import Annotated
 #
 #Workflow системы:
 #Засетапить управленческую учетку для ДБ, объект аутентификации и сервер
@@ -20,6 +23,8 @@ app.add_middleware(
 #DBController.writeNewComplexityValue("легко")
 # DBController.tryWriteNewTypeOfWork("Починить комп", 1, 1)
 #DBController.deleteAllDataFromAllTables()
+#print(DBController.getAllRowsFromTable("types_of_works"))
+
 ComplexityValues = ["easy", "medium", "hard", "critical"]
 def validateDataAndType(data, acceptedType, dataName = "data", cantBeEmpty = True, onlyAcceptedValues = []):
     try:
@@ -39,10 +44,39 @@ def validateDataAndType(data, acceptedType, dataName = "data", cantBeEmpty = Tru
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, 
                     detail=dataName + " is not a correct value")
 
+def coerce_to_str(v) -> str:
+    return str(v) if v is not None else v
+
+# Создаем переиспользуемый тип с автоконвертацией
+CoercedStr = Annotated[str, BeforeValidator(coerce_to_str)]
+
 class TypeOfWorks(BaseModel):
     name: str
     departmentId: int
     complexity:str
+
+class TypeOfWorksReturn(BaseModel):
+    id: CoercedStr = Field(validation_alias = 'type_of_works_id')
+    name: CoercedStr = Field(validation_alias = 'name')
+    departmentId:CoercedStr = Field(validation_alias = 'department_id')
+    complexity: Literal["easy", "medium", "hard", "critical"] = Field(validation_alias='complexity_value')
+    @field_validator('complexity', mode='before')
+    @classmethod
+    def convert_index_to_string(cls, value):
+        # Если пришло число (индекс)
+        if isinstance(value, int):
+            # Проверяем, входит ли индекс в границы списка
+            if 0 <= value < len(ComplexityValues):
+                return ComplexityValues[value]
+            else:
+                raise ValueError(f"Индекс сложности {value} вне диапазона (должен быть от 0 до {len(ComplexityValues)-1})")
+        
+        # Если уже пришла строка, возвращаем как есть (на случай, если данные уже чистые)
+        return value
+    #allowedPositionIds: list[str]
+
+class TypeOfWorksList(RootModel[list[TypeOfWorksReturn]]):
+    pass
 
 @app.get("/work-types")
 def get_types_of_work(userData = Depends(authObj.authenticate_user_test)):
@@ -52,14 +86,17 @@ def get_types_of_work(userData = Depends(authObj.authenticate_user_test)):
 
 
         data = DBUser.getAllRowsFromTable("types_of_works")
+        collection = TypeOfWorksList.model_validate(data)
 
+        new_list = collection.model_dump()
 
         if data == [] or data == None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="no data")
         else:
-            return data
+            
+            return new_list#data#TypeOfWorksReturn.model_validate(data)
     except Exception as exc: 
         if hasattr(exc, "status_code")  and hasattr(exc, "detail"):
             raise HTTPException(
