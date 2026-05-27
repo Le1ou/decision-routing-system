@@ -19,16 +19,18 @@ with configPath.open() as config_data:
     configData = json.load(config_data)
     config_data.close()
 
-
+security = HTTPBasic()
 class ActiveDirectoryAuth:
     def __init__(self):
         pass
-    def authenticate_user_test(self, username:str, password:str):
+    def authenticate_user_test(self, credentials: HTTPBasicCredentials = Depends(security)):
+        username = credentials.username
         if username not in configData["MOCK_USERS_DB"]:
             raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="User with that username does not exists"
         )
+        password = credentials.password
         stored_password = configData["MOCK_USERS_DB"][username]["password"]
         if password == stored_password:
             return [username, password]
