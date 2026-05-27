@@ -2,8 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { notifications, requests } from "@mocks/mockData";
-import { filterRequestsByRole } from "@shared/model/requestRules";
+import { notifications, applications } from "@mocks/mockData";
+import { filterApplicationsByRole } from "@shared/model/applicationRules";
 
 import "./AppShell.css";
 
@@ -19,16 +19,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
-  const visibleRequestIds = new Set(filterRequestsByRole(requests, currentUser).map((request) => request.id));
+  const visibleApplicationIds = new Set(filterApplicationsByRole(applications, currentUser).map((application) => application.id));
   const visibleNotifications = notifications.filter(
-    (notification) => !notification.requestId || visibleRequestIds.has(notification.requestId),
+    (notification) => !notification.applicationId || visibleApplicationIds.has(notification.applicationId),
   );
   const enrichedNotifications = useMemo(
     () =>
       visibleNotifications.map((notification) => ({
         ...notification,
         isRead: readNotificationIds.has(notification.id),
-        request: requests.find((request) => request.id === notification.requestId),
+        application: applications.find((application) => application.id === notification.applicationId),
       })),
     [readNotificationIds, visibleNotifications],
   );
@@ -96,7 +96,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                           ? "app-shell__notification-item"
                           : "app-shell__notification-item app-shell__notification-item--unread"
                       }
-                      to={notification.request ? `/requests?request=${notification.request.id}` : "/requests"}
+                      to={notification.application ? `/applications?application=${notification.application.id}` : "/applications"}
                       key={notification.id}
                       onClick={() => {
                         setReadNotificationIds((current) => new Set(current).add(notification.id));

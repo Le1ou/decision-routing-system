@@ -45,7 +45,8 @@ paths:
                   fullName: "Орлова Мария Викторовна"
                   role: "manager"
                   departmentId: "it"
-                  positionId: "department-head"
+                  postName: "Руководитель"
+                  positionId: "grade-chief"
                   isActive: true
                 permissions:
                   canManageEmployees: true
@@ -81,7 +82,7 @@ paths:
           in: query
           schema:
             type: string
-        - name: applicationNumber
+        - name: applicationId
           in: query
           schema:
             type: string
@@ -123,14 +124,14 @@ paths:
       tags: [Applications]
       summary: Создать заявку
       description: >
-        Создает заявку от имени текущего пользователя. Приоритет, номер и статус рассчитывает backend.
+        Создает заявку от имени текущего пользователя. Приоритет и статус рассчитывает backend.
         Вложения загружаются отдельным запросом, если frontend реально отправляет файлы.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateApplicationRequest"
+              $ref: "#/components/schemas/CreateApplicationPayload"
       responses:
         "201":
           description: Заявка создана
@@ -171,7 +172,9 @@ paths:
       summary: Выполнить действие над заявкой
       description: >
         Единая точка для действий из карточки заявки. Backend проверяет роль пользователя,
-        текущий статус заявки и обязательность полей для конкретного action.
+        текущий статус заявки и обязательность полей для конкретного action. Исполнитель не
+        выполняет финальное `reject`: если он не справляется, заявка возвращается в `new`
+        с признаком `isUnfinished`.
       parameters:
         - $ref: "#/components/parameters/ApplicationId"
       requestBody:
@@ -179,7 +182,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ApplicationActionRequest"
+              $ref: "#/components/schemas/ApplicationActionPayload"
             examples:
               assignExecutor:
                 value:
@@ -195,6 +198,10 @@ paths:
                 value:
                   action: complete
                   resultText: "Работы выполнены, доступ проверен."
+              changeWorkType:
+                value:
+                  action: changeWorkType
+                  workTypeId: "it-server-setup"
       responses:
         "204":
           description: Действие выполнено. Если frontend нужно обновить карточку, он делает GET /applications/{applicationId}.
@@ -270,7 +277,7 @@ paths:
   /employees:
     get:
       tags: [Directories]
-      summary: Получить сотрудников
+      summary: Получить сотрудников, подключенных к системе
       parameters:
         - name: departmentId
           in: query
@@ -301,13 +308,16 @@ paths:
           $ref: "#/components/responses/Unauthorized"
     post:
       tags: [Directories]
-      summary: Создать сотрудника
+      summary: Добавить AD-пользователя в систему как исполнителя
+      description: >
+        Не создает человека в AD. Backend создает локальную запись участия в системе
+        для уже существующего AD-пользователя. Роль нового сотрудника - executor.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateEmployeeRequest"
+              $ref: "#/components/schemas/CreateEmployeePayload"
       responses:
         "201":
           description: Сотрудник создан
@@ -327,7 +337,7 @@ paths:
   /employees/{employeeId}:
     patch:
       tags: [Directories]
-      summary: Изменить сотрудника или его активность
+      summary: Изменить позицию сотрудника или участие в распределении
       parameters:
         - $ref: "#/components/parameters/EmployeeId"
       requestBody:
@@ -335,7 +345,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateEmployeeRequest"
+              $ref: "#/components/schemas/UpdateEmployeePayload"
       responses:
         "204":
           description: Сотрудник обновлен
@@ -351,10 +361,11 @@ paths:
   /positions:
     get:
       tags: [Directories]
-      summary: Получить должности
+      summary: Получить позиции
+      description: Позиции - это грейды из `post_grade`, которые руководитель назначает сотрудникам.
       responses:
         "200":
-          description: Список должностей
+          description: Список позиций
           content:
             application/json:
               schema:
@@ -367,30 +378,35 @@ paths:
                       $ref: "#/components/schemas/Position"
         "401":
           $ref: "#/components/responses/Unauthorized"
-    post:
+
+  /ad/users:
+    get:
       tags: [Directories]
-      summary: Создать должность
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreatePositionRequest"
+      summary: Найти пользователей AD для добавления в систему
+      parameters:
+        - name: query
+          in: query
+          schema:
+            type: string
+        - name: departmentId
+          in: query
+          schema:
+            type: string
       responses:
-        "201":
-          description: Должность создана
+        "200":
+          description: Пользователи AD, которых можно добавить в систему
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/IdResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdUser"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "422":
-          $ref: "#/components/responses/ValidationError"
 
   /work-types:
     get:
@@ -424,7 +440,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateWorkTypeRequest"
+              $ref: "#/components/schemas/CreateWorkTypePayload"
       responses:
         "201":
           description: Вид работ создан
@@ -762,7 +778,7 @@ components:
         - returnToNew
         - confirmExternalDelegation
         - declineExternalDelegation
-        - changeComplexity
+        - changeWorkType
 
     CurrentUserResponse:
       type: object
@@ -788,7 +804,7 @@ components:
 
     User:
       type: object
-      required: [id, login, fullName, role, departmentId, positionId, isActive]
+      required: [id, login, fullName, role, departmentId, postName, positionId, isActive]
       properties:
         id:
           type: string
@@ -800,6 +816,9 @@ components:
           $ref: "#/components/schemas/UserRole"
         departmentId:
           type: string
+        postName:
+          type: string
+          description: Должность сотрудника из AD.
         positionId:
           type: string
           description: Идентификатор записи `post_grade`; в русском UI называется "позиция".
@@ -839,18 +858,32 @@ components:
     Position:
       type: object
       description: Позиция сотрудника; соответствует записи `post_grade` в SQL.
-      required: [id, name, isTop]
+      required: [id, name]
       properties:
         id:
           type: string
         name:
           type: string
-        isTop:
-          type: boolean
+
+    AdUser:
+      type: object
+      required: [adUserId, login, fullName, departmentId, postName]
+      properties:
+        adUserId:
+          type: string
+        login:
+          type: string
+        fullName:
+          type: string
+        departmentId:
+          type: string
+        postName:
+          type: string
+          description: Должность пользователя из AD.
 
     WorkType:
       type: object
-      required: [id, name, departmentId, complexity]
+      required: [id, name, departmentId, complexity, allowedPositionIds]
       properties:
         id:
           type: string
@@ -860,6 +893,11 @@ components:
           type: string
         complexity:
           $ref: "#/components/schemas/Complexity"
+        allowedPositionIds:
+          type: array
+          description: Допустимые позиции `post_grade` для выполнения вида работ.
+          items:
+            type: string
 
     Attachment:
       type: object
@@ -915,7 +953,6 @@ components:
       type: object
       required:
         - id
-        - number
         - name
         - status
         - priority
@@ -923,9 +960,6 @@ components:
       properties:
         id:
           type: string
-        number:
-          type: string
-          example: DRS-1024
         name:
           type: string
         status:
@@ -973,6 +1007,12 @@ components:
               type: string
             delegationId:
               type: string
+            delegatedFromDepartmentId:
+              type: string
+              description: Исходный отдел при межотдельном делегировании.
+            delegatedToDepartmentId:
+              type: string
+              description: Целевой отдел при межотдельном делегировании.
             assignedComplexity:
               $ref: "#/components/schemas/Complexity"
             assignedAt:
@@ -1050,7 +1090,7 @@ components:
           type: integer
           minimum: 0
 
-    CreateApplicationRequest:
+    CreateApplicationPayload:
       type: object
       required: [name, departmentId, workTypeId, deadlineAt, description]
       properties:
@@ -1071,13 +1111,10 @@ components:
 
     CreateApplicationResponse:
       type: object
-      required: [id, number]
+      required: [id]
       properties:
         id:
           type: string
-        number:
-          type: string
-          example: DRS-1029
 
     AttachmentUploadResponse:
       type: object
@@ -1088,7 +1125,7 @@ components:
           items:
             $ref: "#/components/schemas/IdResponse"
 
-    ApplicationActionRequest:
+    ApplicationActionPayload:
       type: object
       required: [action]
       properties:
@@ -1100,6 +1137,9 @@ components:
         departmentId:
           type: string
           description: Обязательно для delegateExternal.
+        workTypeId:
+          type: string
+          description: Обязательно для changeWorkType.
         comment:
           type: string
           description: Пояснение для истории заявки.
@@ -1107,60 +1147,36 @@ components:
           $ref: "#/components/schemas/Complexity"
         resultText:
           type: string
-          description: Обязательно или желательно для complete.
+          description: Обязательно для complete.
         description:
           type: string
           maxLength: 1000
           description: Новое описание для editDescription.
 
-    CreateEmployeeRequest:
+    CreateEmployeePayload:
       type: object
-      required: [login, fullName, role, departmentId, positionId, isActive]
+      required: [adUserId, positionId, isActive]
       properties:
-        login:
+        adUserId:
           type: string
-          minLength: 1
-        fullName:
-          type: string
-          minLength: 1
-        role:
-          $ref: "#/components/schemas/UserRole"
-        departmentId:
-          type: string
+          description: Идентификатор пользователя в AD.
         positionId:
           type: string
           description: Идентификатор записи `post_grade`.
         isActive:
           type: boolean
 
-    UpdateEmployeeRequest:
+    UpdateEmployeePayload:
       type: object
       minProperties: 1
       properties:
-        fullName:
-          type: string
-          minLength: 1
-        role:
-          $ref: "#/components/schemas/UserRole"
-        departmentId:
-          type: string
         positionId:
           type: string
           description: Идентификатор записи `post_grade`.
         isActive:
           type: boolean
 
-    CreatePositionRequest:
-      type: object
-      required: [name, isTop]
-      properties:
-        name:
-          type: string
-          minLength: 1
-        isTop:
-          type: boolean
-
-    CreateWorkTypeRequest:
+    CreateWorkTypePayload:
       type: object
       required: [name, departmentId, complexity]
       properties:
@@ -1215,11 +1231,9 @@ components:
 
     ApplicationReportRow:
       type: object
-      required: [applicationId, number, name, status, priority, createdAt]
+      required: [applicationId, name, status, priority, createdAt]
       properties:
         applicationId:
-          type: string
-        number:
           type: string
         name:
           type: string

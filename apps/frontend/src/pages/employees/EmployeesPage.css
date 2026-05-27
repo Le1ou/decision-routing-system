@@ -11,7 +11,6 @@
 }
 
 .employees-page__header h1,
-.positions-table h2,
 .employees-modal__panel h2 {
   margin: 0;
   color: #1f2a44;
@@ -46,8 +45,7 @@
 }
 
 .employees-summary div,
-.employees-table,
-.positions-table {
+.employees-table {
   border: 1px solid #d8dee9;
   border-radius: 8px;
   background: #ffffff;
@@ -79,18 +77,18 @@
   overflow: hidden;
 }
 
-.positions-table {
-  min-width: 0;
-  overflow: hidden;
-}
-
 .employees-table__toolbar {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) 220px;
+  grid-template-columns: minmax(240px, 1fr) 220px auto;
   gap: 14px;
   align-items: end;
   border-bottom: 1px solid #edf0f5;
   padding: 16px 18px;
+}
+
+.employees-table__toolbar > button {
+  min-height: 38px;
+  white-space: nowrap;
 }
 
 .employees-table__toolbar label,
@@ -118,47 +116,18 @@
   display: grid;
 }
 
-.positions-table > header {
-  display: flex;
-  min-height: 70px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border-bottom: 1px solid #edf0f5;
-  padding: 16px 18px;
-}
-
-.positions-table h2 {
-  font-size: 20px;
-}
-
-.positions-table header span {
-  display: inline-block;
-  margin-top: 4px;
-  color: #667085;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.positions-table__grid {
-  display: grid;
-}
-
 .employees-table__row {
   display: grid;
-  grid-template-columns: minmax(240px, 1.4fr) minmax(110px, 0.6fr) minmax(120px, 0.7fr) minmax(150px, 0.8fr) minmax(110px, 0.6fr) minmax(140px, 0.7fr);
+  grid-template-columns:
+    minmax(210px, 1.25fr)
+    minmax(100px, 0.55fr)
+    minmax(115px, 0.6fr)
+    minmax(140px, 0.75fr)
+    minmax(120px, 0.65fr)
+    minmax(130px, 0.7fr)
+    minmax(110px, 0.55fr);
   gap: 14px;
   min-height: 60px;
-  align-items: center;
-  border-bottom: 1px solid #edf0f5;
-  padding: 12px 18px;
-}
-
-.positions-table__row {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) 170px 120px;
-  gap: 14px;
-  min-height: 56px;
   align-items: center;
   border-bottom: 1px solid #edf0f5;
   padding: 12px 18px;
@@ -174,22 +143,7 @@
   text-transform: uppercase;
 }
 
-.positions-table__row--head {
-  min-height: 44px;
-  background: #fbfcfe;
-  color: #667085;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
 .employees-table__row:not(.employees-table__row--head) {
-  color: #263247;
-  font-size: 14px;
-}
-
-.positions-table__row:not(.positions-table__row--head) {
   color: #263247;
   font-size: 14px;
 }
@@ -202,6 +156,16 @@
   color: #1f2a44;
   cursor: pointer;
   font-weight: 800;
+}
+
+.employees-position-select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #c8d0dc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2a44;
+  padding: 0 8px;
 }
 
 .employees-status {
@@ -219,23 +183,6 @@
 .employees-status--active {
   background: #e7f7ee;
   color: #087443;
-}
-
-.position-type {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  border-radius: 999px;
-  background: #edf1f7;
-  color: #344054;
-  font-size: 13px;
-  font-weight: 800;
-  padding: 0 10px;
-}
-
-.position-type--top {
-  background: #e6f0ff;
-  color: #1f6feb;
 }
 
 .employees-table__empty {
@@ -287,6 +234,33 @@
   gap: 12px;
 }
 
+.employees-ad-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.employees-ad-card div {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 12px;
+}
+
+.employees-ad-card span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.employees-ad-card strong {
+  color: #1f2a44;
+  font-size: 14px;
+}
+
 .employees-modal__panel small {
   color: #b42318;
   font-size: 13px;
@@ -313,10 +287,16 @@
   color: #ffffff;
 }
 
+.employees-modal__panel footer button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (max-width: 980px) {
   .employees-page__header,
   .employees-summary,
   .employees-table__toolbar,
+  .employees-ad-card,
   .employees-modal__grid {
     grid-template-columns: 1fr;
   }
@@ -330,17 +310,7 @@
     gap: 8px;
   }
 
-  .positions-table > header {
-    display: grid;
-  }
-
-  .positions-table__row {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .employees-table__row--head,
-  .positions-table__row--head {
+  .employees-table__row--head {
     display: none;
   }
 }

@@ -1,4 +1,4 @@
-import type { RequestAction, RequestPriority, RequestStatus, UserRole } from "./domain";
+import type { ApplicationAction, ApplicationPriority, ApplicationStatus, UserRole } from "./domain";
 
 export const roleLabels: Record<UserRole, string> = {
   author: "Автор",
@@ -6,7 +6,7 @@ export const roleLabels: Record<UserRole, string> = {
   manager: "Руководитель",
 };
 
-export const statusLabels: Record<RequestStatus, string> = {
+export const statusLabels: Record<ApplicationStatus, string> = {
   new: "Новый",
   assigned: "Назначен исполнитель",
   delegated: "Делегирована в другой отдел",
@@ -15,14 +15,14 @@ export const statusLabels: Record<RequestStatus, string> = {
   completed: "Завершена",
 };
 
-export const priorityLabels: Record<RequestPriority, string> = {
+export const priorityLabels: Record<ApplicationPriority, string> = {
   low: "Низкий",
   medium: "Средний",
   high: "Высокий",
   critical: "Критичный",
 };
 
-export const actionLabels: Record<RequestAction, string> = {
+export const actionLabels: Record<ApplicationAction, string> = {
   editDescription: "Редактировать описание",
   assignExecutor: "Назначить исполнителя",
   startWork: "Взять в работу",
@@ -33,4 +33,5 @@ export const actionLabels: Record<RequestAction, string> = {
   returnToNew: "Вернуть в Новый",
   confirmExternalDelegation: "Подтвердить делегирование",
   declineExternalDelegation: "Отклонить делегирование",
+  changeWorkType: "Изменить вид работ",
 };

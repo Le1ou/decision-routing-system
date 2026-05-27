@@ -29,11 +29,6 @@
   line-height: 1.5;
 }
 
-.priority-page__actions {
-  display: flex;
-  gap: 10px;
-}
-
 .priority-notice {
   border: 1px solid #badbcc;
   border-radius: 8px;
@@ -84,6 +79,14 @@
 
 .priority-settings__list {
   display: grid;
+}
+
+.priority-settings__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #edf0f5;
+  padding: 16px 18px;
 }
 
 .priority-setting {
@@ -219,7 +222,7 @@
     display: grid;
   }
 
-  .priority-page__actions {
+  .priority-settings__actions {
     justify-content: flex-start;
   }
 }

@@ -2,14 +2,14 @@ import { FormEvent, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { useRequestsStore } from "@app/providers/RequestsProvider";
+import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
 import { departments, positions, workTypes } from "@mocks/mockData";
-import type { Request } from "@shared/model/domain";
+import type { Application } from "@shared/model/domain";
 import { Button } from "@shared/ui";
 
-import "./CreateRequestPage.css";
+import "./CreateApplicationPage.css";
 
-type CreateRequestForm = {
+type CreateApplicationForm = {
   title: string;
   departmentId: string;
   workTypeId: string;
@@ -19,13 +19,13 @@ type CreateRequestForm = {
   files: File[];
 };
 
-type CreateRequestErrors = Partial<Record<keyof CreateRequestForm, string>>;
+type CreateApplicationErrors = Partial<Record<keyof CreateApplicationForm, string>>;
 
-export function CreateRequestPage() {
+export function CreateApplicationPage() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { requestItems, addRequest } = useRequestsStore();
-  const [form, setForm] = useState<CreateRequestForm>({
+  const { applicationItems, addApplication } = useApplicationsStore();
+  const [form, setForm] = useState<CreateApplicationForm>({
     title: "",
     departmentId: departments[0]?.id ?? "",
     workTypeId: workTypes.find((workType) => workType.departmentId === departments[0]?.id)?.id ?? "",
@@ -34,9 +34,8 @@ export function CreateRequestPage() {
     font: "system",
     files: [],
   });
-  const [errors, setErrors] = useState<CreateRequestErrors>({});
-  const [createdRequestNumber, setCreatedRequestNumber] = useState("");
-  const [createdRequestId, setCreatedRequestId] = useState("");
+  const [errors, setErrors] = useState<CreateApplicationErrors>({});
+  const [createdApplicationId, setCreatedApplicationId] = useState("");
 
   const availableWorkTypes = useMemo(
     () => workTypes.filter((workType) => workType.departmentId === form.departmentId),
@@ -45,15 +44,14 @@ export function CreateRequestPage() {
   const authorPosition = positions.find((position) => position.id === currentUser?.positionId);
   const authorDepartment = departments.find((department) => department.id === currentUser?.departmentId);
 
-  const updateField = <Key extends keyof CreateRequestForm>(field: Key, value: CreateRequestForm[Key]) => {
+  const updateField = <Key extends keyof CreateApplicationForm>(field: Key, value: CreateApplicationForm[Key]) => {
     setForm((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
-    setCreatedRequestNumber("");
-    setCreatedRequestId("");
+    setCreatedApplicationId("");
   };
 
   const validate = () => {
-    const nextErrors: CreateRequestErrors = {};
+    const nextErrors: CreateApplicationErrors = {};
 
     if (!form.title.trim()) {
       nextErrors.title = "Укажите тему заявки.";
@@ -69,6 +67,10 @@ export function CreateRequestPage() {
 
     if (!form.deadlineAt) {
       nextErrors.deadlineAt = "Укажите срок исполнения.";
+    } else if (Number.isNaN(new Date(form.deadlineAt).getTime())) {
+      nextErrors.deadlineAt = "Укажите корректный срок исполнения.";
+    } else if (new Date(form.deadlineAt).getTime() <= Date.now()) {
+      nextErrors.deadlineAt = "Срок исполнения должен быть в будущем.";
     }
 
     if (!form.description.trim()) {
@@ -91,11 +93,10 @@ export function CreateRequestPage() {
       return;
     }
 
-    const requestNumber = `DRS-${getNextRequestNumber(requestItems)}`;
+    const applicationId = String(getNextApplicationId(applicationItems));
     const now = new Date().toISOString();
-    const createdRequest: Request = {
-      id: `request-${Date.now()}`,
-      number: requestNumber,
+    const createdApplication: Application = {
+      id: applicationId,
       title: form.title.trim(),
       description: form.description.trim(),
       status: "new",
@@ -110,23 +111,22 @@ export function CreateRequestPage() {
       updatedAt: now,
     };
 
-    addRequest(createdRequest);
-    setCreatedRequestNumber(requestNumber);
-    setCreatedRequestId(createdRequest.id);
+    addApplication(createdApplication);
+    setCreatedApplicationId(createdApplication.id);
   };
 
   return (
-    <section className="create-request-page">
+    <section className="create-application-page">
       <form className="create-window" onSubmit={handleSubmit} noValidate>
         <header className="create-window__header">
           <h1>Форма для создания заявки</h1>
           <button type="button" onClick={() => navigate("/")} aria-label="Закрыть">×</button>
         </header>
 
-        {createdRequestNumber ? (
+        {createdApplicationId ? (
           <div className="create-window__success">
-            Заявка {createdRequestNumber} создана в mock-режиме и получит статус «Новый».
-            <button type="button" onClick={() => navigate(`/requests?request=${createdRequestId}`)}>
+            Заявка ID {createdApplicationId} создана в mock-режиме и получит статус «Новый».
+            <button type="button" onClick={() => navigate(`/applications?application=${createdApplicationId}`)}>
               Открыть просмотр заявок
             </button>
           </div>
@@ -160,8 +160,7 @@ export function CreateRequestPage() {
               const nextWorkTypeId = workTypes.find((workType) => workType.departmentId === nextDepartmentId)?.id ?? "";
               setForm((current) => ({ ...current, departmentId: nextDepartmentId, workTypeId: nextWorkTypeId }));
               setErrors((current) => ({ ...current, departmentId: undefined, workTypeId: undefined }));
-              setCreatedRequestNumber("");
-              setCreatedRequestId("");
+              setCreatedApplicationId("");
             }}
             aria-label="Отдел"
           >
@@ -203,11 +202,11 @@ export function CreateRequestPage() {
 
         <div className="create-window__description">
           <div className="create-window__description-header">
-            <label htmlFor="request-description">Описание проблемы</label>
+            <label htmlFor="application-description">Описание проблемы</label>
             <span>{form.description.length}/1000</span>
           </div>
           <textarea
-            id="request-description"
+            id="application-description"
             value={form.description}
             onChange={(event) => updateField("description", event.target.value)}
             maxLength={1000}
@@ -237,7 +236,7 @@ export function CreateRequestPage() {
         </div>
 
         <footer className="create-window__footer">
-          <Button type="submit" variant="ghost" disabled={Boolean(createdRequestNumber)}>
+          <Button type="submit" variant="ghost" disabled={Boolean(createdApplicationId)}>
             Отправить
           </Button>
         </footer>
@@ -246,12 +245,12 @@ export function CreateRequestPage() {
   );
 }
 
-function getNextRequestNumber(requestItems: Request[]) {
-  const maxNumber = requestItems.reduce((max, request) => {
-    const numericPart = Number(request.number.replace(/\D/g, ""));
+function getNextApplicationId(applicationItems: Application[]) {
+  const maxId = applicationItems.reduce((max, application) => {
+    const numericPart = Number(application.id);
 
     return Number.isFinite(numericPart) ? Math.max(max, numericPart) : max;
   }, 1000);
 
-  return maxNumber + 1;
+  return maxId + 1;
 }

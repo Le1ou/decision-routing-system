@@ -2,16 +2,16 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { RequestsProvider } from "@app/providers/RequestsProvider";
+import { ApplicationsProvider } from "@app/providers/ApplicationsProvider";
 import { AppShell } from "@widgets/app-shell";
 import {
-  CreateRequestPage,
+  CreateApplicationPage,
   EmployeesPage,
   HomePage,
   LoginPage,
   PrioritySettingsPage,
   ReportsPage,
-  RequestsPage,
+  ApplicationsPage,
   WorkTypesPage,
 } from "@pages/index";
 
@@ -29,18 +29,18 @@ export function App() {
 
   return (
     <AppShell>
-      <RequestsProvider>
+      <ApplicationsProvider>
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/requests" element={<RequestsPage />} />
-          <Route path="/requests/new" element={<CreateRequestPage />} />
+          <Route path="/applications" element={<ApplicationsPage />} />
+          <Route path="/applications/new" element={<CreateApplicationPage />} />
           <Route path="/reports" element={<RequireManager><ReportsPage /></RequireManager>} />
           <Route path="/employees" element={<RequireManager><EmployeesPage /></RequireManager>} />
           <Route path="/work-types" element={<RequireManager><WorkTypesPage /></RequireManager>} />
           <Route path="/priority-settings" element={<RequireManager><PrioritySettingsPage /></RequireManager>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </RequestsProvider>
+      </ApplicationsProvider>
     </AppShell>
   );
 }

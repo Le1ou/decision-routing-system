@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
-import { departments, mockUsers, positions, requests, workTypes } from "@mocks/mockData";
-import type { RequestPriority } from "@shared/model/domain";
+import { departments, mockUsers, positions, applications, workTypes } from "@mocks/mockData";
+import type { ApplicationPriority } from "@shared/model/domain";
 import { priorityLabels } from "@shared/model/labels";
 import { Button } from "@shared/ui";
 
@@ -51,13 +51,13 @@ const complexityValues = {
 export function PrioritySettingsPage() {
   const [savedSettings, setSavedSettings] = useState<PrioritySettings>(initialSettings);
   const [draftSettings, setDraftSettings] = useState<PrioritySettings>(initialSettings);
-  const [sampleRequestId, setSampleRequestId] = useState(requests[0]?.id ?? "");
+  const [sampleApplicationId, setSampleApplicationId] = useState(applications[0]?.id ?? "");
   const [notice, setNotice] = useState("");
 
-  const sampleRequest = requests.find((request) => request.id === sampleRequestId) ?? requests[0];
+  const sampleApplication = applications.find((application) => application.id === sampleApplicationId) ?? applications[0];
   const preview = useMemo(
-    () => (sampleRequest ? calculatePriorityPreview(sampleRequest.id, draftSettings) : null),
-    [draftSettings, sampleRequest],
+    () => (sampleApplication ? calculatePriorityPreview(sampleApplication.id, draftSettings) : null),
+    [draftSettings, sampleApplication],
   );
   const hasChanges = Object.keys(draftSettings).some(
     (key) => draftSettings[key as PrioritySettingKey] !== savedSettings[key as PrioritySettingKey],
@@ -71,6 +71,13 @@ export function PrioritySettingsPage() {
   };
 
   const saveSettings = () => {
+    const totalWeight = Object.values(draftSettings).reduce((sum, value) => sum + value, 0);
+
+    if (totalWeight <= 0) {
+      setNotice("Хотя бы один коэффициент должен быть больше 0.");
+      return;
+    }
+
     setSavedSettings(draftSettings);
     setNotice("Коэффициенты сохранены в mock-режиме.");
   };
@@ -86,14 +93,6 @@ export function PrioritySettingsPage() {
         <div>
           <h1>Изменение приоритетности заявки</h1>
           <p>Настройка влияния факторов на предварительный расчет приоритета в mock-режиме.</p>
-        </div>
-        <div className="priority-page__actions">
-          <Button type="button" variant="secondary" onClick={resetSettings} disabled={!hasChanges}>
-            Отмена
-          </Button>
-          <Button type="button" onClick={saveSettings} disabled={!hasChanges}>
-            Подтвердить
-          </Button>
         </div>
       </header>
 
@@ -133,6 +132,14 @@ export function PrioritySettingsPage() {
               </label>
             ))}
           </div>
+          <footer className="priority-settings__actions">
+            <Button type="button" variant="secondary" onClick={resetSettings} disabled={!hasChanges}>
+              Отмена
+            </Button>
+            <Button type="button" onClick={saveSettings} disabled={!hasChanges}>
+              Подтвердить
+            </Button>
+          </footer>
         </article>
 
         <aside className="priority-preview">
@@ -140,10 +147,10 @@ export function PrioritySettingsPage() {
             <h2>Предварительный расчет</h2>
             <label>
               Тестовая заявка
-              <select value={sampleRequest?.id ?? ""} onChange={(event) => setSampleRequestId(event.target.value)}>
-                {requests.map((request) => (
-                  <option value={request.id} key={request.id}>
-                    {request.number} · {request.title}
+              <select value={sampleApplication?.id ?? ""} onChange={(event) => setSampleApplicationId(event.target.value)}>
+                {applications.map((application) => (
+                  <option value={application.id} key={application.id}>
+                    ID {application.id} · {application.title}
                   </option>
                 ))}
               </select>
@@ -176,22 +183,22 @@ export function PrioritySettingsPage() {
   );
 }
 
-function calculatePriorityPreview(requestId: string, settings: PrioritySettings) {
-  const request = requests.find((item) => item.id === requestId);
+function calculatePriorityPreview(applicationId: string, settings: PrioritySettings) {
+  const application = applications.find((item) => item.id === applicationId);
 
-  if (!request) {
+  if (!application) {
     return null;
   }
 
-  const author = mockUsers.find((user) => user.id === request.authorId);
+  const author = mockUsers.find((user) => user.id === application.authorId);
   const department = departments.find((item) => item.id === author?.departmentId);
   const position = positions.find((item) => item.id === author?.positionId);
-  const workType = workTypes.find((item) => item.id === request.workTypeId);
+  const workType = workTypes.find((item) => item.id === application.workTypeId);
   const factorValues = {
     department: department?.value ?? 0,
     position: position?.isTop ? 1 : 0.45,
     workType: workType ? complexityValues[workType.complexity] : 0,
-    deadline: getDeadlinePressure(request.deadlineAt),
+    deadline: getDeadlinePressure(application.deadlineAt),
     managerAuthor: author?.role === "manager" ? 1 : 0,
   };
 
@@ -235,7 +242,7 @@ function getDeadlinePressure(deadlineAt: string) {
   return 0.35;
 }
 
-function getPriorityByScore(score: number): RequestPriority {
+function getPriorityByScore(score: number): ApplicationPriority {
   if (score >= 0.82) {
     return "critical";
   }

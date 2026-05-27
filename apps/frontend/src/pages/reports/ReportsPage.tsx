@@ -1,10 +1,10 @@
 import { FormEvent, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { departments, mockUsers, requests, workTypes } from "@mocks/mockData";
-import type { RequestStatus } from "@shared/model/domain";
+import { departments, mockUsers, applications, workTypes } from "@mocks/mockData";
+import type { ApplicationStatus } from "@shared/model/domain";
 import { priorityLabels, statusLabels } from "@shared/model/labels";
-import { filterRequestsByRole } from "@shared/model/requestRules";
+import { filterApplicationsByRole } from "@shared/model/applicationRules";
 import { Button } from "@shared/ui";
 
 import "./ReportsPage.css";
@@ -14,7 +14,7 @@ type ReportFilters = {
   createdTo: string;
   finishedFrom: string;
   finishedTo: string;
-  status: "all" | RequestStatus;
+  status: "all" | ApplicationStatus;
   executorId: "all" | string;
 };
 
@@ -34,8 +34,8 @@ export function ReportsPage() {
   const [isReportReady, setIsReportReady] = useState(true);
   const [notice, setNotice] = useState("");
 
-  const visibleRequests = useMemo(
-    () => (currentUser ? filterRequestsByRole(requests, currentUser) : []),
+  const visibleApplications = useMemo(
+    () => (currentUser ? filterApplicationsByRole(applications, currentUser) : []),
     [currentUser],
   );
   const executors = useMemo(
@@ -49,23 +49,23 @@ export function ReportsPage() {
   );
   const reportRows = useMemo(
     () =>
-      visibleRequests.filter((request) => {
-        const createdAt = toDateOnly(request.createdAt);
-        const finishedAt = request.finishedAt ? toDateOnly(request.finishedAt) : "";
+      visibleApplications.filter((application) => {
+        const createdAt = toDateOnly(application.createdAt);
+        const finishedAt = application.finishedAt ? toDateOnly(application.finishedAt) : "";
         const matchesCreatedFrom = !filters.createdFrom || createdAt >= filters.createdFrom;
         const matchesCreatedTo = !filters.createdTo || createdAt <= filters.createdTo;
         const matchesFinishedFrom = !filters.finishedFrom || (finishedAt && finishedAt >= filters.finishedFrom);
         const matchesFinishedTo = !filters.finishedTo || (finishedAt && finishedAt <= filters.finishedTo);
-        const matchesStatus = filters.status === "all" || request.status === filters.status;
-        const matchesExecutor = filters.executorId === "all" || request.executorId === filters.executorId;
+        const matchesStatus = filters.status === "all" || application.status === filters.status;
+        const matchesExecutor = filters.executorId === "all" || application.executorId === filters.executorId;
 
         return matchesCreatedFrom && matchesCreatedTo && matchesFinishedFrom && matchesFinishedTo && matchesStatus && matchesExecutor;
       }),
-    [filters, visibleRequests],
+    [filters, visibleApplications],
   );
 
-  const completedCount = reportRows.filter((request) => request.status === "completed").length;
-  const inProgressCount = reportRows.filter((request) => request.status === "inProgress" || request.status === "assigned").length;
+  const completedCount = reportRows.filter((application) => application.status === "completed").length;
+  const inProgressCount = reportRows.filter((application) => application.status === "inProgress" || application.status === "assigned").length;
 
   const updateFilter = <Key extends keyof ReportFilters>(key: Key, value: ReportFilters[Key]) => {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -114,6 +114,15 @@ export function ReportsPage() {
   };
 
   const handleExport = () => {
+    if (!validate()) {
+      return;
+    }
+
+    if (!isReportReady) {
+      setNotice("Сначала сформируйте отчет с текущими фильтрами.");
+      return;
+    }
+
     setNotice("Выгрузка .xls показана как UI-действие. Реальный файл подключим после согласования с backend.");
   };
 
@@ -233,24 +242,24 @@ export function ReportsPage() {
           </div>
 
           {reportRows.length > 0 ? (
-            reportRows.map((request) => {
-              const executor = mockUsers.find((user) => user.id === request.executorId);
-              const workType = workTypes.find((item) => item.id === request.workTypeId);
-              const department = departments.find((item) => item.id === request.departmentId);
+            reportRows.map((application) => {
+              const executor = mockUsers.find((user) => user.id === application.executorId);
+              const workType = workTypes.find((item) => item.id === application.workTypeId);
+              const department = departments.find((item) => item.id === application.departmentId);
 
               return (
-                <div className="reports-table__row" role="row" key={request.id}>
+                <div className="reports-table__row" role="row" key={application.id}>
                   <span role="cell">
-                    <strong>{request.number}</strong>
+                    <strong>ID {application.id}</strong>
                     <small>{department?.name ?? "-"}</small>
                   </span>
-                  <span role="cell">{statusLabels[request.status]}</span>
-                  <span role="cell">{priorityLabels[request.priority]}</span>
+                  <span role="cell">{statusLabels[application.status]}</span>
+                  <span role="cell">{priorityLabels[application.priority]}</span>
                   <span role="cell">{executor?.fullName ?? "-"}</span>
                   <span role="cell">{workType?.name ?? "-"}</span>
-                  <span role="cell">{formatDateTime(request.createdAt)}</span>
-                  <span role="cell">{formatDateTime(request.startedAt)}</span>
-                  <span role="cell">{formatDateTime(request.finishedAt)}</span>
+                  <span role="cell">{formatDateTime(application.createdAt)}</span>
+                  <span role="cell">{formatDateTime(application.startedAt)}</span>
+                  <span role="cell">{formatDateTime(application.finishedAt)}</span>
                 </div>
               );
             })

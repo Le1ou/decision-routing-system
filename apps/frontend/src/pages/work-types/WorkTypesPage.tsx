@@ -22,6 +22,13 @@ const complexityLabels: Record<Complexity, string> = {
   critical: "Критичная",
 };
 
+const allowedPositionsByComplexity: Record<Complexity, string[]> = {
+  easy: ["Младший", "Старший", "Ведущий", "Главный"],
+  medium: ["Младший", "Старший", "Ведущий", "Главный"],
+  hard: ["Старший", "Ведущий", "Главный"],
+  critical: ["Ведущий", "Главный"],
+};
+
 export function WorkTypesPage() {
   const { currentUser } = useAuth();
   const initialDepartmentId = currentUser?.role === "manager" ? currentUser.departmentId : departments[0]?.id ?? "";
@@ -109,9 +116,6 @@ export function WorkTypesPage() {
           <h1>Виды работ</h1>
           <p>Справочник работ по отделам для маршрутизации заявок и расчета сложности.</p>
         </div>
-        <Button type="button" onClick={openCreateModal}>
-          Добавить вид работ
-        </Button>
       </header>
 
       {notice ? <div className="work-types-notice">{notice}</div> : null}
@@ -147,12 +151,16 @@ export function WorkTypesPage() {
                 ))}
               </select>
             </label>
+            <Button type="button" onClick={openCreateModal}>
+              Добавить вид работ
+            </Button>
           </header>
 
           <div className="work-types-table__grid" role="table" aria-label="Виды работ">
             <div className="work-types-table__row work-types-table__row--head" role="row">
               <span role="columnheader">Название</span>
               <span role="columnheader">Сложность</span>
+              <span role="columnheader">Допустимые позиции</span>
               <span role="columnheader">Использование</span>
               <span role="columnheader">Действия</span>
             </div>
@@ -164,6 +172,11 @@ export function WorkTypesPage() {
                   <span role="cell">
                     <span className={`work-types-complexity work-types-complexity--${item.complexity}`}>
                       {complexityLabels[item.complexity]}
+                    </span>
+                  </span>
+                  <span role="cell">
+                    <span className="work-types-positions">
+                      {allowedPositionsByComplexity[item.complexity].join(", ")}
                     </span>
                   </span>
                   <span role="cell">Доступен для новых заявок</span>
@@ -235,6 +248,11 @@ export function WorkTypesPage() {
                 ))}
               </select>
             </label>
+
+            <div className="work-types-matrix-preview" aria-label="Допустимые позиции">
+              <span>Допустимые позиции</span>
+              <strong>{allowedPositionsByComplexity[form.complexity].join(", ")}</strong>
+            </div>
 
             <footer>
               <button type="button" onClick={() => setIsModalOpen(false)}>

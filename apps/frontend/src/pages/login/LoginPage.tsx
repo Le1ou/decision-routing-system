@@ -14,11 +14,19 @@ export function LoginPage() {
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (password.length > 0 && password.length < 8) {
-      setError("Пароль должен быть не менее 8 символов.");
+    const trimmedPassword = password.trim();
+
+    if (!selectedLogin) {
+      setError("Выберите логин.");
       return;
     }
 
+    if (trimmedPassword !== "123") {
+      setError("Для mock-входа используйте пароль 123.");
+      return;
+    }
+
+    setError("");
     login(selectedLogin);
   };
 
@@ -34,7 +42,14 @@ export function LoginPage() {
 
         <label className="login-field">
           <span>Логин</span>
-          <select value={selectedLogin} onChange={(event) => setSelectedLogin(event.target.value)} aria-label="Логин">
+          <select
+            value={selectedLogin}
+            onChange={(event) => {
+              setSelectedLogin(event.target.value);
+              setError("");
+            }}
+            aria-label="Логин"
+          >
             {availableUsers.map((user) => (
               <option value={user.login} key={user.id}>
                 {user.login}
@@ -49,8 +64,11 @@ export function LoginPage() {
             <input
               type={passwordVisible ? "text" : "password"}
               value={password}
-              placeholder="********"
-              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Введите пароль"
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setError("");
+              }}
             />
             <button
               className={passwordVisible ? "login-card__eye login-card__eye--open" : "login-card__eye"}

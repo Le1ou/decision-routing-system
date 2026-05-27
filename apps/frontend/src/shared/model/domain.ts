@@ -1,6 +1,6 @@
 export type UserRole = "author" | "executor" | "manager";
 
-export type RequestStatus =
+export type ApplicationStatus =
   | "new"
   | "assigned"
   | "delegated"
@@ -8,9 +8,9 @@ export type RequestStatus =
   | "rejected"
   | "completed";
 
-export type RequestPriority = "low" | "medium" | "high" | "critical";
+export type ApplicationPriority = "low" | "medium" | "high" | "critical";
 
-export type RequestAction =
+export type ApplicationAction =
   | "editDescription"
   | "assignExecutor"
   | "startWork"
@@ -20,7 +20,8 @@ export type RequestAction =
   | "delegateExternal"
   | "returnToNew"
   | "confirmExternalDelegation"
-  | "declineExternalDelegation";
+  | "declineExternalDelegation"
+  | "changeWorkType";
 
 export type Complexity = "easy" | "medium" | "hard" | "critical";
 
@@ -58,14 +59,14 @@ export type WorkType = {
 
 export type Attachment = {
   id: string;
-  requestId: string;
+  applicationId: string;
   name: string;
   type: "photo" | "document";
 };
 
 export type Delegation = {
   id: string;
-  requestId: string;
+  applicationId: string;
   delegatedByDepartmentId: string;
   delegatedFromDepartmentId: string;
   delegatedToDepartmentId: string;
@@ -75,13 +76,12 @@ export type Delegation = {
   decidedAt?: string;
 };
 
-export type Request = {
+export type Application = {
   id: string;
-  number: string;
   title: string;
   description: string;
-  status: RequestStatus;
-  priority: RequestPriority;
+  status: ApplicationStatus;
+  priority: ApplicationPriority;
   departmentId: string;
   workTypeId: string;
   authorId: string;
@@ -91,6 +91,8 @@ export type Request = {
   managerComment?: string;
   resultText?: string;
   delegationId?: string;
+  delegatedFromDepartmentId?: string;
+  delegatedToDepartmentId?: string;
   attachmentNames?: string[];
   assignedComplexity?: Complexity;
   assignedAt?: string;
@@ -106,7 +108,7 @@ export type Request = {
 export type Notification = {
   id: string;
   text: string;
-  requestId?: string;
+  applicationId?: string;
   createdAt: string;
   isRead: boolean;
 };

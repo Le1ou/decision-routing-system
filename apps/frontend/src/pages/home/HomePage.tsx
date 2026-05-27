@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { requests } from "@mocks/mockData";
-import { filterRequestsByRole } from "@shared/model/requestRules";
+import { applications } from "@mocks/mockData";
+import { filterApplicationsByRole } from "@shared/model/applicationRules";
 
 import "./HomePage.css";
 
@@ -16,10 +16,10 @@ const sections = [
 export function HomePage() {
   const { currentUser } = useAuth();
   const visibleSections = sections.filter((section) => !section.managerOnly || currentUser?.role === "manager");
-  const visibleRequests = currentUser ? filterRequestsByRole(requests, currentUser) : [];
-  const activeRequests = visibleRequests.filter((request) => request.status !== "completed" && request.status !== "rejected");
-  const urgentRequests = visibleRequests.filter((request) => request.priority === "critical" || request.priority === "high");
-  const inProgressRequests = visibleRequests.filter((request) => request.status === "inProgress");
+  const visibleApplications = currentUser ? filterApplicationsByRole(applications, currentUser) : [];
+  const activeApplications = visibleApplications.filter((application) => application.status !== "completed" && application.status !== "rejected");
+  const criticalApplications = visibleApplications.filter((application) => application.priority === "critical");
+  const inProgressApplications = visibleApplications.filter((application) => application.status === "inProgress");
 
   return (
     <section className="home-page" aria-label="Стартовая страница">
@@ -36,12 +36,12 @@ export function HomePage() {
 
           <div className="home-hero__summary" aria-label="Краткая сводка">
             <span>Видимых заявок</span>
-            <strong>{visibleRequests.length}</strong>
+            <strong>{visibleApplications.length}</strong>
           </div>
         </div>
 
         <div className="home-actions" aria-label="Основные действия">
-          <Link className="home-action home-action--primary" to="/requests/new">
+          <Link className="home-action home-action--primary" to="/applications/new">
             <span className="home-action__icon" aria-hidden="true">+</span>
             <span>
               <strong>Создать заявку</strong>
@@ -49,7 +49,7 @@ export function HomePage() {
             </span>
           </Link>
 
-          <Link className="home-action" to="/requests">
+          <Link className="home-action" to="/applications">
             <span className="home-action__icon" aria-hidden="true">#</span>
             <span>
               <strong>Просмотреть заявки</strong>
@@ -61,15 +61,15 @@ export function HomePage() {
         <div className="home-overview" aria-label="Сводка по заявкам">
           <article>
             <span>Активные</span>
-            <strong>{activeRequests.length}</strong>
+            <strong>{activeApplications.length}</strong>
           </article>
           <article>
-            <span>Высокий приоритет</span>
-            <strong>{urgentRequests.length}</strong>
+            <span>Критичные</span>
+            <strong>{criticalApplications.length}</strong>
           </article>
           <article>
             <span>В работе</span>
-            <strong>{inProgressRequests.length}</strong>
+            <strong>{inProgressApplications.length}</strong>
           </article>
         </div>
 

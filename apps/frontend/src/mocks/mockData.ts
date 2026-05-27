@@ -1,4 +1,4 @@
-import type { Attachment, Delegation, Department, Notification, Position, Request, User, WorkType } from "@shared/model/domain";
+import type { Attachment, Delegation, Department, Notification, Position, Application, User, WorkType } from "@shared/model/domain";
 
 export const departments: Department[] = [
   { id: "it", name: "IT-отдел", value: 0.75, delegatedToSameDepartment: true, employeeApplicationDelayMinutes: 10, deadlineNotificationRatio: 0.25 },
@@ -58,15 +58,21 @@ export const mockUsers: User[] = [
 export const workTypes: WorkType[] = [
   { id: "it-hardware-replace", name: "Замена оборудования", departmentId: "it", complexity: "medium" },
   { id: "it-server-setup", name: "Настройка сервера", departmentId: "it", complexity: "hard" },
+  { id: "it-other", name: "Прочее", departmentId: "it", complexity: "medium" },
   { id: "oge-wiring", name: "Ремонт проводки", departmentId: "oge", complexity: "hard" },
+  { id: "oge-other", name: "Прочее", departmentId: "oge", complexity: "medium" },
   { id: "production-repair", name: "Заявка на ремонт оборудования", departmentId: "production", complexity: "medium" },
+  { id: "production-other", name: "Прочее", departmentId: "production", complexity: "medium" },
+  { id: "okk-other", name: "Прочее", departmentId: "okk", complexity: "medium" },
+  { id: "ogm-other", name: "Прочее", departmentId: "ogm", complexity: "medium" },
   { id: "warehouse-inventory", name: "Инвентаризация", departmentId: "warehouse", complexity: "easy" },
+  { id: "warehouse-other", name: "Прочее", departmentId: "warehouse", complexity: "medium" },
+  { id: "supply-other", name: "Прочее", departmentId: "supply", complexity: "medium" },
 ];
 
-export const requests: Request[] = [
+export const applications: Application[] = [
   {
-    id: "request-1",
-    number: "DRS-1024",
+    id: "1024",
     title: "Не запускается станция оператора",
     description: "После перезапуска рабочая станция не проходит загрузку и не подключается к сети цеха.",
     status: "new",
@@ -81,8 +87,7 @@ export const requests: Request[] = [
     updatedAt: "2026-05-21T09:00:00.000Z",
   },
   {
-    id: "request-2",
-    number: "DRS-1025",
+    id: "1025",
     title: "Настроить доступ к серверу отчетности",
     description: "Нужен доступ для сменного инженера к папке с производственными отчетами.",
     status: "assigned",
@@ -98,8 +103,7 @@ export const requests: Request[] = [
     updatedAt: "2026-05-22T11:40:00.000Z",
   },
   {
-    id: "request-3",
-    number: "DRS-1026",
+    id: "1026",
     title: "Проверка партии готовой продукции",
     description: "Требуется внеплановая проверка партии после замены комплектующих.",
     status: "inProgress",
@@ -117,8 +121,7 @@ export const requests: Request[] = [
     startedAt: "2026-05-23T08:10:00.000Z",
   },
   {
-    id: "request-4",
-    number: "DRS-1027",
+    id: "1027",
     title: "Согласовать замену позиции в поставке",
     description: "Поставщик предложил аналог комплектующей, нужно проверить возможность замены.",
     status: "delegated",
@@ -127,14 +130,15 @@ export const requests: Request[] = [
     workTypeId: "it-server-setup",
     authorId: "user-author",
     delegationId: "delegation-1",
+    delegatedFromDepartmentId: "supply",
+    delegatedToDepartmentId: "it",
     isUnfinished: false,
     createdAt: "2026-05-24T09:20:00.000Z",
     deadlineAt: "2026-05-27T12:00:00.000Z",
     updatedAt: "2026-05-24T10:05:00.000Z",
   },
   {
-    id: "request-5",
-    number: "DRS-1028",
+    id: "1028",
     title: "Закрыть доступ у уволенного сотрудника",
     description: "Необходимо отключить учетную запись и проверить доступ к сетевым папкам.",
     status: "completed",
@@ -158,7 +162,7 @@ export const requests: Request[] = [
 export const delegations: Delegation[] = [
   {
     id: "delegation-1",
-    requestId: "request-4",
+    applicationId: "1027",
     delegatedByDepartmentId: "supply",
     delegatedFromDepartmentId: "supply",
     delegatedToDepartmentId: "it",
@@ -168,22 +172,22 @@ export const delegations: Delegation[] = [
 ];
 
 export const attachments: Attachment[] = [
-  { id: "attachment-1", requestId: "request-1", name: "station-error.jpg", type: "photo" },
-  { id: "attachment-2", requestId: "request-3", name: "quality-report.pdf", type: "document" },
+  { id: "attachment-1", applicationId: "1024", name: "station-error.jpg", type: "photo" },
+  { id: "attachment-2", applicationId: "1026", name: "quality-report.pdf", type: "document" },
 ];
 
 export const notifications: Notification[] = [
   {
     id: "notification-1",
-    text: "Заявка DRS-1024 ожидает назначения исполнителя",
-    requestId: "request-1",
+    text: "Заявка 1024 ожидает назначения исполнителя",
+    applicationId: "1024",
     createdAt: "2026-05-21T09:00:00.000Z",
     isRead: false,
   },
   {
     id: "notification-2",
-    text: "По заявке DRS-1025 назначен исполнитель",
-    requestId: "request-2",
+    text: "По заявке 1025 назначен исполнитель",
+    applicationId: "1025",
     createdAt: "2026-05-22T11:40:00.000Z",
     isRead: true,
   },

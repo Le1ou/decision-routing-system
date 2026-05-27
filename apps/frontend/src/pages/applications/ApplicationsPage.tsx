@@ -1,0 +1,815 @@
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+
+import { useAuth } from "@app/providers/AuthProvider";
+import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
+import { attachments, departments, positions, workTypes, mockUsers } from "@mocks/mockData";
+import type { Complexity, Application, ApplicationAction, ApplicationStatus } from "@shared/model/domain";
+import { actionLabels, priorityLabels, statusLabels } from "@shared/model/labels";
+import {
+  applyApplicationFilters,
+  filterApplicationsByRole,
+  getAvailableApplicationActions,
+  sortApplications,
+  type ApplicationFilter,
+  type ApplicationSortKey,
+} from "@shared/model/applicationRules";
+
+import "./ApplicationsPage.css";
+
+export function ApplicationsPage() {
+  const { currentUser } = useAuth();
+  const { applicationItems, updateApplication } = useApplicationsStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [departmentSettings, setDepartmentSettings] = useState(() =>
+    Object.fromEntries(departments.map((department) => [department.id, department.delegatedToSameDepartment])),
+  );
+  const [sortKey, setSortKey] = useState<ApplicationSortKey>("priority");
+  const [filters, setFilters] = useState<ApplicationFilter>({});
+  const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
+  const [isSidebarHidden, setIsSidebarHidden] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [pendingAction, setPendingAction] = useState<ApplicationAction | null>(null);
+  const [actionForm, setActionForm] = useState({
+    comment: "",
+    complexity: "medium",
+    departmentId: "it",
+    description: "",
+    executorId: "",
+    resultText: "",
+    workTypeId: "",
+  });
+  const [actionError, setActionError] = useState("");
+
+  const visibleApplications = useMemo(() => {
+    if (!currentUser) {
+      return [];
+    }
+
+    const getExecutorName = (executorId?: string) => mockUsers.find((user) => user.id === executorId)?.fullName ?? "";
+
+    return sortApplications(
+      applyApplicationFilters(filterApplicationsByRole(applicationItems, currentUser), filters, currentUser, { getExecutorName }),
+      sortKey,
+    );
+  }, [currentUser, filters, applicationItems, sortKey]);
+
+  useEffect(() => {
+    const applicationIdFromUrl = searchParams.get("application");
+
+    if (visibleApplications.length === 0) {
+      setSelectedApplicationId(null);
+      return;
+    }
+
+    if (applicationIdFromUrl && visibleApplications.some((application) => application.id === applicationIdFromUrl)) {
+      setSelectedApplicationId(applicationIdFromUrl);
+      return;
+    }
+
+    if (!selectedApplicationId || !visibleApplications.some((application) => application.id === selectedApplicationId)) {
+      setSelectedApplicationId(visibleApplications[0].id);
+    }
+  }, [searchParams, selectedApplicationId, visibleApplications]);
+
+  const selectedApplication = visibleApplications.find((application) => application.id === selectedApplicationId) ?? visibleApplications[0];
+  const applicationActions = currentUser && selectedApplication ? getAvailableApplicationActions(selectedApplication, currentUser) : [];
+  const managerDepartment = currentUser?.role === "manager"
+    ? departments.find((department) => department.id === currentUser.departmentId)
+    : undefined;
+  const applicationDepartment = departments.find((department) => department.id === selectedApplication?.departmentId);
+  const applicationWorkType = workTypes.find((workType) => workType.id === selectedApplication?.workTypeId);
+  const author = mockUsers.find((user) => user.id === selectedApplication?.authorId);
+  const executor = mockUsers.find((user) => user.id === selectedApplication?.executorId);
+  const previousExecutor = mockUsers.find((user) => user.id === selectedApplication?.previousExecutorId);
+  const authorDepartment = departments.find((department) => department.id === author?.departmentId);
+  const authorPosition = positions.find((position) => position.id === author?.positionId);
+  const executorDepartment = departments.find((department) => department.id === executor?.departmentId);
+  const executorPosition = positions.find((position) => position.id === executor?.positionId);
+  const applicationAttachmentNames = [
+    ...attachments.filter((attachment) => attachment.applicationId === selectedApplication?.id).map((attachment) => attachment.name),
+    ...(selectedApplication?.attachmentNames ?? []),
+  ];
+
+  const executorsForDepartment = mockUsers.filter(
+    (user) => user.role === "executor" && user.departmentId === selectedApplication?.departmentId && user.isActive,
+  );
+  const actionsWithForm: ApplicationAction[] = [
+    "assignExecutor",
+    "delegateInternal",
+    "delegateExternal",
+    "editDescription",
+    "returnToNew",
+    "complete",
+    "changeWorkType",
+    "reject",
+  ];
+
+  const handleApplicationAction = (action: ApplicationAction) => {
+    if (!selectedApplication || !currentUser) {
+      return;
+    }
+
+    if (actionsWithForm.includes(action)) {
+      setPendingAction(action);
+      setActionError("");
+      setActionForm({
+        comment: "",
+        complexity: selectedApplication.assignedComplexity ?? applicationWorkType?.complexity ?? "medium",
+        departmentId: selectedApplication.departmentId,
+        description: selectedApplication.description,
+        executorId: selectedApplication.executorId ?? executorsForDepartment[0]?.id ?? "",
+        resultText: selectedApplication.resultText ?? "",
+        workTypeId: selectedApplication.workTypeId,
+      });
+      return;
+    }
+
+    applyAction(action);
+  };
+
+  const toggleDelegationConfirmation = () => {
+    if (!managerDepartment) {
+      return;
+    }
+
+    const nextValue = !departmentSettings[managerDepartment.id];
+
+    setDepartmentSettings((current) => ({ ...current, [managerDepartment.id]: nextValue }));
+    setNotice(
+      nextValue
+        ? `Для отдела «${managerDepartment.name}» включено подтверждение делегирования внутри отдела.`
+        : `Для отдела «${managerDepartment.name}» подтверждение делегирования внутри отдела отключено.`,
+    );
+  };
+
+  const applyAction = (action: ApplicationAction, payload: MockActionPayload = {}) => {
+    if (!selectedApplication || !currentUser) {
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+    const currentComplexity = selectedApplication.assignedComplexity ?? applicationWorkType?.complexity ?? "medium";
+
+    if (
+      (action === "delegateInternal" || action === "returnToNew") &&
+      payload.complexity &&
+      complexityOrder[payload.complexity as Complexity] < complexityOrder[currentComplexity]
+    ) {
+      setActionError("Новая сложность не может быть ниже текущей.");
+      return;
+    }
+
+    const validationError = getActionValidationError(action, payload, selectedApplication);
+
+    if (validationError) {
+      setActionError(validationError);
+      return;
+    }
+
+    updateApplication(selectedApplication.id, (application) => applyMockAction(application, action, currentUser.id, updatedAt, payload));
+
+    setNotice(getMockActionNotice(action));
+    setActionError("");
+    setPendingAction(null);
+  };
+
+  if (!currentUser) {
+    return (
+      <section className="applications-page applications-page--empty">
+        <div className="applications-empty">Для текущей роли нет доступных заявок.</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className={isSidebarHidden ? "applications-page applications-page--sidebar-hidden" : "applications-page"}>
+      <aside className="applications-sidebar" aria-hidden={isSidebarHidden}>
+        <div className="applications-toolbar">
+          <select value={sortKey} onChange={(event) => setSortKey(event.target.value as ApplicationSortKey)} aria-label="Сортировка">
+            <option value="priority">Сортировать по приоритету</option>
+            <option value="status">Сортировать по статусу</option>
+            <option value="createdAt">Сортировать по дате создания</option>
+            <option value="finishedAt">Сортировать по дате закрытия</option>
+          </select>
+          <button type="button" aria-label="Направление сортировки">↕</button>
+        </div>
+
+        <div className="applications-filters" aria-label="Фильтры заявок">
+          <input
+            value={filters.applicationIdQuery ?? ""}
+            onChange={(event) => setFilters((current) => ({ ...current, applicationIdQuery: event.target.value }))}
+            placeholder="ID заявки"
+            aria-label="Поиск по ID заявки"
+          />
+          <input
+            value={filters.executorQuery ?? ""}
+            onChange={(event) => setFilters((current) => ({ ...current, executorQuery: event.target.value }))}
+            placeholder="ФИО исполнителя"
+            aria-label="Поиск по ФИО исполнителя"
+          />
+          {currentUser.role !== "author" ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.createdByMe ?? false}
+                onChange={(event) => setFilters((current) => ({ ...current, createdByMe: event.target.checked }))}
+              />
+              Созданные мной
+            </label>
+          ) : null}
+          {currentUser.role === "executor" ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.assignedToMe ?? false}
+                onChange={(event) => setFilters((current) => ({ ...current, assignedToMe: event.target.checked }))}
+              />
+              Назначенные на меня
+            </label>
+          ) : null}
+          {currentUser.role === "manager" ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={filters.delegatedFromAnotherDepartment ?? false}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, delegatedFromAnotherDepartment: event.target.checked }))
+                }
+              />
+              Делегированы из другого отдела
+            </label>
+          ) : null}
+        </div>
+
+        {managerDepartment ? (
+          <section className="applications-manager-settings" aria-label="Настройки отдела">
+            <strong>Делегирование внутри отдела</strong>
+            <label>
+              <input
+                type="checkbox"
+                checked={Boolean(departmentSettings[managerDepartment.id])}
+                onChange={toggleDelegationConfirmation}
+              />
+              Подтверждать руководителем
+            </label>
+          </section>
+        ) : null}
+
+        <div className="applications-list">
+          {visibleApplications.length > 0 ? (
+            visibleApplications.map((application) => (
+              <button
+                className={application.id === selectedApplication?.id ? "application-row application-row--active" : "application-row"}
+                type="button"
+                key={application.id}
+                onClick={() => {
+                  setSelectedApplicationId(application.id);
+                  setSearchParams({ application: application.id });
+                }}
+              >
+                <strong>Заявка ID {application.id}</strong>
+                <span>{application.title}</span>
+              </button>
+            ))
+          ) : (
+            <div className="applications-list__empty">Заявки не найдены</div>
+          )}
+        </div>
+      </aside>
+
+      {selectedApplication ? (
+      <article className="application-card">
+        {notice ? <div className="application-card__notice">{notice}</div> : null}
+        <button
+          className="application-card__toggle-list"
+          type="button"
+          onClick={() => setIsSidebarHidden((value) => !value)}
+        >
+          {isSidebarHidden ? "Показать список" : "Скрыть список"}
+        </button>
+        <button
+          className="application-card__edit"
+          type="button"
+          aria-label="Редактировать"
+          disabled={!applicationActions.includes("editDescription")}
+          onClick={() => handleApplicationAction("editDescription")}
+        >
+          ✎
+        </button>
+
+        <header className="application-card__title">
+          <h1>{applicationDepartment?.name ?? "Отдел не указан"} / Заявка ID {selectedApplication.id}</h1>
+          <input value={selectedApplication.title} readOnly aria-label="Тема заявки" />
+        </header>
+
+        <div className="application-card__main">
+          <section className="application-card__workarea">
+            <div className="application-card__section-header">
+              <strong>Описание</strong>
+              <span>Предыдущий исполнитель: {previousExecutor?.fullName ?? "не назначен"}</span>
+            </div>
+            <textarea
+              value={selectedApplication.description}
+              readOnly
+              aria-label="Описание заявки"
+            />
+            <label className="application-card__comment">
+              <span>Комментарий исполнителя:</span>
+              <textarea
+                value={selectedApplication.executorComment ?? selectedApplication.resultText ?? ""}
+                placeholder="Комментарий появится после назначения или выполнения работ"
+                readOnly
+                aria-label="Комментарий исполнителя"
+              />
+            </label>
+            <div className="application-card__actions">
+              {applicationActions.map((action) => (
+                <button type="button" key={action} onClick={() => handleApplicationAction(action)}>
+                  {actionLabels[action]}
+                </button>
+              ))}
+            </div>
+            <section className="application-card__attachments">
+              <h2>Вложения</h2>
+              {applicationAttachmentNames.length > 0 ? (
+                <ul>
+                  {applicationAttachmentNames.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Файлы не прикреплены</p>
+              )}
+            </section>
+          </section>
+
+          <aside className="application-card__info">
+            <div className="application-card__params">
+              <label>
+                Статус:
+                <select value={selectedApplication.status} disabled>
+                  <option value={selectedApplication.status}>{statusLabels[selectedApplication.status]}</option>
+                </select>
+              </label>
+              <label>
+                Приоритет:
+                <input value={priorityLabels[selectedApplication.priority]} readOnly />
+              </label>
+              <label>
+                Вид работ:
+                <input value={applicationWorkType?.name ?? "-"} readOnly />
+              </label>
+            </div>
+
+            <section className="application-info-box">
+              <h2>Автор заявки</h2>
+              <p><b>ФИО:</b> {author?.fullName ?? "-"}</p>
+              <p><b>Отдел:</b> {authorDepartment?.name ?? "-"}</p>
+              <p><b>Должность:</b> {authorPosition?.name ?? "-"}</p>
+            </section>
+
+            <section className="application-info-box">
+              <h2>Исполнитель</h2>
+              <p><b>ФИО:</b> {executor?.fullName ?? "-"}</p>
+              <p><b>Отдел:</b> {executorDepartment?.name ?? "-"}</p>
+              <p><b>Должность:</b> {executorPosition?.name ?? "-"}</p>
+            </section>
+
+            <section className="application-info-box application-info-box--dates">
+              <h2>Информация о заявке</h2>
+              <p><b>Дата и время последнего изменения:</b> {formatDateTime(selectedApplication.updatedAt)}</p>
+              <p><b>Дата и время создания заявки:</b> {formatDateTime(selectedApplication.createdAt)}</p>
+              <p><b>Дата и время назначения исполнителя:</b> {formatDateTime(selectedApplication.assignedAt)}</p>
+              <p><b>Дата и время взятия в работу заявки:</b> {formatDateTime(selectedApplication.startedAt)}</p>
+              <p><b>Дата и время закрытия заявки:</b> {formatDateTime(selectedApplication.finishedAt)}</p>
+            </section>
+          </aside>
+        </div>
+      </article>
+      ) : (
+        <div className="application-card application-card--empty">
+          <div className="applications-empty">Заявки не найдены. Измените параметры фильтрации.</div>
+        </div>
+      )}
+      {pendingAction && selectedApplication ? (
+        <div className="application-modal" role="dialog" aria-modal="true" aria-label={actionLabels[pendingAction]}>
+          <form
+            className="application-modal__panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              applyAction(pendingAction, actionForm);
+            }}
+          >
+            <header>
+              <h2>{actionLabels[pendingAction]}</h2>
+              <button type="button" onClick={() => setPendingAction(null)} aria-label="Закрыть">×</button>
+            </header>
+
+            {pendingAction === "assignExecutor" ? (
+              <label>
+                Исполнитель
+                <select
+                  value={actionForm.executorId}
+                  onChange={(event) => {
+                    setActionForm((current) => ({ ...current, executorId: event.target.value }));
+                    setActionError("");
+                  }}
+                >
+                  {executorsForDepartment.map((user) => (
+                    <option value={user.id} key={user.id}>{user.fullName}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            {pendingAction === "delegateExternal" ? (
+              <label>
+                Новый отдел
+                <select
+                  value={actionForm.departmentId}
+                  onChange={(event) => {
+                    setActionForm((current) => ({ ...current, departmentId: event.target.value }));
+                    setActionError("");
+                  }}
+                >
+                  {departments
+                    .filter((department) => department.id !== selectedApplication.departmentId)
+                    .map((department) => (
+                      <option value={department.id} key={department.id}>{department.name}</option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
+
+            {pendingAction === "delegateInternal" || pendingAction === "returnToNew" ? (
+              <section className="application-modal__complexity">
+                <div>
+                  <span>Текущая сложность</span>
+                  <strong>{complexityLabels[selectedApplication.assignedComplexity ?? applicationWorkType?.complexity ?? "medium"]}</strong>
+                </div>
+                <label>
+                  Новая сложность
+                  <select
+                    value={actionForm.complexity}
+                    onChange={(event) => {
+                      setActionForm((current) => ({ ...current, complexity: event.target.value }));
+                      setActionError("");
+                    }}
+                  >
+                    <option value="easy">Легкая</option>
+                    <option value="medium">Средняя</option>
+                    <option value="hard">Высокая</option>
+                    <option value="critical">Критичная</option>
+                  </select>
+                </label>
+              </section>
+            ) : null}
+
+            {pendingAction === "editDescription" ? (
+              <label>
+                Описание проблемы
+                <textarea
+                  value={actionForm.description}
+                  onChange={(event) => {
+                    setActionForm((current) => ({ ...current, description: event.target.value }));
+                    setActionError("");
+                  }}
+                  maxLength={1000}
+                  placeholder="Уточните описание проблемы"
+                />
+              </label>
+            ) : null}
+
+            {pendingAction === "changeWorkType" ? (
+              <label>
+                Вид работ
+                <select
+                  value={actionForm.workTypeId}
+                  onChange={(event) => {
+                    setActionForm((current) => ({ ...current, workTypeId: event.target.value }));
+                    setActionError("");
+                  }}
+                >
+                  {workTypes
+                    .filter((workType) => workType.departmentId === selectedApplication.departmentId)
+                    .map((workType) => (
+                      <option value={workType.id} key={workType.id}>{workType.name}</option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
+
+            {pendingAction === "complete" ? (
+              <label>
+                Состав / результат работ
+                <textarea
+                  value={actionForm.resultText}
+                  onChange={(event) => {
+                    setActionForm((current) => ({ ...current, resultText: event.target.value }));
+                    setActionError("");
+                  }}
+                  placeholder="Опишите, какие работы выполнены"
+                />
+              </label>
+            ) : null}
+
+            {pendingAction !== "editDescription" && pendingAction !== "complete" && pendingAction !== "changeWorkType" ? (
+            <label>
+              Комментарий
+              <textarea
+                value={actionForm.comment}
+                onChange={(event) => {
+                  setActionForm((current) => ({ ...current, comment: event.target.value }));
+                  setActionError("");
+                }}
+                placeholder="Добавьте пояснение для истории заявки"
+              />
+            </label>
+            ) : null}
+
+            {actionError ? <div className="application-modal__error">{actionError}</div> : null}
+
+            <footer>
+              <button type="button" onClick={() => setPendingAction(null)}>Отмена</button>
+              <button type="submit">Подтвердить</button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+type MockActionPayload = {
+  comment?: string;
+  complexity?: string;
+  description?: string;
+  departmentId?: string;
+  executorId?: string;
+  resultText?: string;
+  workTypeId?: string;
+};
+
+const complexityOrder: Record<Complexity, number> = {
+  easy: 1,
+  medium: 2,
+  hard: 3,
+  critical: 4,
+};
+
+const complexityLabels: Record<Complexity, string> = {
+  easy: "Легкая",
+  medium: "Средняя",
+  hard: "Высокая",
+  critical: "Критичная",
+};
+
+function getActionValidationError(
+  action: ApplicationAction,
+  payload: MockActionPayload,
+  application: Application,
+) {
+  if (action === "assignExecutor" && !payload.executorId) {
+    return "Выберите исполнителя.";
+  }
+
+  if (action === "delegateExternal") {
+    if (!payload.departmentId) {
+      return "Выберите отдел для делегирования.";
+    }
+
+    if (payload.departmentId === application.departmentId) {
+      return "Выберите другой отдел.";
+    }
+
+    if (!payload.comment?.trim()) {
+      return "Добавьте комментарий к делегированию.";
+    }
+  }
+
+  if ((action === "delegateInternal" || action === "returnToNew") && !payload.comment?.trim()) {
+    return "Добавьте комментарий для перераспределения заявки.";
+  }
+
+  if (action === "reject" && !payload.comment?.trim()) {
+    return "Укажите причину отклонения заявки.";
+  }
+
+  if (action === "complete" && !payload.resultText?.trim()) {
+    return "Заполните состав или результат выполненных работ.";
+  }
+
+  if (action === "editDescription") {
+    const nextDescription = payload.description?.trim() ?? "";
+
+    if (!nextDescription) {
+      return "Описание не должно быть пустым.";
+    }
+
+    if (nextDescription === application.description.trim()) {
+      return "Измените описание перед подтверждением.";
+    }
+  }
+
+  if (action === "changeWorkType") {
+    if (!payload.workTypeId) {
+      return "Выберите вид работ.";
+    }
+
+    if (payload.workTypeId === application.workTypeId) {
+      return "Выберите другой вид работ.";
+    }
+  }
+
+  return "";
+}
+
+function applyMockAction(
+  application: Application,
+  action: ApplicationAction,
+  userId: string,
+  updatedAt: string,
+  payload: MockActionPayload = {},
+): Application {
+  const statusByAction: Partial<Record<ApplicationAction, ApplicationStatus>> = {
+    startWork: "inProgress",
+    reject: "rejected",
+    complete: "completed",
+    delegateInternal: "new",
+    delegateExternal: "delegated",
+    returnToNew: "new",
+  };
+
+  if (action === "assignExecutor") {
+    const executor =
+      mockUsers.find((user) => user.id === payload.executorId) ??
+      mockUsers.find((user) => user.role === "executor" && user.departmentId === application.departmentId && user.isActive);
+
+    return {
+      ...application,
+      status: "assigned",
+      executorId: executor?.id ?? application.executorId,
+      assignedAt: updatedAt,
+      isUnfinished: false,
+      updatedAt,
+      managerComment: payload.comment || "Исполнитель назначен вручную в mock-режиме.",
+    };
+  }
+
+  if (action === "editDescription") {
+    return {
+      ...application,
+      updatedAt,
+      description: payload.description?.trim() || application.description,
+    };
+  }
+
+  if (action === "complete") {
+    return {
+      ...application,
+      status: "completed",
+      updatedAt,
+      finishedAt: updatedAt,
+      closedById: userId,
+      resultText: payload.resultText?.trim() ?? application.resultText,
+    };
+  }
+
+  if (action === "startWork") {
+    return {
+      ...application,
+      status: "inProgress",
+      startedAt: updatedAt,
+      updatedAt,
+    };
+  }
+
+  if (action === "reject") {
+    return {
+      ...application,
+      status: "rejected",
+      updatedAt,
+      managerComment: payload.comment?.trim() ?? application.managerComment,
+    };
+  }
+
+  if (action === "delegateInternal" || action === "returnToNew") {
+    return {
+      ...application,
+      status: "new",
+      previousExecutorId: application.executorId ?? application.previousExecutorId,
+      executorId: undefined,
+      assignedAt: undefined,
+      startedAt: undefined,
+      isUnfinished: true,
+      updatedAt,
+      assignedComplexity: payload.complexity as Complexity | undefined,
+      executorComment: payload.comment || "Заявка возвращена для переназначения в mock-режиме.",
+    };
+  }
+
+  if (action === "delegateExternal") {
+    return {
+      ...application,
+      status: "delegated",
+      delegationId: application.delegationId ?? `delegation-${application.id}`,
+      previousExecutorId: application.executorId ?? application.previousExecutorId,
+      executorId: undefined,
+      assignedAt: undefined,
+      startedAt: undefined,
+      departmentId: payload.departmentId ?? application.departmentId,
+      delegatedFromDepartmentId: application.departmentId,
+      delegatedToDepartmentId: payload.departmentId ?? application.departmentId,
+      updatedAt,
+      executorComment: payload.comment || "Запрошено делегирование в другой отдел.",
+    };
+  }
+
+  if (action === "confirmExternalDelegation") {
+    return {
+      ...application,
+      status: "new",
+      departmentId: application.delegatedToDepartmentId ?? application.departmentId,
+      executorId: undefined,
+      assignedAt: undefined,
+      startedAt: undefined,
+      updatedAt,
+    };
+  }
+
+  if (action === "declineExternalDelegation") {
+    return {
+      ...application,
+      status: "new",
+      departmentId: application.delegatedFromDepartmentId ?? application.departmentId,
+      executorId: undefined,
+      assignedAt: undefined,
+      startedAt: undefined,
+      updatedAt,
+    };
+  }
+
+  if (action === "changeWorkType") {
+    const nextWorkType = workTypes.find((workType) => workType.id === payload.workTypeId);
+
+    return {
+      ...application,
+      workTypeId: nextWorkType?.id ?? application.workTypeId,
+      assignedComplexity: nextWorkType?.complexity ?? application.assignedComplexity,
+      updatedAt,
+    };
+  }
+
+  return {
+    ...application,
+    status: statusByAction[action] ?? application.status,
+    updatedAt,
+  };
+}
+
+function getMockActionNotice(action: ApplicationAction) {
+  if (action === "assignExecutor") {
+    return "Исполнитель назначен. Заявка перешла в статус «Назначен исполнитель».";
+  }
+
+  if (action === "startWork") {
+    return "Заявка взята в работу.";
+  }
+
+  if (action === "complete") {
+    return "Заявка завершена.";
+  }
+
+  if (action === "reject") {
+    return "Заявка отклонена.";
+  }
+
+  if (action === "delegateExternal") {
+    return "Заявка отправлена на межотдельное делегирование.";
+  }
+
+  if (action === "delegateInternal" || action === "returnToNew") {
+    return "Заявка возвращена в статус «Новый» для переназначения.";
+  }
+
+  if (action === "confirmExternalDelegation" || action === "declineExternalDelegation") {
+    return "Решение по делегированию зафиксировано.";
+  }
+
+  return "Действие применено в mock-режиме.";
+}
+
+function formatDateTime(value?: string) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
