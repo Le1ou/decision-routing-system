@@ -17,10 +17,34 @@ app.add_middleware(
 )
 #Выполнять команды пользователя по запросам, для каждого запроса проводить заново аутентификацию и создание своего управляющего БД объекта
 # DBController.writeNewDepartment("Отдел безопасности", "основное отделение", 1, True, 10)
-# DBController.writeNewComplexityValue("легко")
+#DBController.writeNewComplexityValue("легко")
 # DBController.tryWriteNewTypeOfWork("Починить комп", 1, 1)
-# DBController.deleteAllDataFromAllTables()
-@app.get("/types_of_works")
+#DBController.deleteAllDataFromAllTables()
+ComplexityValues = ["easy", "medium", "hard", "critical"]
+def validateDataAndType(data, acceptedType, dataName = "data", cantBeEmpty = True, onlyAcceptedValues = []):
+    try:
+        acceptedType(data)
+    except:
+        raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, 
+                detail= dataName + " is not in correct format")
+    if cantBeEmpty:
+        if str(data) == "":
+            raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, 
+                    detail=dataName + " is empty")
+    if len(onlyAcceptedValues ) > 0:
+        if not data in onlyAcceptedValues:
+            raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, 
+                    detail=dataName + " is not a correct value")
+
+class TypeOfWorks(BaseModel):
+    name: str
+    departmentId: int
+    complexity:str
+
+@app.get("/work-types")
 def get_types_of_work(userData = Depends(authObj.authenticate_user_test)):
     try:
         DBController.createUserRole(userData[0],userData[1], configData["MOCK_USERS_DB"][userData[0]]["roles"] ) # Создаем учетку если она не существует
@@ -46,34 +70,28 @@ def get_types_of_work(userData = Depends(authObj.authenticate_user_test)):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail="Server-side error")
         
-@app.post("/types_of_works")
-def set_types_of_work(userData = Depends(authObj.authenticate_user_test), name:str| None = Body(default=""), department_id:int| None = Body(default=0), complexity_value:int | None = Body(default=int(0))):
+@app.post("/work-types", status_code=201)
+#def set_types_of_work(userData = Depends(authObj.authenticate_user_test), name:str| None = Body(default=""), departmentId:int| None = Body(default=0), complexity_value:int | None = Body(default=int(0))):
+def set_types_of_work(typeOfWorks:TypeOfWorks, userData = Depends(authObj.authenticate_user_test)):
     try:
-        if name == "":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="name is not set")
-        if department_id == 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="department id is not set")
+        validateDataAndType(typeOfWorks.name, str,"Наименование вида работ", False)
+        validateDataAndType(typeOfWorks.departmentId, int,"ID департамента", False)
+        validateDataAndType(typeOfWorks.complexity, str,"Сложность", False, ComplexityValues)
         DBController.createUserRole(userData[0],userData[1], configData["MOCK_USERS_DB"][userData[0]]["roles"] ) # Создаем учетку если она не существует
         DBUser = PgDbOperator(userData[0], userData[1])
-
-
-        data = DBController.tryWriteNewTypeOfWork(name,department_id,complexity_value)
-        
-
+        data = DBController.tryWriteNewTypeOfWork(typeOfWorks.name,int(typeOfWorks.departmentId),ComplexityValues.index(typeOfWorks.complexity))
         if data == [] or data == None or data == "":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, 
                 detail="Cant write data with your rights")
-        elif data != True:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail=data)
         else:
-            return data
+            try: 
+                return int(data[0][0])
+            except:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, 
+                    detail=data)
+
     except Exception as exc: 
         if hasattr(exc, "status_code")  and hasattr(exc, "detail"):
             raise HTTPException(

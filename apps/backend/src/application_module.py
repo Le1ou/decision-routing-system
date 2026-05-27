@@ -171,9 +171,9 @@ class PgDbOperator:
     def tryWriteNewTypeOfWork(self, name = "Вид работы", department_id = None, complexity_value = 0):
         with self.pool.connection() as conn:
             try:
-                conn.execute('INSERT INTO types_of_works (name, complexity_value, department_id ' \
-                                                        ") VALUES (%s,%s,%s)", (name, complexity_value , department_id))
-                return True
+                id = conn.execute('INSERT INTO types_of_works (name, complexity_value, department_id ' \
+                                                        ") VALUES (%s,%s,%s) RETURNING type_of_works_id;", (name, complexity_value , department_id)).fetchall()
+                return id
             except psycopg.errors.ForeignKeyViolation:
                 conn.rollback()
                 print("Error: Foreign key value does not exist for command tryWriteNewTypeOfWork")

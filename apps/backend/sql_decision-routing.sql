@@ -2,7 +2,6 @@
 -- Please log an issue at https://github.com/pgadmin-org/pgadmin4/issues/new/choose if you find any bugs, including reproduction steps.
 BEGIN;
 
-
 CREATE TABLE IF NOT EXISTS public.application
 (
     application_id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
@@ -83,7 +82,7 @@ CREATE TABLE IF NOT EXISTS public.types_of_works
 
 CREATE TABLE IF NOT EXISTS public.complexity_value
 (
-    complexity_value_id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
+    complexity_value_id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 0 MINVALUE 0 ),
     name text,
     PRIMARY KEY (complexity_value_id)
 );
@@ -110,7 +109,7 @@ CREATE TABLE IF NOT EXISTS public.post
 
 CREATE TABLE IF NOT EXISTS public.grade
 (
-    grade_id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
+    grade_id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 0 MINVALUE 0 ),
     name text,
     PRIMARY KEY (grade_id)
 );
