@@ -301,6 +301,15 @@ class PgDbOperator:
            print("getting row error for table " + table + " with identifier" + identifierName)
            return None
         
+    def getAllRowsFromTableWithJoin(self, table:str, joinStatement:str, rowfactory = dict_row):
+
+            requestString = 'SELECT * FROM ' + table + joinStatement
+        
+            with self.pool.connection() as conn:
+                with conn.cursor(row_factory=rowfactory) as cur:
+                    return cur.execute(requestString).fetchall()
+
+        
     def getAllRowsFromTable(self, table:str, rowfactory = dict_row):
         try:
             requestString = 'SELECT * FROM ' + table
