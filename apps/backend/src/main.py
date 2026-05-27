@@ -46,9 +46,12 @@ def validateDataAndType(data, acceptedType, dataName = "data", cantBeEmpty = Tru
                     detail=dataName + " is not a correct value")
 
 def coerce_to_str(v) -> str:
-    return str(v) if v is not None else v
+    print(v)
+    return str(v) if v is not None else ""
 
 def coerce_to_str_multiple(v):
+    if v is None:
+        return [] 
     if isinstance(v, list):
         return [str(item) for item in v]
     return v
@@ -83,40 +86,35 @@ class TypeOfWorksReturn(BaseModel):
 
 class TypeOfWorksList(RootModel[list[TypeOfWorksReturn]]):
     pass
-join_str =  """
-    LEFT JOIN (
-        SELECT 
-            type_of_works_id, 
-            COALESCE(json_agg(post_grade_id) FILTER (WHERE post_grade_id IS NOT NULL), '[]'::json) as post_grade_ids
-        FROM public.type_of_work_to_post_grade
-        GROUP BY type_of_works_id
-    ) type_of_work_to_post_grade ON type_of_work_to_post_grade.type_of_works_id = type_of_work_to_post_grade.type_of_works_id;
-    """
-data = DBController.getAllRowsFromTableWithJoin("types_of_works", join_str)
-collection = TypeOfWorksList.model_validate(data)
 
-new_list = collection.model_dump()
-print(new_list)
 @app.get("/work-types")
-def get_types_of_work(userData = Depends(authObj.authenticate_user_test)):
+def get_types_of_work(userData = Depends(authObj.authenticate_user_test), departmentId:str =""):
     try:
         DBController.createUserRole(userData[0],userData[1], configData["MOCK_USERS_DB"][userData[0]]["roles"] ) # Создаем учетку если она не существует
         DBUser = PgDbOperator(userData[0], userData[1])
-
         join_str =  """
-            LEFT JOIN (
-                SELECT 
-                    type_of_works_id, 
-                    COALESCE(json_agg(post_grade_id) FILTER (WHERE post_grade_id IS NOT NULL), '[]'::json) as post_grade_ids
-                FROM public.type_of_work_to_post_grade
-                GROUP BY type_of_works_id
-            ) type_of_work_to_post_grade ON types_of_works.type_of_works_id = type_of_work_to_post_grade.type_of_works_id;
-            """
-        data = DBUser.getAllRowsFromTableWithJoin("types_of_works", join_str)
-        collection = TypeOfWorksList.model_validate(data)
+                LEFT JOIN (
+                    SELECT 
+                        type_of_works_id AS sub_id, 
+                        COALESCE(json_agg(post_grade_id) FILTER (WHERE post_grade_id IS NOT NULL), '[]'::json) as post_grade_ids
+                    FROM public.type_of_work_to_post_grade
+                    GROUP BY type_of_works_id
+                ) type_of_work_to_post_grade ON types_of_works.type_of_works_id = type_of_work_to_post_grade.sub_id;
+                """
+        if departmentId == "":
+            print("empty department id")
+           
+            data = DBUser.getAllRowsFromTableWithJoin("types_of_works", join_str)
+            collection = TypeOfWorksList.model_validate(data)
 
-        new_list = collection.model_dump()
-        print(new_list)
+            new_list = collection.model_dump()
+        else:
+            data = DBUser.getRowsFromTableWithJoin("types_of_works", join_str, "department_id", departmentId)
+            print(data)
+            collection = TypeOfWorksList.model_validate(data)
+            
+            new_list = collection.model_dump()
+            
         if data == [] or data == None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 

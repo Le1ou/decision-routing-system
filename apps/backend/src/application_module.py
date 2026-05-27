@@ -300,6 +300,11 @@ class PgDbOperator:
         except:
            print("getting row error for table " + table + " with identifier" + identifierName)
            return None
+    
+    def getRowsFromTableWithJoin(self, table:str, joinStatement:str, identifierName, identifierValue, rowfactory = dict_row):
+        data = self.getAllRowsFromTableWithJoin(table, joinStatement, rowfactory)
+        filtered_data = [item for item in data if str(item[identifierName]) == identifierValue]
+        return filtered_data
         
     def getAllRowsFromTableWithJoin(self, table:str, joinStatement:str, rowfactory = dict_row):
 
