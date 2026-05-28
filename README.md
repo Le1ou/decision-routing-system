@@ -36,13 +36,18 @@ DB_NAME=app_db
 BACKEND_PORT=3000
 VITE_API_URL=http://localhost:3000
 
-## Запуск базы данных
+## Запустить инфраструктуру (DB + Backend)
 
+docker compose -f infra/compose/docker-compose.local.yml up --build
+или
 docker compose -f infra/compose/docker-compose.local.yml up -d
 
-База данных доступна по параметрам:
-Host: localhost
-Port: 5432
+## Проверить backend
+
+http://localhost:3000/health
+
+Ожидаемый ответ: 
+{"status": "ok"}
 
 ## Остановка контейнеров:
 
@@ -51,6 +56,18 @@ docker compose -f infra/compose/docker-compose.local.yml down
 ## Удаление вместе с данными:
 
 docker compose -f infra/compose/docker-compose.local.yml down -v
+
+## Frontend (локальный запуск)
+
+Frontend запускается отдельно:
+
+cd apps/frontend
+npm install
+npm run dev
+
+URL backend для frontend:
+
+VITE_API_URL=http://localhost:3000
 
 ## Подключение к базе данных
 
@@ -101,7 +118,7 @@ COPY . .
 3. Открываем порт
 EXPOSE 3000
 4. Запуск приложения
-CMD ["python", "src/application_module.py"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "3000"]
 
 Порядок важен
 зависимости меняются редко → кешируются
@@ -120,3 +137,42 @@ RUN pip install --no-cache-dir -r requirements.txt
 fastapi==0.110.0
 uvicorn==0.29.0
 psycopg2-binary==2.9.9
+
+## CI/CD
+
+CI запускается:
+
+на pull request
+на push в develop
+
+Проверяет:
+
+установку backend dependencies
+компиляцию backend кода
+сборку frontend
+валидность docker-compose конфигурации
+
+## Healthchecks
+
+Backend:
+
+GET /health
+
+PostgreSQL:
+managed via pg_isready
+
+## Важные особенности
+SQL init выполняется только при первом создании volume
+Для пересоздания БД используйте down -v
+Backend использует переменные окружения из .env
+DB_HOST должен быть db внутри Docker
+
+## Требования
+Docker Desktop
+Docker Compose
+Node.js 20+ (для frontend dev)
+
+## Проверка установки 
+docker --version
+docker compose version
+node -v

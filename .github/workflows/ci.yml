@@ -3,38 +3,58 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches:
+      - develop
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Backend (Python)
+      # Python / Backend
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install backend deps
+      - name: Install backend dependencies
         run: |
-          if [ -f apps/backend/requirements.txt ]; then
-            pip install -r apps/backend/requirements.txt
-          fi
+          pip install -r apps/backend/requirements.txt
 
-      # Frontend (Node)
+      - name: Check backend syntax
+        run: |
+          PYTHONPYCACHEPREFIX=/tmp/pycache python -m compileall apps/backend/src
+
+      # Node / Frontend
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
-      - name: Install frontend deps
+      - name: Install frontend dependencies
+        working-directory: apps/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: apps/frontend
+        run: npm run build
+
+      # Docker Compose validation
+      - name: Validate Docker Compose config
         run: |
-          if [ -f apps/frontend/package.json ]; then
-            cd apps/frontend
-            npm install
-            npm run build
-          fi
+          docker compose \
+            --env-file .env.example \
+            -f infra/compose/docker-compose.local.yml \
+            config
+
+      # Docker build checks
+      - name: Build backend image
+        run: |
+          docker build -t decision-routing-backend ./apps/backend
+
+      - name: Build frontend image
+        run: |
+          docker build -t decision-routing-frontend ./apps/frontend

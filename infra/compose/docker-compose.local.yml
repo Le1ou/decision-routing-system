@@ -18,14 +18,28 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ../../apps/backend/sql_decision-routing.sql:/docker-entrypoint-initdb.d/001_init.sql
 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build: 
       context: ../../apps/backend
     ports:
-      - "3000:3000"
+      - "${BACKEND_PORT:-3000}:3000"
     container_name: project_backend
+    env_file:
+      - .env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # frontend:
   #   build: ../../apps/frontend
