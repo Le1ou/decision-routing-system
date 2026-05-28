@@ -1,0 +1,1282 @@
+openapi: 3.0.3
+info:
+  title: Decision Routing System API
+  version: 0.1.0
+  description: >
+    Контракт backend API для подключения текущего frontend к реальным данным.
+    Все защищенные методы используют Basic Auth. Backend определяет текущего
+    пользователя по заголовку Authorization и возвращает только доступные ему данные.
+servers:
+  - url: http://localhost:3000
+    description: Локальный backend
+security:
+  - basicAuth: []
+tags:
+  - name: Auth
+    description: Текущий пользователь
+  - name: Applications
+    description: Производственные заявки
+  - name: Directories
+    description: Отделы, сотрудники, должности и виды работ
+  - name: Priority
+    description: Настройки расчета приоритета
+  - name: Notifications
+    description: Уведомления текущего пользователя
+  - name: Reports
+    description: Отчеты и XLS-выгрузка
+
+paths:
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Получить текущего пользователя
+      description: Возвращает пользователя, найденного через Basic Auth/Active Directory, его роль, отдел, должность и права frontend.
+      responses:
+        "200":
+          description: Текущий пользователь
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUserResponse"
+              example:
+                user:
+                  id: "user-manager"
+                  login: "manager"
+                  fullName: "Орлова Мария Викторовна"
+                  role: "manager"
+                  departmentId: "it"
+                  postName: "Руководитель"
+                  positionId: "grade-chief"
+                  isActive: true
+                permissions:
+                  canManageEmployees: true
+                  canManageWorkTypes: true
+                  canManagePrioritySettings: true
+                  canViewReports: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /applications:
+    get:
+      tags: [Applications]
+      summary: Получить список заявок
+      description: >
+        Без query-параметров backend возвращает список заявок по умолчанию для текущего пользователя.
+        Видимость заявок определяется ролью пользователя на backend.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationStatusQuery"
+        - $ref: "#/components/parameters/ApplicationPriorityQuery"
+        - name: createdByMe
+          in: query
+          schema:
+            type: boolean
+        - name: assignedToMe
+          in: query
+          schema:
+            type: boolean
+        - name: delegatedToMyDepartment
+          in: query
+          schema:
+            type: boolean
+        - name: executorName
+          in: query
+          schema:
+            type: string
+        - name: applicationId
+          in: query
+          schema:
+            type: string
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [priority, status, createdAt, finishedAt]
+            default: priority
+        - name: sortDirection
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Список заявок
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Applications]
+      summary: Создать заявку
+      description: >
+        Создает заявку от имени текущего пользователя. Приоритет и статус рассчитывает backend.
+        Вложения загружаются отдельным запросом, если frontend реально отправляет файлы.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApplicationPayload"
+      responses:
+        "201":
+          description: Заявка создана
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateApplicationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /applications/{applicationId}:
+    get:
+      tags: [Applications]
+      summary: Получить карточку заявки
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      responses:
+        "200":
+          description: Детальная карточка заявки
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /applications/{applicationId}/actions:
+    post:
+      tags: [Applications]
+      summary: Выполнить действие над заявкой
+      description: >
+        Единая точка для действий из карточки заявки. Backend проверяет роль пользователя,
+        текущий статус заявки и обязательность полей для конкретного action. Исполнитель не
+        выполняет финальное `reject`: если он не справляется, заявка возвращается в `new`
+        с признаком `isUnfinished`.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplicationActionPayload"
+            examples:
+              assignExecutor:
+                value:
+                  action: assignExecutor
+                  executorId: "user-executor"
+                  comment: "Назначено вручную руководителем."
+              delegateExternal:
+                value:
+                  action: delegateExternal
+                  departmentId: "oge"
+                  comment: "Работы относятся к ОГЭ."
+              complete:
+                value:
+                  action: complete
+                  resultText: "Работы выполнены, доступ проверен."
+              changeWorkType:
+                value:
+                  action: changeWorkType
+                  workTypeId: "it-server-setup"
+      responses:
+        "204":
+          description: Действие выполнено. Если frontend нужно обновить карточку, он делает GET /applications/{applicationId}.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /applications/{applicationId}/attachments:
+    post:
+      tags: [Applications]
+      summary: Загрузить вложения к заявке
+      description: >
+        Frontend отправляет файлы на backend через multipart/form-data. Backend проверяет права,
+        загружает файлы в S3 и сохраняет метаданные вложений в БД. Frontend не работает с S3 напрямую.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "201":
+          description: Вложения загружены
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentUploadResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /departments:
+    get:
+      tags: [Directories]
+      summary: Получить отделы
+      responses:
+        "200":
+          description: Список отделов
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Department"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /employees:
+    get:
+      tags: [Directories]
+      summary: Получить сотрудников, подключенных к системе
+      parameters:
+        - name: departmentId
+          in: query
+          schema:
+            type: string
+        - name: isActive
+          in: query
+          schema:
+            type: boolean
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserRole"
+      responses:
+        "200":
+          description: Список сотрудников
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Directories]
+      summary: Добавить AD-пользователя в систему как исполнителя
+      description: >
+        Не создает человека в AD. Backend создает локальную запись участия в системе
+        для уже существующего AD-пользователя. Роль нового сотрудника - executor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEmployeePayload"
+      responses:
+        "201":
+          description: Сотрудник создан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /employees/{employeeId}:
+    patch:
+      tags: [Directories]
+      summary: Изменить позицию сотрудника или участие в распределении
+      parameters:
+        - $ref: "#/components/parameters/EmployeeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEmployeePayload"
+      responses:
+        "204":
+          description: Сотрудник обновлен
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /positions:
+    get:
+      tags: [Directories]
+      summary: Получить позиции
+      description: Позиции - это грейды из `post_grade`, которые руководитель назначает сотрудникам.
+      responses:
+        "200":
+          description: Список позиций
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Position"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /ad/users:
+    get:
+      tags: [Directories]
+      summary: Найти пользователей AD для добавления в систему
+      parameters:
+        - name: query
+          in: query
+          schema:
+            type: string
+        - name: departmentId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Пользователи AD, которых можно добавить в систему
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /work-types:
+    get:
+      tags: [Directories]
+      summary: Получить виды работ
+      parameters:
+        - name: departmentId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Список видов работ
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkType"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Directories]
+      summary: Создать вид работ
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkTypePayload"
+      responses:
+        "201":
+          description: Вид работ создан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /work-types/{workTypeId}:
+    delete:
+      tags: [Directories]
+      summary: Удалить вид работ
+      parameters:
+        - $ref: "#/components/parameters/WorkTypeId"
+      responses:
+        "204":
+          description: Вид работ удален
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /priority-settings:
+    get:
+      tags: [Priority]
+      summary: Получить коэффициенты расчета приоритета
+      responses:
+        "200":
+          description: Настройки приоритета
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrioritySettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [Priority]
+      summary: Сохранить коэффициенты расчета приоритета
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrioritySettings"
+      responses:
+        "200":
+          description: Настройки сохранены
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrioritySettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Получить уведомления текущего пользователя
+      description: >
+        Текущий контракт рассчитан на pull-модель: backend создает уведомления при событиях системы,
+        frontend периодически запрашивает список или обновляет его после действий пользователя.
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Список уведомлений
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, unreadCount]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+                  unreadCount:
+                    type: integer
+                    minimum: 0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /notifications/{notificationId}/read:
+    post:
+      tags: [Notifications]
+      summary: Отметить уведомление прочитанным
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "204":
+          description: Уведомление отмечено прочитанным
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Отметить все уведомления текущего пользователя прочитанными
+      responses:
+        "204":
+          description: Все уведомления текущего пользователя отмечены прочитанными
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /reports/applications:
+    get:
+      tags: [Reports]
+      summary: Сформировать предварительный отчет по заявкам
+      description: >
+        Возвращает JSON-данные для предпросмотра отчета. Фильтры передаются query-параметрами,
+        потому что формирование отчета не меняет состояние backend.
+      parameters:
+        - $ref: "#/components/parameters/CreatedFrom"
+        - $ref: "#/components/parameters/CreatedTo"
+        - $ref: "#/components/parameters/FinishedFrom"
+        - $ref: "#/components/parameters/FinishedTo"
+        - $ref: "#/components/parameters/ApplicationStatusQuery"
+        - name: executorId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Данные для предварительного просмотра отчета
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /reports/applications.xls:
+    get:
+      tags: [Reports]
+      summary: Скачать XLS-отчет по заявкам
+      description: >
+        Возвращает готовый XLS-файл по тем же фильтрам, что и предпросмотр отчета.
+        Генерация файла выполняется на backend.
+      parameters:
+        - $ref: "#/components/parameters/CreatedFrom"
+        - $ref: "#/components/parameters/CreatedTo"
+        - $ref: "#/components/parameters/FinishedFrom"
+        - $ref: "#/components/parameters/FinishedTo"
+        - $ref: "#/components/parameters/ApplicationStatusQuery"
+        - name: executorId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: XLS-файл
+          content:
+            application/vnd.ms-excel:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+
+  parameters:
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      schema:
+        type: string
+    EmployeeId:
+      name: employeeId
+      in: path
+      required: true
+      schema:
+        type: string
+    WorkTypeId:
+      name: workTypeId
+      in: path
+      required: true
+      schema:
+        type: string
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema:
+        type: string
+    ApplicationStatusQuery:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/ApplicationStatus"
+    ApplicationPriorityQuery:
+      name: priority
+      in: query
+      schema:
+        $ref: "#/components/schemas/ApplicationPriority"
+    CreatedFrom:
+      name: createdFrom
+      in: query
+      schema:
+        type: string
+        format: date
+    CreatedTo:
+      name: createdTo
+      in: query
+      schema:
+        type: string
+        format: date
+    FinishedFrom:
+      name: finishedFrom
+      in: query
+      schema:
+        type: string
+        format: date
+    FinishedTo:
+      name: finishedTo
+      in: query
+      schema:
+        type: string
+        format: date
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+    Unauthorized:
+      description: Не передан или не принят Basic Auth
+    Forbidden:
+      description: У пользователя нет прав на действие или объект
+    NotFound:
+      description: Объект не найден
+    ValidationError:
+      description: Ошибка валидации полей
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorResponse"
+    Conflict:
+      description: Конфликт состояния или бизнес-правила
+
+  schemas:
+    ValidationErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: validation_error
+        message:
+          type: string
+          example: Ошибка валидации.
+        fields:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+                  field:
+                    type: string
+                    example: name
+                  message:
+                    type: string
+                    example: Укажите название заявки.
+
+    IdResponse:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+
+    UserRole:
+      type: string
+      enum: [author, executor, manager]
+
+    ApplicationStatus:
+      type: string
+      enum: [new, assigned, delegated, inProgress, rejected, completed]
+
+    ApplicationPriority:
+      type: string
+      enum: [low, medium, high, critical]
+
+    Complexity:
+      type: string
+      enum: [easy, medium, hard, critical]
+
+    ApplicationAction:
+      type: string
+      enum:
+        - editDescription
+        - assignExecutor
+        - startWork
+        - reject
+        - complete
+        - delegateInternal
+        - delegateExternal
+        - returnToNew
+        - confirmExternalDelegation
+        - declineExternalDelegation
+        - changeWorkType
+
+    CurrentUserResponse:
+      type: object
+      required: [user, permissions]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        permissions:
+          $ref: "#/components/schemas/UserPermissions"
+
+    UserPermissions:
+      type: object
+      required: [canManageEmployees, canManageWorkTypes, canManagePrioritySettings, canViewReports]
+      properties:
+        canManageEmployees:
+          type: boolean
+        canManageWorkTypes:
+          type: boolean
+        canManagePrioritySettings:
+          type: boolean
+        canViewReports:
+          type: boolean
+
+    User:
+      type: object
+      required: [id, login, fullName, role, departmentId, postName, positionId, isActive]
+      properties:
+        id:
+          type: string
+        login:
+          type: string
+        fullName:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        departmentId:
+          type: string
+        postName:
+          type: string
+          description: Должность сотрудника из AD.
+        positionId:
+          type: string
+          description: Идентификатор записи `post_grade`; в русском UI называется "позиция".
+        isActive:
+          type: boolean
+
+    Department:
+      type: object
+      required:
+        - id
+        - name
+        - value
+        - delegatedToSameDepartment
+        - employeeApplicationDelayMinutes
+        - deadlineNotificationRatio
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        value:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        delegatedToSameDepartment:
+          type: boolean
+        employeeApplicationDelayMinutes:
+          type: integer
+          minimum: 0
+        deadlineNotificationRatio:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+
+    Position:
+      type: object
+      description: Позиция сотрудника; соответствует записи `post_grade` в SQL.
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    AdUser:
+      type: object
+      required: [adUserId, login, fullName, departmentId, postName]
+      properties:
+        adUserId:
+          type: string
+        login:
+          type: string
+        fullName:
+          type: string
+        departmentId:
+          type: string
+        postName:
+          type: string
+          description: Должность пользователя из AD.
+
+    WorkType:
+      type: object
+      required: [id, name, departmentId, complexity, allowedPositionIds]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        departmentId:
+          type: string
+        complexity:
+          $ref: "#/components/schemas/Complexity"
+        allowedPositionIds:
+          type: array
+          description: Допустимые позиции `post_grade` для выполнения вида работ.
+          items:
+            type: string
+
+    Attachment:
+      type: object
+      required: [id, applicationId, name, type]
+      properties:
+        id:
+          type: string
+        applicationId:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [photo, document]
+        url:
+          type: string
+          format: uri
+
+    Delegation:
+      type: object
+      required:
+        - id
+        - applicationId
+        - delegatedByDepartmentId
+        - delegatedFromDepartmentId
+        - delegatedToDepartmentId
+        - comment
+        - createdAt
+      properties:
+        id:
+          type: string
+        applicationId:
+          type: string
+        delegatedByDepartmentId:
+          type: string
+        delegatedFromDepartmentId:
+          type: string
+        delegatedToDepartmentId:
+          type: string
+        comment:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        decision:
+          type: string
+          enum: [confirmed, declined]
+        decidedAt:
+          type: string
+          format: date-time
+
+    ApplicationListItem:
+      type: object
+      required:
+        - id
+        - name
+        - status
+        - priority
+        - createdAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ApplicationStatus"
+        priority:
+          $ref: "#/components/schemas/ApplicationPriority"
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+
+    Application:
+      allOf:
+        - $ref: "#/components/schemas/ApplicationListItem"
+        - type: object
+          required:
+            - description
+            - departmentId
+            - workTypeId
+            - authorId
+            - isUnfinished
+            - deadlineAt
+            - updatedAt
+          properties:
+            description:
+              type: string
+              maxLength: 1000
+            departmentId:
+              type: string
+            workTypeId:
+              type: string
+            authorId:
+              type: string
+            executorId:
+              type: string
+            previousExecutorId:
+              type: string
+            executorComment:
+              type: string
+            managerComment:
+              type: string
+            resultText:
+              type: string
+            delegationId:
+              type: string
+            delegatedFromDepartmentId:
+              type: string
+              description: Исходный отдел при межотдельном делегировании.
+            delegatedToDepartmentId:
+              type: string
+              description: Целевой отдел при межотдельном делегировании.
+            assignedComplexity:
+              $ref: "#/components/schemas/Complexity"
+            assignedAt:
+              type: string
+              format: date-time
+            isUnfinished:
+              type: boolean
+            deadlineAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            startedAt:
+              type: string
+              format: date-time
+            closedById:
+              type: string
+            availableActions:
+              type: array
+              description: Действия, которые текущий пользователь может выполнить с заявкой.
+              items:
+                $ref: "#/components/schemas/ApplicationAction"
+
+    ApplicationDetail:
+      allOf:
+        - $ref: "#/components/schemas/Application"
+        - type: object
+          required: [attachments]
+          properties:
+            attachments:
+              type: array
+              items:
+                $ref: "#/components/schemas/Attachment"
+            delegation:
+              $ref: "#/components/schemas/Delegation"
+            author:
+              $ref: "#/components/schemas/User"
+            executor:
+              $ref: "#/components/schemas/User"
+            workType:
+              $ref: "#/components/schemas/WorkType"
+            department:
+              $ref: "#/components/schemas/Department"
+
+    ApplicationListResponse:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApplicationListItem"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    ApplicationDetailResponse:
+      type: object
+      required: [application]
+      properties:
+        application:
+          $ref: "#/components/schemas/ApplicationDetail"
+
+    Pagination:
+      type: object
+      required: [page, pageSize, total]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+
+    CreateApplicationPayload:
+      type: object
+      required: [name, departmentId, workTypeId, deadlineAt, description]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        departmentId:
+          type: string
+        workTypeId:
+          type: string
+        deadlineAt:
+          type: string
+          format: date-time
+        description:
+          type: string
+          minLength: 1
+          maxLength: 1000
+
+    CreateApplicationResponse:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+
+    AttachmentUploadResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/IdResponse"
+
+    ApplicationActionPayload:
+      type: object
+      required: [action]
+      properties:
+        action:
+          $ref: "#/components/schemas/ApplicationAction"
+        executorId:
+          type: string
+          description: Обязательно для assignExecutor.
+        departmentId:
+          type: string
+          description: Обязательно для delegateExternal.
+        workTypeId:
+          type: string
+          description: Обязательно для changeWorkType.
+        comment:
+          type: string
+          description: Пояснение для истории заявки.
+        complexity:
+          $ref: "#/components/schemas/Complexity"
+        resultText:
+          type: string
+          description: Обязательно для complete.
+        description:
+          type: string
+          maxLength: 1000
+          description: Новое описание для editDescription.
+
+    CreateEmployeePayload:
+      type: object
+      required: [adUserId, positionId, isActive]
+      properties:
+        adUserId:
+          type: string
+          description: Идентификатор пользователя в AD.
+        positionId:
+          type: string
+          description: Идентификатор записи `post_grade`.
+        isActive:
+          type: boolean
+
+    UpdateEmployeePayload:
+      type: object
+      minProperties: 1
+      properties:
+        positionId:
+          type: string
+          description: Идентификатор записи `post_grade`.
+        isActive:
+          type: boolean
+
+    CreateWorkTypePayload:
+      type: object
+      required: [name, departmentId, complexity]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        departmentId:
+          type: string
+        complexity:
+          $ref: "#/components/schemas/Complexity"
+
+    PrioritySettings:
+      type: object
+      required: [department, position, workType, deadline, managerAuthor]
+      properties:
+        department:
+          type: number
+          minimum: 0
+          maximum: 1
+        position:
+          type: number
+          minimum: 0
+          maximum: 1
+        workType:
+          type: number
+          minimum: 0
+          maximum: 1
+        deadline:
+          type: number
+          minimum: 0
+          maximum: 1
+        managerAuthor:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    Notification:
+      type: object
+      required: [id, text, createdAt, isRead]
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        applicationId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        isRead:
+          type: boolean
+
+    ApplicationReportRow:
+      type: object
+      required: [applicationId, name, status, priority, createdAt]
+      properties:
+        applicationId:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ApplicationStatus"
+        priority:
+          $ref: "#/components/schemas/ApplicationPriority"
+        executorId:
+          type: string
+        executorName:
+          type: string
+        departmentName:
+          type: string
+        workTypeName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+
+    ApplicationReportResponse:
+      type: object
+      required: [items, summary]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApplicationReportRow"
+        summary:
+          type: object
+          required: [total, completed, inProgressOrAssigned]
+          properties:
+            total:
+              type: integer
+              minimum: 0
+            completed:
+              type: integer
+              minimum: 0
+            inProgressOrAssigned:
+              type: integer
+              minimum: 0
