@@ -1,0 +1,102 @@
+.button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.button--primary {
+  background: #1f6feb;
+  color: #ffffff;
+}
+
+.button--secondary {
+  background: #ffffff;
+  border-color: #cfd6e4;
+  color: #1f2a44;
+}
+
+.button--ghost {
+  background: transparent;
+  color: #33415f;
+}
+
+.badge {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 26px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.badge--neutral {
+  background: #edf1f7;
+  color: #344054;
+}
+
+.badge--success {
+  background: #e7f7ee;
+  color: #087443;
+}
+
+.badge--warning {
+  background: #fff4d6;
+  color: #8a5a00;
+}
+
+.badge--danger {
+  background: #ffe8e5;
+  color: #b42318;
+}
+
+.badge--info {
+  background: #e6f0ff;
+  color: #1f6feb;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field__label {
+  color: #33415f;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid #cfd6e4;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #172033;
+  padding: 10px 12px;
+}
+
+.field textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.field__error {
+  color: #b42318;
+  font-size: 13px;
+}
