@@ -12,6 +12,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Body
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import os
 
 configPath = Path(__file__).parent.parent / "config.json"
 global configData
@@ -66,7 +67,14 @@ class PgDbOperator:
     deadline_notification = configData["dep_configs"]["deadline_notification"]
     def __init__(self, user, password):
         try:
-            conn_info = "dbname=app_db user=" + user + " password=" + password
+            #conn_info = "dbname=app_db user=" + user + " password=" + password
+            conn_info = (
+                f"dbname={os.getenv('DB_NAME')} "
+                f"user={user} "
+                f"password={password} "
+                f"host={os.getenv('DB_HOST')} "
+                f"port={os.getenv('DB_PORT')}"
+            )
             self.pool = psycopg_pool.ConnectionPool(conninfo=conn_info, min_size=1, max_size= 10)
             atexit.register(self.pool.close)
             self.pool.wait()

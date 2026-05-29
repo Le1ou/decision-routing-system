@@ -16,21 +16,57 @@ services:
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ../../apps/backend/sql_decision-routing.sql:/docker-entrypoint-initdb.d/001_init.sql
 
-  # backend:
-  #   build: ../../apps/backend
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     - db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-  # frontend:
-  #   build: ../../apps/frontend
-  #   ports:
-  #     - "5173:5173"
-  #   depends_on:
-  #     - backend
+  backend:
+    build: 
+      context: ../../apps/backend
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    container_name: project_backend
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ../../apps/frontend
+
+    container_name: project_frontend
+
+    #env_file:
+      #- ../../.env
+
+    environment:
+      VITE_API_URL: ${VITE_API_URL}
+
+    ports:
+      - "5173:5173"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    volumes:
+      - ../../apps/frontend:/app
+      - /app/node_modules
 
 volumes:
   postgres_data:
-  
