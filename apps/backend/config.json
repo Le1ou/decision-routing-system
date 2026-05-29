@@ -1,22 +1,126 @@
 {
-    "dep_configs":{
-        "empl_appl_delay": 360,
-        "delegated_to_same_dep": false,
-        "deadline_notification": 25      
+  "dep_configs": {
+    "empl_appl_delay": 360,
+    "delegated_to_same_dep": false,
+    "deadline_notification": 25
+  },
+  "AD_auth": {
+    "server_adress": "your_ad_server.yourdomain.local",
+    "Domain": "yourdomain"
+  },
+  "MOCK_USERS_DB": {
+    "orlova_m": {
+      "password": "Manager!1",
+      "pgRoles": [
+        "IT",
+        "IT_lead",
+        "canCreateApplications",
+        "canExecuteApplications",
+        "canManageDepartment",
+        "canManageEmployees",
+        "canManageWorkTypes",
+        "canManagePrioritySettings",
+        "canViewReports"
+      ],
+      "employee_id": 1,
+      "roles": ["author", "executor", "manager"],
+      "is_active": true
     },
-    "AD_auth":{
-        "server_adress":"your_ad_server.yourdomain.local",
-        "Domain":"yourdomain"
+    "ivanov_i": {
+      "password": "SecretPassword!1",
+      "pgRoles": [
+        "IT",
+        "canExecuteApplications"
+      ],
+      "employee_id": 2,
+      "roles": ["executor"],
+      "is_active": true
     },
-    "MOCK_USERS_DB": {
-        "ivanov_i": {
-            "password": "SecretPassword!1",
-            "roles": ["IT", "IT_lead"]
-        },
-        "petrov_p": {
-            "password": "Pa$$w0rd",
-            "roles": ["JANITOR"]
-        }
+    "petrov_p": {
+      "password": "Pa$$w0rd",
+      "pgRoles": [
+        "IT",
+        "canExecuteApplications"
+      ],
+      "employee_id": 3,
+      "roles": ["executor"],
+      "is_active": true
     },
-    "ROLES":["JANITOR", "IT", "IT_lead"]
+    "sidorova_a": {
+      "password": "Sidorova!3",
+      "pgRoles": [
+        "OGE",
+        "canExecuteApplications"
+      ],
+      "employee_id": 4,
+      "roles": ["executor"],
+      "is_active": true
+    },
+    "kozlov_d": {
+      "password": "Kozlov!4",
+      "pgRoles": [
+        "SEC",
+        "canExecuteApplications"
+      ],
+      "employee_id": 5,
+      "roles": ["executor"],
+      "is_active": true
+    },
+    "novikova_e": {
+      "password": "Novikova!5",
+      "pgRoles": [
+        "HR",
+        "canCreateApplications"
+      ],
+      "employee_id": 6,
+      "roles": ["author"],
+      "is_active": true
+    },
+    "fedorov_a": {
+      "password": "Fedorov!6",
+      "pgRoles": [
+        "IT",
+        "canCreateApplications"
+      ],
+      "employee_id": 7,
+      "roles": ["author"],
+      "is_active": true
+    }
+  },
+  "MOCK_AD_USERS": {
+    "1001": {
+      "login": "smirnova_t",
+      "fio": "Смирнова Татьяна Владимировна",
+      "department_id": 1,
+      "post_name": "Инженер"
+    },
+    "1002": {
+      "login": "titov_k",
+      "fio": "Титов Кирилл Романович",
+      "department_id": 1,
+      "post_name": "Специалист"
+    },
+    "1003": {
+      "login": "morozov_s",
+      "fio": "Морозов Сергей Игоревич",
+      "department_id": 3,
+      "post_name": "Старший инженер"
+    }
+  },
+  "ROLES": [
+    "IT",
+    "IT_lead",
+    "OGE",
+    "SEC",
+    "HR"
+  ],
+  "PERMISSIONS": [
+    "canCreateApplications",
+    "canExecuteApplications",
+    "canManageDepartment",
+    "canManageEmployees",
+    "canManageWorkTypes",
+    "canManagePrioritySettings",
+    "canViewReports"
+  ]
 }
