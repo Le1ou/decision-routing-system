@@ -1,19 +1,18 @@
 import { useMemo, useState } from "react";
 
-import { departments, mockUsers, positions, applications, workTypes } from "@mocks/mockData";
+import { departments, mockUsers, positions, applications } from "@mocks/mockData";
 import type { ApplicationPriority } from "@shared/model/domain";
 import { priorityLabels } from "@shared/model/labels";
 import { Button } from "@shared/ui";
 
 import "./PrioritySettingsPage.css";
 
-type PrioritySettingKey = "department" | "position" | "workType" | "deadline" | "managerAuthor";
+type PrioritySettingKey = "department" | "position" | "deadline" | "managerAuthor";
 type PrioritySettings = Record<PrioritySettingKey, number>;
 
 const initialSettings: PrioritySettings = {
   department: 0.25,
   position: 0.15,
-  workType: 0.25,
   deadline: 0.25,
   managerAuthor: 0.1,
 };
@@ -27,10 +26,6 @@ const settingLabels: Record<PrioritySettingKey, { title: string; hint: string }>
     title: "Должность автора",
     hint: "Повышает вес заявок от руководящих или ключевых должностей.",
   },
-  workType: {
-    title: "Вид работ",
-    hint: "Использует сложность выбранного вида работ.",
-  },
   deadline: {
     title: "Срок исполнения",
     hint: "Чем ближе срок, тем выше предварительная оценка.",
@@ -39,13 +34,6 @@ const settingLabels: Record<PrioritySettingKey, { title: string; hint: string }>
     title: "Руководитель как автор",
     hint: "Дополнительный вес, если заявку создал руководитель.",
   },
-};
-
-const complexityValues = {
-  easy: 0.25,
-  medium: 0.5,
-  hard: 0.75,
-  critical: 1,
 };
 
 export function PrioritySettingsPage() {
@@ -193,11 +181,9 @@ function calculatePriorityPreview(applicationId: string, settings: PrioritySetti
   const author = mockUsers.find((user) => user.id === application.authorId);
   const department = departments.find((item) => item.id === author?.departmentId);
   const position = positions.find((item) => item.id === author?.positionId);
-  const workType = workTypes.find((item) => item.id === application.workTypeId);
   const factorValues = {
     department: department?.value ?? 0,
     position: position?.isTop ? 1 : 0.45,
-    workType: workType ? complexityValues[workType.complexity] : 0,
     deadline: getDeadlinePressure(application.deadlineAt),
     managerAuthor: author?.role === "manager" ? 1 : 0,
   };
@@ -215,7 +201,6 @@ function calculatePriorityPreview(applicationId: string, settings: PrioritySetti
     factors: [
       { label: "Отдел", value: factorValues.department },
       { label: "Должность", value: factorValues.position },
-      { label: "Вид работ", value: factorValues.workType },
       { label: "Срок", value: factorValues.deadline },
       { label: "Автор-руководитель", value: factorValues.managerAuthor },
     ],
