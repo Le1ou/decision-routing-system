@@ -2,6 +2,7 @@
 -- Please log an issue at https://github.com/pgadmin-org/pgadmin4/issues/new/choose if you find any bugs, including reproduction steps.
 BEGIN;
 
+
 CREATE TABLE IF NOT EXISTS public.application
 (
     application_id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
@@ -22,6 +23,10 @@ CREATE TABLE IF NOT EXISTS public.application
     updated_at timestamp with time zone,
     finished_at timestamp with time zone,
     result_text text,
+    executor_comment text,
+    manager_comment text,
+    previous_executor_id integer,
+    closed_by_id integer,
     PRIMARY KEY (application_id)
 );
 
@@ -55,7 +60,10 @@ CREATE TABLE IF NOT EXISTS public.delegated
     delegated_from text,
     delegated_to text,
     comment text,
-    created_at timestamp without time zone,
+    created_at timestamp with time zone,
+    decision text,
+    decided_at timestamp with time zone,
+    application_id integer,
     PRIMARY KEY (delegated_id)
 );
 
@@ -66,7 +74,7 @@ CREATE TABLE IF NOT EXISTS public.department
     value real,
     name text,
     delegated_to_same_dep boolean,
-    empl_appl_delay real,
+    empl_appl_delay integer,
     deadline_notification real,
     PRIMARY KEY (department_id)
 );
@@ -96,6 +104,7 @@ CREATE TABLE IF NOT EXISTS public.employee
     created_at timestamp with time zone,
     updated_at timestamp with time zone,
     deleted_at timestamp with time zone,
+    is_active boolean,
     PRIMARY KEY (employee_id)
 );
 
@@ -146,9 +155,7 @@ CREATE TABLE IF NOT EXISTS public.notification
     employee_id integer,
     is_read boolean,
     application_id integer,
-    PRIMARY KEY (notification_id),
-    UNIQUE (application_id),
-    UNIQUE (employee_id)
+    PRIMARY KEY (notification_id)
 );
 
 CREATE TABLE IF NOT EXISTS public.type_of_work_to_post_grade
@@ -199,7 +206,31 @@ ALTER TABLE IF EXISTS public.application
     NOT VALID;
 
 
+ALTER TABLE IF EXISTS public.application
+    ADD FOREIGN KEY (previous_executor_id)
+    REFERENCES public.employee (employee_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+
+ALTER TABLE IF EXISTS public.application
+    ADD FOREIGN KEY (closed_by_id)
+    REFERENCES public.employee (employee_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+
 ALTER TABLE IF EXISTS public.photo
+    ADD FOREIGN KEY (application_id)
+    REFERENCES public.application (application_id) MATCH SIMPLE
+    ON UPDATE NO ACTION
+    ON DELETE NO ACTION
+    NOT VALID;
+
+
+ALTER TABLE IF EXISTS public.delegated
     ADD FOREIGN KEY (application_id)
     REFERENCES public.application (application_id) MATCH SIMPLE
     ON UPDATE NO ACTION

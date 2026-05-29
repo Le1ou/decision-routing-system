@@ -30,7 +30,7 @@ paths:
     get:
       tags: [Auth]
       summary: Получить текущего пользователя
-      description: Возвращает пользователя, найденного через Basic Auth/Active Directory, его роль, отдел, должность и права frontend.
+      description: Возвращает пользователя, найденного через Basic Auth/Active Directory, его роли, отдел, должность и права frontend.
       responses:
         "200":
           description: Текущий пользователь
@@ -43,12 +43,15 @@ paths:
                   id: "user-manager"
                   login: "manager"
                   fullName: "Орлова Мария Викторовна"
-                  role: "manager"
+                  roles: ["author", "executor", "manager"]
                   departmentId: "it"
                   postName: "Руководитель"
                   positionId: "grade-chief"
                   isActive: true
                 permissions:
+                  canCreateApplications: true
+                  canExecuteApplications: true
+                  canManageDepartment: true
                   canManageEmployees: true
                   canManageWorkTypes: true
                   canManagePrioritySettings: true
@@ -791,8 +794,24 @@ components:
 
     UserPermissions:
       type: object
-      required: [canManageEmployees, canManageWorkTypes, canManagePrioritySettings, canViewReports]
+      required:
+        - canCreateApplications
+        - canExecuteApplications
+        - canManageDepartment
+        - canManageEmployees
+        - canManageWorkTypes
+        - canManagePrioritySettings
+        - canViewReports
       properties:
+        canCreateApplications:
+          type: boolean
+          description: Пользователь может создавать заявки как автор.
+        canExecuteApplications:
+          type: boolean
+          description: Пользователь может быть исполнителем заявок.
+        canManageDepartment:
+          type: boolean
+          description: Пользователь может выполнять руководительские действия в своем отделе.
         canManageEmployees:
           type: boolean
         canManageWorkTypes:
@@ -804,7 +823,7 @@ components:
 
     User:
       type: object
-      required: [id, login, fullName, role, departmentId, postName, positionId, isActive]
+      required: [id, login, fullName, roles, departmentId, postName, positionId, isActive]
       properties:
         id:
           type: string
@@ -812,8 +831,17 @@ components:
           type: string
         fullName:
           type: string
-        role:
-          $ref: "#/components/schemas/UserRole"
+        roles:
+          type: array
+          minItems: 1
+          description: >
+            Системные возможности пользователя: кем он может быть в системе. Один сотрудник
+            может одновременно быть автором, исполнителем и руководителем. Наличие роли
+            `executor` не зависит от текущих активных заявок; оно означает, что сотрудник
+            подключен как потенциальный исполнитель.
+          items:
+            $ref: "#/components/schemas/UserRole"
+          example: ["author", "executor", "manager"]
         departmentId:
           type: string
         postName:
@@ -824,6 +852,9 @@ components:
           description: Идентификатор записи `post_grade`; в русском UI называется "позиция".
         isActive:
           type: boolean
+          description: >
+            Участвует ли сотрудник в распределении новых заявок как исполнитель. Не удаляет
+            роль `executor` из `roles` и не зависит от наличия активных заявок.
 
     Department:
       type: object
@@ -1190,17 +1221,13 @@ components:
 
     PrioritySettings:
       type: object
-      required: [department, position, workType, deadline, managerAuthor]
+      required: [department, position, deadline, managerAuthor]
       properties:
         department:
           type: number
           minimum: 0
           maximum: 1
         position:
-          type: number
-          minimum: 0
-          maximum: 1
-        workType:
           type: number
           minimum: 0
           maximum: 1

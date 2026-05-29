@@ -9,14 +9,20 @@ from pydantic import model_validator
 from typing import Annotated, Literal, Optional
 from datetime import datetime
 import uuid
+import psycopg
 from apps.backend.src.seed import seed_database
 
 # ─────────────────────────── App bootstrap ───────────────────────────
 
 DBController = PgDbOperator("postgres", "postgres")
 DBController.fillDbRolesBasedOnADTest(configData["ROLES"])
+DBController.fillPermissionRoles(configData["PERMISSIONS"])
+with DBController.pool.connection() as _conn:
+    _conn.execute("ALTER TABLE public.employee ADD COLUMN IF NOT EXISTS is_active boolean")
 authObj = ActiveDirectoryAuth()
 seed_database(DBController)
+for _username, _user_cfg in configData["MOCK_USERS_DB"].items():
+    DBController.createUserRole(_username, _user_cfg["password"], _user_cfg["pgRoles"])
 app = FastAPI(title="Decision Routing System API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
@@ -44,16 +50,26 @@ def get_db_user(userData) -> PgDbOperator:
     """Create a per-request DB operator using the authenticated user credentials."""
     DBController.createUserRole(
         userData[0], userData[1],
-        configData["MOCK_USERS_DB"][userData[0]]["roles"]
+        configData["MOCK_USERS_DB"][userData[0]]["pgRoles"]
     )
     return PgDbOperator(userData[0], userData[1])
 
 
 def require_permission(userData, permission: str):
-    """Raise 403 if the mock user lacks the given permission key."""
-    user_cfg = configData["MOCK_USERS_DB"].get(userData[0], {})
-    perms = user_cfg.get("permissions", {})
-    if not perms.get(permission, False):
+    """Raise 403 if the user does not hold the given permission role in the database."""
+    with DBController.pool.connection() as conn:
+        row = conn.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM pg_auth_members m
+                JOIN pg_roles r ON r.oid = m.roleid
+                JOIN pg_roles u ON u.oid = m.member
+                WHERE r.rolname = %s AND u.rolname = %s
+            )
+            """,
+            (permission.lower(), userData[0].lower()),
+        ).fetchone()
+    if not row or not row[0]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Insufficient permissions")
 
@@ -62,6 +78,16 @@ def row_or_404(row, detail="Not found"):
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return row
+
+
+def _raise_for_db_error(e: Exception) -> None:
+    if isinstance(e, psycopg.errors.ForeignKeyViolation):
+        raise HTTPException(status_code=400, detail="Referenced entity does not exist")
+    if isinstance(e, psycopg.errors.UniqueViolation):
+        raise HTTPException(status_code=409, detail="Entity already exists")
+    if isinstance(e, ValueError):
+        raise HTTPException(status_code=422, detail=str(e))
+    raise HTTPException(status_code=500, detail=str(e))
 
 
 def complexity_int_to_str(value) -> str:
@@ -108,16 +134,19 @@ ListOfStrings = Annotated[list[str], BeforeValidator(coerce_str_list)]
 # ── Auth ──
 
 class UserPermissionsOut(BaseModel):
+    canCreateApplications: bool
+    canExecuteApplications: bool
+    canManageDepartment: bool
     canManageEmployees: bool
     canManageWorkTypes: bool
     canManagePrioritySettings: bool
     canViewReports: bool
 
 class UserOut(BaseModel):
-    id: CoercedStr       = Field(validation_alias="employee_id")
-    login: CoercedStr    = Field(validation_alias="login")
-    fullName: CoercedStr = Field(validation_alias="fio")
-    role: str
+    id: CoercedStr        = Field(validation_alias="employee_id")
+    login: CoercedStr     = Field(validation_alias="login")
+    fullName: CoercedStr  = Field(validation_alias="fio")
+    roles: ListOfStrings
     departmentId: CoercedStr = Field(validation_alias="department_id")
     postName: CoercedStr     = Field(validation_alias="post_name")
     positionId: CoercedStr   = Field(validation_alias="post_grade_id")
@@ -255,12 +284,12 @@ class ApplicationDetailOut(ApplicationListItemOut):
     isUnfinished: bool            = Field(validation_alias="is_unfinished")
     deadlineAt: str               = Field(validation_alias="deadline")
     updatedAt: str                = Field(validation_alias="updated_at")
-    executorId: Optional[str]     = Field(default=None, validation_alias="executor_id")
-    executorComment: Optional[str]= Field(default=None, validation_alias="executor_comment")
-    managerComment: Optional[str] = Field(default=None, validation_alias="manager_comment")
-    resultText: Optional[str]     = Field(default=None, validation_alias="result_text")
-    delegationId: Optional[str]   = Field(default=None, validation_alias="delegated_id")
-    assignedComplexity: Optional[str] = Field(default=None, validation_alias="empl_assigned_complexity")
+    executorId: Optional[CoercedStr]  = Field(default=None, validation_alias="executor_id")
+    executorComment: Optional[str]   = Field(default=None, validation_alias="executor_comment")
+    managerComment: Optional[str]    = Field(default=None, validation_alias="manager_comment")
+    resultText: Optional[str]        = Field(default=None, validation_alias="result_text")
+    delegationId: Optional[CoercedStr] = Field(default=None, validation_alias="delegated_id")
+    assignedComplexity: Optional[CoercedStr] = Field(default=None, validation_alias="empl_assigned_complexity")
     assignedAt: Optional[str]     = Field(default=None, validation_alias="executor_at")
     startedAt: Optional[str]      = Field(default=None, validation_alias="work_at")
     availableActions: list[str]   = Field(default_factory=list)
@@ -294,7 +323,7 @@ class CreateApplicationPayload(BaseModel):
     name: str
     departmentId: str
     workTypeId: str
-    deadlineAt: str
+    deadlineAt: datetime
     description: str = Field(max_length=1000)
 
 class ApplicationActionPayload(BaseModel):
@@ -345,7 +374,7 @@ class ApplicationReportRowOut(BaseModel):
     status: str                   = Field(validation_alias="status_name")
     priority: str                 = Field(validation_alias="priority_name")
     createdAt: str                = Field(validation_alias="created_at")
-    executorId: Optional[str]     = Field(default=None, validation_alias="executor_id")
+    executorId: Optional[CoercedStr] = Field(default=None, validation_alias="executor_id")
     executorName: Optional[str]   = Field(default=None, validation_alias="executor_name")
     departmentName: Optional[str] = Field(default=None, validation_alias="department_name")
     workTypeName: Optional[str]   = Field(default=None, validation_alias="work_type_name")
@@ -379,9 +408,9 @@ def _available_actions(app_row: dict, user_role: str) -> list[str]:
         elif status_name == "assigned":
             actions += ["assignExecutor", "delegateExternal", "reject"]
         elif status_name == "delegated":
-            actions += ["confirmExternalDelegation", "declineExternalDelegation"]
-        elif status_name in ("inProgress", "assigned"):
-            actions += ["reject"]
+            actions += ["assignExecutor", "confirmExternalDelegation", "declineExternalDelegation"]
+        elif status_name == "inProgress":
+            actions += ["assignExecutor", "reject"]
         elif status_name in ("completed", "rejected"):
             pass
 
@@ -406,7 +435,12 @@ def _resolve_employee_id(db: PgDbOperator, login: str) -> Optional[int]:
 
 
 def _get_user_role(login: str) -> str:
-    return configData["MOCK_USERS_DB"].get(login, {}).get("role", "author")
+    """Return the highest-privilege role a user holds (manager > executor > author)."""
+    roles = configData["MOCK_USERS_DB"].get(login, {}).get("roles", ["author"])
+    for r in ("manager", "executor", "author"):
+        if r in roles:
+            return r
+    return "author"
 
 
 def _build_application_list_query(filters: dict) -> tuple[str, list]:
@@ -514,10 +548,9 @@ def get_current_user(userData=Depends(authObj.authenticate_user_test)):
         row_or_404(rows, "Employee not found")
         row = rows[0]
 
-        # Enrich with login and role from config (not stored in DB)
-        row["login"]     = login
-        row["role"]      = user_cfg.get("role", "author")
-        row["is_active"] = user_cfg.get("is_active", True)
+        # Enrich with login and roles from config (not stored in DB)
+        row["login"]  = login
+        row["roles"]  = user_cfg.get("roles", ["author"])
 
         # Resolve post_name from post_grade → post
         pg_rows = db.getRowFromTable("post_grade", "post_grade_id", row.get("post_grade_id"))
@@ -528,18 +561,27 @@ def get_current_user(userData=Depends(authObj.authenticate_user_test)):
             row["post_name"] = ""
 
         user_out = UserOut.model_validate(row)
-        perms = user_cfg.get("permissions", {
-            "canManageEmployees": False,
-            "canManageWorkTypes": False,
-            "canManagePrioritySettings": False,
-            "canViewReports": False,
-        })
+        perms = {}
+        for perm in configData["PERMISSIONS"]:
+            with DBController.pool.connection() as conn:
+                perm_row = conn.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_auth_members m
+                        JOIN pg_roles r ON r.oid = m.roleid
+                        JOIN pg_roles u ON u.oid = m.member
+                        WHERE r.rolname = %s AND u.rolname = %s
+                    )
+                    """,
+                    (perm.lower(), login.lower()),
+                ).fetchone()
+            perms[perm] = bool(perm_row and perm_row[0])
         return {"user": user_out.model_dump(), "permissions": perms}
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 # ─── Applications ────────────────────────────────────────────────
@@ -624,7 +666,7 @@ def list_applications(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.post("/applications", status_code=201)
@@ -687,12 +729,12 @@ def create_application(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.get("/applications/{applicationId}")
 def get_application(
-    applicationId: str = Path(...),
+    applicationId: int = Path(...),
     userData=Depends(authObj.authenticate_user_test),
 ):
     try:
@@ -763,12 +805,12 @@ def get_application(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.post("/applications/{applicationId}/actions", status_code=204)
 def application_action(
-    applicationId: str = Path(...),
+    applicationId: int = Path(...),
     payload: ApplicationActionPayload = ...,
     userData=Depends(authObj.authenticate_user_test),
 ):
@@ -816,6 +858,16 @@ def application_action(
                 if action == "assignExecutor":
                     if not payload.executorId:
                         raise HTTPException(status_code=400, detail="executorId required")
+                    # Cancel active delegation if the application is currently delegated
+                    if app_row.get("delegated_id"):
+                        cur.execute(
+                            "UPDATE public.delegated SET decision = 'declined', decided_at = %s WHERE delegated_id = %s",
+                            (now, app_row["delegated_id"])
+                        )
+                        cur.execute(
+                            "UPDATE public.application SET delegated_id = NULL, updated_at = %s WHERE application_id = %s",
+                            (now, int(applicationId))
+                        )
                     set_status("assigned")
                     cur.execute(
                         "UPDATE public.application SET executor_at = %s, updated_at = %s WHERE application_id = %s",
@@ -940,12 +992,12 @@ def application_action(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.post("/applications/{applicationId}/attachments", status_code=201)
 async def upload_attachments(
-    applicationId: str = Path(...),
+    applicationId: int = Path(...),
     files: list[UploadFile] = File(...),
     userData=Depends(authObj.authenticate_user_test),
 ):
@@ -975,7 +1027,7 @@ async def upload_attachments(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 # ─── Directories ────────────────────────────────────────────────
@@ -990,7 +1042,7 @@ def get_departments(userData=Depends(authObj.authenticate_user_test)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.get("/employees")
@@ -1018,12 +1070,12 @@ def get_employees(
             if departmentId and str(row.get("department_id")) != departmentId:
                 continue
 
-            is_active = ucfg.get("is_active", True)
+            is_active = row.get("is_active", True)
             if isActive is not None and is_active != isActive:
                 continue
 
-            user_role = ucfg.get("role", "author")
-            if role and user_role != role:
+            user_roles = ucfg.get("roles", ["author"])
+            if role and role not in user_roles:
                 continue
 
             pg_rows   = db.getRowFromTable("post_grade", "post_grade_id", row.get("post_grade_id"))
@@ -1036,7 +1088,7 @@ def get_employees(
                 "id":           str(emp_id),
                 "login":        uname,
                 "fullName":     row.get("fio", ""),
-                "role":         user_role,
+                "roles":        user_roles,
                 "departmentId": str(row.get("department_id", "")),
                 "postName":     post_name,
                 "positionId":   str(row.get("post_grade_id", "")),
@@ -1048,7 +1100,7 @@ def get_employees(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.post("/employees", status_code=201)
@@ -1067,12 +1119,12 @@ def add_employee(
             with conn.cursor(row_factory=dict_row) as cur:
                 emp_id = cur.execute(
                     """
-                    INSERT INTO public.employee (employee_id, post_grade_id, fio, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (employee_id) DO UPDATE SET post_grade_id = EXCLUDED.post_grade_id, updated_at = EXCLUDED.updated_at
+                    INSERT INTO public.employee (employee_id, post_grade_id, fio, created_at, updated_at, is_active)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (employee_id) DO UPDATE SET post_grade_id = EXCLUDED.post_grade_id, updated_at = EXCLUDED.updated_at, is_active = EXCLUDED.is_active
                     RETURNING employee_id
                     """,
-                    (int(payload.adUserId), int(payload.positionId), "AD User", now, now)
+                    (int(payload.adUserId), int(payload.positionId), "AD User", now, now, payload.isActive)
                 ).fetchone()["employee_id"]
 
         return {"id": str(emp_id)}
@@ -1080,13 +1132,13 @@ def add_employee(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.patch("/employees/{employeeId}", status_code=204)
 def update_employee(
     payload: UpdateEmployeePayload,
-    employeeId: str = Path(...),
+    employeeId: int = Path(...),
     userData=Depends(authObj.authenticate_user_test),
 ):
     try:
@@ -1104,14 +1156,18 @@ def update_employee(
                         "UPDATE public.employee SET post_grade_id = %s, updated_at = %s WHERE employee_id = %s",
                         (int(payload.positionId), now, int(employeeId))
                     )
-                # isActive is stored in config for mock; in production it would be a DB column
+                if payload.isActive is not None:
+                    cur.execute(
+                        "UPDATE public.employee SET is_active = %s, updated_at = %s WHERE employee_id = %s",
+                        (payload.isActive, now, int(employeeId))
+                    )
 
         return Response(status_code=204)
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.get("/positions")
@@ -1138,7 +1194,7 @@ def get_positions(userData=Depends(authObj.authenticate_user_test)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.get("/ad/users")
@@ -1168,7 +1224,7 @@ def get_ad_users(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.get("/work-types")
@@ -1193,7 +1249,7 @@ def get_work_types_all(
             data = db.getAllRowsFromTableWithJoin("types_of_works", join_str)
 
         if not data:
-            raise HTTPException(status_code=404, detail="No work types found")
+            return {"items": []}
 
         from pydantic import RootModel
         class WTList(RootModel[list[WorkTypeOut]]):
@@ -1205,7 +1261,7 @@ def get_work_types_all(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.post("/work-types", status_code=201)
@@ -1215,24 +1271,27 @@ def create_work_type(
 ):
     try:
         require_permission(userData, "canManageWorkTypes")
+        dep = DBController.getRowFromTable("department", "department_id", int(payload.departmentId))
+        if not dep:
+            raise HTTPException(status_code=400, detail="Department not found")
         data = DBController.tryWriteNewTypeOfWork(
             payload.name,
             payload.departmentId,
             ComplexityValues.index(payload.complexity),
         )
-        if not data:
-            raise HTTPException(status_code=403, detail="Cannot write with current rights")
+        if not data or isinstance(data, str):
+            raise HTTPException(status_code=500, detail="Failed to create work type")
         return {"id": str(data[0][0])}
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.delete("/work-types/{workTypeId}", status_code=204)
 def delete_work_type(
-    workTypeId: str = Path(...),
+    workTypeId: int = Path(...),
     userData=Depends(authObj.authenticate_user_test),
 ):
     try:
@@ -1253,7 +1312,7 @@ def delete_work_type(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 # ─── Priority settings ───────────────────────────────────────────
@@ -1275,7 +1334,7 @@ def get_priority_settings(userData=Depends(authObj.authenticate_user_test)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.put("/priority-settings")
@@ -1290,7 +1349,7 @@ def update_priority_settings(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 # ─── Notifications ───────────────────────────────────────────────
@@ -1329,12 +1388,12 @@ def get_notifications(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.post("/notifications/{notificationId}/read", status_code=204)
 def mark_notification_read(
-    notificationId: str = Path(...),
+    notificationId: int = Path(...),
     userData=Depends(authObj.authenticate_user_test),
 ):
     try:
@@ -1353,7 +1412,7 @@ def mark_notification_read(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.post("/notifications/read-all", status_code=204)
@@ -1375,7 +1434,7 @@ def mark_all_notifications_read(userData=Depends(authObj.authenticate_user_test)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 # ─── Reports ────────────────────────────────────────────────────
@@ -1466,7 +1525,7 @@ def report_applications(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)
 
 
 @app.get("/reports/applications.xls")
@@ -1552,4 +1611,4 @@ def report_applications_xls(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_for_db_error(e)

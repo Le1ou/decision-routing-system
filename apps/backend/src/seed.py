@@ -5,18 +5,32 @@ Usage (from main.py or a management script):
     from seed import seed_database
     seed_database(DBController)
 
-The function uses the postgres superuser connection (DBController) so it
-never hits privilege errors. Everything runs inside one transaction; on any
-error the whole thing rolls back and the DB is left untouched.
+Uses the postgres superuser connection (DBController) so it never hits
+privilege errors. Everything runs inside one transaction; on any error the
+whole thing rolls back and the DB is left untouched.
 
-Table fill order respects every FK in sql_decision-routing.sql:
+This version matches the CURRENT schema, which means:
+  • employee has NO login / role / is_active columns — those live in
+    config.json MOCK_USERS_DB and are joined in at the API layer.
+  • photo has only value + application_id (no name / type / url yet).
+  • there is no priority_settings table — GET/PUT /priority-settings is
+    still backed by the in-memory dict in main.py.
+  • application has UNIQUE constraints on previous_executor_id and
+    closed_by_id, so every value used in those two columns is kept DISTINCT
+    here to avoid a unique-violation. (Those constraints are a bug — see notes.)
+  • application.delegated_id ↔ delegated.application_id is a circular FK, so
+    we insert the delegation with a NULL application_id, create the app, then
+    back-fill delegated.application_id.
+
+Fill order (respecting every FK):
   complexity_value → status → priority → role
   → grade → post → post_grade
   → department
   → employee
   → types_of_works → type_of_work_to_post_grade
+  → delegated (application_id NULL)
   → application → employee_to_application
-  → delegated (back-patched onto application)
+  → delegated (back-fill application_id)
   → notification
   → photo
 """
@@ -29,12 +43,19 @@ PROJECT_TZ = timezone.utc
 def seed_database(db_operator) -> None:
     """
     Wipe all public tables (RESTART IDENTITY CASCADE) and insert a full
-    set of mock data. Raises on any DB error — caller decides whether to
-    catch or let it propagate.
+    set of mock data. Raises on any DB error.
+
+    NOTE on employee_id mapping: TRUNCATE … RESTART IDENTITY resets the
+    employee identity sequence to 1, and employees are inserted in the order
+    below, so the IDs are deterministic:
+        1=manager 2=executor1 3=executor2 4=executor3
+        5=executor4 6=author1 7=author2
+    config.json MOCK_USERS_DB must point each login at the matching id.
     """
     now = datetime.now(PROJECT_TZ)
 
     with db_operator.pool.connection() as conn:
+
         # ── 0. Wipe everything ────────────────────────────────────────────────
         print("[seed] Wiping all tables …")
         conn.execute("""
@@ -50,9 +71,9 @@ def seed_database(db_operator) -> None:
         """)
         print("[seed] All tables cleared.")
 
-        # ── 1. complexity_value (id starts at 0 per schema) ──────────────────
-        # Maps to the ComplexityValues list index used throughout the codebase:
-        #   0 = easy, 1 = medium, 2 = hard, 3 = critical
+        # ── 1. complexity_value (identity starts at 0 per schema) ────────────
+        # Index maps directly to ComplexityValues in main.py:
+        #   0=easy 1=medium 2=hard 3=critical
         complexity_ids = {}
         for name in ("easy", "medium", "hard", "critical"):
             row = conn.execute(
@@ -92,7 +113,7 @@ def seed_database(db_operator) -> None:
             role_ids[name] = row[0]
         print(f"[seed] role → {role_ids}")
 
-        # ── 5. grade (id starts at 0 per schema) ─────────────────────────────
+        # ── 5. grade (identity starts at 0 per schema) ───────────────────────
         grade_ids = {}
         for name in ("junior", "middle", "senior", "lead"):
             row = conn.execute(
@@ -105,10 +126,10 @@ def seed_database(db_operator) -> None:
         # ── 6. post ───────────────────────────────────────────────────────────
         post_ids = {}
         for name, is_top in (
-            ("Инженер",        False),
-            ("Старший инженер",False),
-            ("Руководитель",   True),
-            ("Специалист",     False),
+            ("Инженер",         False),
+            ("Старший инженер", False),
+            ("Руководитель",    True),
+            ("Специалист",      False),
         ):
             row = conn.execute(
                 "INSERT INTO public.post (name, is_top) VALUES (%s, %s) RETURNING post_id",
@@ -117,8 +138,7 @@ def seed_database(db_operator) -> None:
             post_ids[name] = row[0]
         print(f"[seed] post → {post_ids}")
 
-        # ── 7. post_grade (cross-product of posts × grades we care about) ────
-        #   pg_key → post_grade_id
+        # ── 7. post_grade ─────────────────────────────────────────────────────
         pg_ids = {}
         for pg_key, post_name, grade_name in (
             ("engineer_junior",  "Инженер",         "junior"),
@@ -138,12 +158,13 @@ def seed_database(db_operator) -> None:
         print(f"[seed] post_grade → {pg_ids}")
 
         # ── 8. department ─────────────────────────────────────────────────────
+        # empl_appl_delay is integer (minutes) per the fixed schema.
         dep_ids = {}
         for dep_key, name, group, value, same_dep, delay, notif in (
-            ("it",  "ИТ-отдел",             "Основной",      0.9,  False, 30,  0.8),
-            ("oge", "ОГЭ",                  "Основной",      0.7,  True,  60,  0.7),
-            ("sec", "Отдел безопасности",   "Основной",      0.85, False, 45,  0.75),
-            ("hr",  "Отдел кадров",         "Административный", 0.5, True, 120, 0.6),
+            ("it",  "ИТ-отдел",           "Основной",         0.9,  False, 30,  0.8),
+            ("oge", "ОГЭ",                "Основной",         0.7,  True,  60,  0.7),
+            ("sec", "Отдел безопасности", "Основной",         0.85, False, 45,  0.75),
+            ("hr",  "Отдел кадров",       "Административный", 0.5,  True,  120, 0.6),
         ):
             row = conn.execute(
                 """
@@ -161,24 +182,24 @@ def seed_database(db_operator) -> None:
         # ── 9. employee ───────────────────────────────────────────────────────
         emp_ids = {}
         employees = (
-            # key,       fio,                              dep,   pg_key
-            ("manager",  "Орлова Мария Викторовна",        "it",  "lead_lead"),
-            ("executor1","Иванов Иван Иванович",           "it",  "engineer_middle"),
-            ("executor2","Петров Пётр Петрович",           "it",  "senior_middle"),
-            ("executor3","Сидорова Анна Сергеевна",        "oge", "spec_middle"),
-            ("executor4","Козлов Дмитрий Александрович",   "sec", "senior_senior"),
-            ("author1",  "Новикова Елена Владимировна",    "hr",  "spec_junior"),
-            ("author2",  "Фёдоров Алексей Николаевич",     "it",  "engineer_junior"),
+            # key,        fio,                             dep,   pg_key           is_active
+            ("manager",   "Орлова Мария Викторовна",       "it",  "lead_lead",     True),
+            ("executor1", "Иванов Иван Иванович",          "it",  "engineer_middle",True),
+            ("executor2", "Петров Пётр Петрович",          "it",  "senior_middle",  True),
+            ("executor3", "Сидорова Анна Сергеевна",       "oge", "spec_middle",    True),
+            ("executor4", "Козлов Дмитрий Александрович",  "sec", "senior_senior",  True),
+            ("author1",   "Новикова Елена Владимировна",   "hr",  "spec_junior",    True),
+            ("author2",   "Фёдоров Алексей Николаевич",    "it",  "engineer_junior",True),
         )
-        for emp_key, fio, dep_key, pg_key in employees:
+        for emp_key, fio, dep_key, pg_key, is_active in employees:
             row = conn.execute(
                 """
                 INSERT INTO public.employee
-                    (department_id, post_grade_id, fio, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s)
+                    (department_id, post_grade_id, fio, created_at, updated_at, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING employee_id
                 """,
-                (dep_ids[dep_key], pg_ids[pg_key], fio, now, now)
+                (dep_ids[dep_key], pg_ids[pg_key], fio, now, now, is_active)
             ).fetchone()
             emp_ids[emp_key] = row[0]
         print(f"[seed] employee → {emp_ids}")
@@ -186,16 +207,16 @@ def seed_database(db_operator) -> None:
         # ── 10. types_of_works ────────────────────────────────────────────────
         tow_ids = {}
         work_types = (
-            # key,              name,                              dep,   complexity
-            ("it_pc_repair",    "Ремонт ПК",                      "it",  "easy"),
-            ("it_net_setup",    "Настройка сети",                 "it",  "medium"),
-            ("it_server_setup", "Развёртывание сервера",          "it",  "hard"),
-            ("it_security_audit","Аудит безопасности",            "it",  "critical"),
-            ("oge_inspection",  "Технический осмотр",             "oge", "medium"),
-            ("oge_maintenance",  "Плановое обслуживание",         "oge", "easy"),
-            ("sec_access",      "Выдача доступа",                 "sec", "easy"),
-            ("sec_incident",    "Реагирование на инцидент",       "sec", "critical"),
-            ("hr_onboarding",   "Оформление нового сотрудника",   "hr",  "medium"),
+            # key,               name,                            dep,   complexity
+            ("it_pc_repair",     "Ремонт ПК",                    "it",  "easy"),
+            ("it_net_setup",     "Настройка сети",               "it",  "medium"),
+            ("it_server_setup",  "Развёртывание сервера",        "it",  "hard"),
+            ("it_security_audit","Аудит безопасности",           "it",  "critical"),
+            ("oge_inspection",   "Технический осмотр",           "oge", "medium"),
+            ("oge_maintenance",  "Плановое обслуживание",        "oge", "easy"),
+            ("sec_access",       "Выдача доступа",               "sec", "easy"),
+            ("sec_incident",     "Реагирование на инцидент",     "sec", "critical"),
+            ("hr_onboarding",    "Оформление нового сотрудника", "hr",  "medium"),
         )
         for tow_key, name, dep_key, complexity in work_types:
             row = conn.execute(
@@ -210,17 +231,16 @@ def seed_database(db_operator) -> None:
         print(f"[seed] types_of_works → {tow_ids}")
 
         # ── 11. type_of_work_to_post_grade ────────────────────────────────────
-        # Which positions are allowed to execute each work type
         tow_pg_links = (
-            ("it_pc_repair",     ["engineer_junior", "engineer_middle"]),
-            ("it_net_setup",     ["engineer_middle", "senior_middle"]),
-            ("it_server_setup",  ["senior_middle",   "senior_senior"]),
-            ("it_security_audit",["senior_senior",   "lead_lead"]),
-            ("oge_inspection",   ["spec_middle",     "senior_middle"]),
-            ("oge_maintenance",  ["spec_junior",     "spec_middle"]),
-            ("sec_access",       ["spec_junior",     "spec_middle"]),
-            ("sec_incident",     ["senior_senior",   "lead_lead"]),
-            ("hr_onboarding",    ["spec_junior"]),
+            ("it_pc_repair",      ["engineer_junior", "engineer_middle"]),
+            ("it_net_setup",      ["engineer_middle", "senior_middle"]),
+            ("it_server_setup",   ["senior_middle",   "senior_senior"]),
+            ("it_security_audit", ["senior_senior",   "lead_lead"]),
+            ("oge_inspection",    ["spec_middle",     "senior_middle"]),
+            ("oge_maintenance",   ["spec_junior",     "spec_middle"]),
+            ("sec_access",        ["spec_junior",     "spec_middle"]),
+            ("sec_incident",      ["senior_senior",   "lead_lead"]),
+            ("hr_onboarding",     ["spec_junior"]),
         )
         for tow_key, pg_keys in tow_pg_links:
             for pg_key in pg_keys:
@@ -234,18 +254,33 @@ def seed_database(db_operator) -> None:
                 )
         print("[seed] type_of_work_to_post_grade → done")
 
-        # ── 12. application + employee_to_application ─────────────────────────
-        # We insert applications one by one so we can capture each application_id
-        # and immediately link author / executor via employee_to_application.
-        #
-        # Schema for application:
-        #   application_id, name, priority_id, status_id, description,
-        #   delegated_id, is_unfinished, department_id, types_of_works,
-        #   empl_assigned_complexity, created_at, executor_at, is_expired,
-        #   deadline, work_at, updated_at, finished_at, result_text
-        #
-        # We store returned IDs so delegated / notification can reference them.
+        # ── 12. delegated (application_id NULL for now) ───────────────────────
+        # delegated_by / delegated_from / delegated_to are still text columns,
+        # so department ids are passed as strings.
+        deleg_row = conn.execute(
+            """
+            INSERT INTO public.delegated
+                (delegated_by, delegated_from, delegated_to,
+                 comment, created_at, decision, decided_at, application_id)
+            VALUES (%s, %s, %s, %s, %s, NULL, NULL, NULL)
+            RETURNING delegated_id
+            """,
+            (
+                str(dep_ids["it"]),
+                str(dep_ids["it"]),
+                str(dep_ids["oge"]),
+                "Работы относятся к компетенции ОГЭ.",
+                now - timedelta(hours=1),
+            )
+        ).fetchone()
+        delegated_id = deleg_row[0]
+        print(f"[seed] delegated → delegated_id={delegated_id}")
 
+        # ── 13. application + employee_to_application ─────────────────────────
+        # IMPORTANT: previous_executor_id and closed_by_id each carry a UNIQUE
+        # constraint in the current schema, so the values supplied for those two
+        # columns are kept DISTINCT across all rows below. (See notes — those
+        # constraints should be dropped.)
         app_ids = {}
 
         def insert_app(
@@ -258,10 +293,14 @@ def seed_database(db_operator) -> None:
             executor_at=None, work_at=None, finished_at=None,
             result_text=None, assigned_complexity=None,
             delegated_id=None,
+            executor_comment=None, manager_comment=None,
+            previous_executor_key=None, closed_by_key=None,
         ):
             created  = now - timedelta(days=created_offset_days)
             deadline = created + timedelta(days=deadline_offset_days)
             comp_val = complexity_ids.get(assigned_complexity) if assigned_complexity else None
+            prev_exc = emp_ids.get(previous_executor_key) if previous_executor_key else None
+            closed_by = emp_ids.get(closed_by_key) if closed_by_key else None
 
             row = conn.execute(
                 """
@@ -272,7 +311,9 @@ def seed_database(db_operator) -> None:
                     empl_assigned_complexity,
                     delegated_id,
                     deadline, created_at, updated_at,
-                    executor_at, work_at, finished_at, result_text
+                    executor_at, work_at, finished_at, result_text,
+                    executor_comment, manager_comment,
+                    previous_executor_id, closed_by_id
                 ) VALUES (
                     %s, %s, %s, %s,
                     %s, %s,
@@ -280,7 +321,9 @@ def seed_database(db_operator) -> None:
                     %s,
                     %s,
                     %s, %s, %s,
-                    %s, %s, %s, %s
+                    %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s
                 ) RETURNING application_id
                 """,
                 (
@@ -295,6 +338,8 @@ def seed_database(db_operator) -> None:
                     delegated_id,
                     deadline, created, created,
                     executor_at, work_at, finished_at, result_text,
+                    executor_comment, manager_comment,
+                    prev_exc, closed_by,
                 )
             ).fetchone()
             app_id = row[0]
@@ -335,6 +380,8 @@ def seed_database(db_operator) -> None:
             "Предыдущий исполнитель не завершил работу. Требуется повторная настройка.",
             "it", "it_net_setup", "author2",
             is_unfinished=True,
+            previous_executor_key="executor1",   # UNIQUE col — only used here
+            manager_comment="Возвращено на доработку — предыдущий исполнитель не справился.",
             created_offset_days=3,
         )
         insert_app(
@@ -351,6 +398,7 @@ def seed_database(db_operator) -> None:
             "it", "it_pc_repair", "author2", "executor1",
             executor_at=now - timedelta(hours=2),
             assigned_complexity="easy",
+            manager_comment="Назначено вручную. Приоритет — до конца дня.",
             created_offset_days=2,
         )
         insert_app(
@@ -383,7 +431,7 @@ def seed_database(db_operator) -> None:
             deadline_offset_days=1,
         )
 
-        # ── status: completed ─────────────────────────────────────────────────
+        # ── status: completed (each closed_by is DISTINCT — UNIQUE col) ───────
         insert_app(
             "completed_1", "Замена жёсткого диска на SSD в ПК директора", "high", "completed",
             "Диск Western Digital 1TB заменён на SSD Samsung 870 EVO 500GB.",
@@ -395,6 +443,7 @@ def seed_database(db_operator) -> None:
             assigned_complexity="easy",
             created_offset_days=7,
             deadline_offset_days=3,
+            closed_by_key="executor1",
         )
         insert_app(
             "completed_2", "Развёртывание GitLab на внутреннем сервере", "critical", "completed",
@@ -407,6 +456,7 @@ def seed_database(db_operator) -> None:
             assigned_complexity="hard",
             created_offset_days=14,
             deadline_offset_days=5,
+            closed_by_key="executor2",
         )
         insert_app(
             "completed_3", "Оформление нового сотрудника — Титов К.Р.", "low", "completed",
@@ -419,39 +469,21 @@ def seed_database(db_operator) -> None:
             assigned_complexity="medium",
             created_offset_days=5,
             deadline_offset_days=2,
+            closed_by_key="executor3",
         )
 
-        # ── status: rejected ──────────────────────────────────────────────────
+        # ── status: rejected (closed_by = manager, still distinct) ────────────
         insert_app(
             "rejected_1", "Установить игровую мышь на рабочий ПК", "low", "rejected",
             "Сотрудник просит установить игровую мышь Razer для работы.",
             "it", "it_pc_repair", "author2",
             finished_at=now - timedelta(days=1),
+            manager_comment="Отклонено: не является производственной необходимостью.",
+            closed_by_key="manager",
             created_offset_days=3,
         )
 
-        print(f"[seed] application + employee_to_application → {app_ids}")
-
-        # ── 13. delegated ─────────────────────────────────────────────────────
-        # Insert a delegation record and back-patch the application
-        deleg_row = conn.execute(
-            """
-            INSERT INTO public.delegated
-                (delegated_by, delegated_from, delegated_to, comment, created_at)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING delegated_id
-            """,
-            (
-                str(dep_ids["it"]),
-                str(dep_ids["it"]),
-                str(dep_ids["oge"]),
-                "Работы относятся к компетенции ОГЭ.",
-                now - timedelta(hours=1),
-            )
-        ).fetchone()
-        delegated_id = deleg_row[0]
-
-        # Create the delegated application referencing this delegation
+        # ── status: delegated (references the delegation created earlier) ─────
         insert_app(
             "delegated_1", "Техническое обслуживание ИБП в серверной", "medium", "delegated",
             "Требуется проверка и замена аккумуляторов в ИБП APC 3000VA.",
@@ -459,37 +491,43 @@ def seed_database(db_operator) -> None:
             created_offset_days=2,
             delegated_id=delegated_id,
         )
-        # Back-patch the delegation with the correct application_id
-        # (delegated table doesn't store application_id in schema — it's via FK on application)
-        print(f"[seed] delegated → delegated_id={delegated_id}, app_id={app_ids['delegated_1']}")
 
-        # ── 14. notification ──────────────────────────────────────────────────
-        # Schema: notification_id, text, created_at, employee_id, is_read, application_id
-        # Note: schema has UNIQUE on (application_id) and UNIQUE on (employee_id) —
-        # so max 1 notification per employee and per application in current schema.
+        # Back-fill the circular FK now that the application row exists.
+        conn.execute(
+            "UPDATE public.delegated SET application_id = %s WHERE delegated_id = %s",
+            (app_ids["delegated_1"], delegated_id)
+        )
+        print(f"[seed] application + employee_to_application → {app_ids}")
+        print(f"[seed] delegated back-filled → app_id={app_ids['delegated_1']}")
+
+        # ── 14. notification (multiple per employee now allowed) ──────────────
         notifications = (
-            # employee_key,  text,                                                   app_key,         is_read
+            # employee_key,  text,                                                          app_key,          is_read
             ("executor1",
              "Вам назначена новая заявка: «Установить рабочую станцию в бухгалтерии».",
-             "assigned_it",     False),
+             "assigned_it",      False),
             ("executor3",
              "Вам назначена новая заявка: «Плановый осмотр серверной комнаты».",
-             "assigned_oge",    False),
+             "assigned_oge",     False),
             ("manager",
              "Заявка «Развёртывание GitLab на внутреннем сервере» выполнена.",
-             "completed_2",     True),
+             "completed_2",      True),
             ("author2",
              "Заявка «Установить игровую мышь на рабочий ПК» отклонена.",
-             "rejected_1",      True),
+             "rejected_1",       True),
             ("executor4",
              "Вам назначена заявка: «Реагирование на подозрительную активность в сети».",
-             "in_progress_sec", False),
+             "in_progress_sec",  False),
             ("executor2",
              "Вам назначена заявка: «Настройка VLAN для нового офисного сегмента».",
-             "in_progress_net", True),
+             "in_progress_net",  True),
             ("author1",
              "Заявка «Техническое обслуживание ИБП в серверной» передана в ОГЭ.",
-             "delegated_1",     False),
+             "delegated_1",      False),
+            # second notification for executor1 — proves the dropped UNIQUE works
+            ("executor1",
+             "Заявка «Замена жёсткого диска на SSD» отмечена выполненной.",
+             "completed_1",      True),
         )
         for emp_key, text, app_key, is_read in notifications:
             conn.execute(
@@ -503,9 +541,7 @@ def seed_database(db_operator) -> None:
             )
         print("[seed] notification → done")
 
-        # ── 15. photo ─────────────────────────────────────────────────────────
-        # Attach a small 1×1 transparent PNG (base64) to two completed applications
-        # so the attachment list is non-empty during testing.
+        # ── 15. photo (schema only has value + application_id) ────────────────
         TINY_PNG_B64 = (
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
             "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -517,7 +553,7 @@ def seed_database(db_operator) -> None:
             )
         print("[seed] photo → done")
 
-    # Connection auto-commits on clean exit from the context manager
+    # psycopg auto-commits on clean context-manager exit
     print("[seed] ✅ Database seeded successfully.")
     _print_summary(app_ids, emp_ids, dep_ids, tow_ids, pg_ids)
 

@@ -1,4 +1,5 @@
 import psycopg
+from psycopg import sql as pgsql
 import  psycopg_pool
 import atexit
 import json
@@ -15,7 +16,7 @@ from pydantic import BaseModel
 configPath = Path(__file__).parent.parent / "config.json"
 global configData
 project_timezone = timezone.utc
-with configPath.open() as config_data:
+with configPath.open(encoding="utf-8") as config_data:
     configData = json.load(config_data)
     config_data.close()
 
@@ -85,48 +86,78 @@ class PgDbOperator:
         return json.dumps(data, default=self.datetime_handler, ensure_ascii=False)
     
     def createUserRole(self, username, password, roleList):
-         with self.pool.connection() as conn:
-                # try:
-                    conn.execute("""
-                                            DO $$
-                                            BEGIN
-                                                IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '"""+ username+ """') THEN
-                                                    CREATE ROLE """+ username+ """ WITH LOGIN PASSWORD '""" + password +"""';
-                                                END IF;
-                                            END;
-                                            $$;
-                                        """
-                                )
-                    for role in roleList:
-                        conn.execute(
-                          "GRANT " + role + " TO " + username
+        with self.pool.connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = %s",
+                (username,)
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    pgsql.SQL("CREATE ROLE {} WITH LOGIN PASSWORD {}").format(
+                        pgsql.Identifier(username),
+                        pgsql.Literal(password)
+                    )
+                )
+            for role in roleList:
+                try:
+                    conn.execute(
+                        pgsql.SQL("GRANT {} TO {}").format(
+                            pgsql.Identifier(role.lower()),
+                            pgsql.Identifier(username)
                         )
-                    
-                # except :
-                #     print("ошибка создания пользователя")
-                #     conn.rollback() 
-    def fillDbRolesBasedOnADTest(self, roleList):
-        for role in roleList:
+                    )
+                except psycopg.errors.UndefinedObject:
+                    conn.rollback()
+                    print(f"Role {role} not found, skipping grant")
+    def fillPermissionRoles(self, permissionList):
+        for perm in permissionList:
             with self.pool.connection() as conn:
                 try:
                     conn.execute("""
-                                            DO $$
-                                            BEGIN
-                                                IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '"""+ role+ """') THEN
-                                                    CREATE ROLE """+ role+ """ WITH NOLOGIN;
-                                                    GRANT USAGE ON SCHEMA public TO """+ role+ """;
-                                                    GRANT INSERT, UPDATE ON public.application TO """+ role+ """;
-                                                    GRANT SELECT ON ALL TABLES IN SCHEMA public TO """+ role+ """;
-                                                END IF;
-                                            END;
-                                            $$;
-                                        """
-                                )
-                    if "lead" in role:
-                        conn.execute("GRANT UPDATE ON public.department, public.employee, public.types_of_works TO "+ role )
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '""" + perm.lower() + """') THEN
+                                CREATE ROLE """ + perm + """ WITH NOLOGIN;
+                            END IF;
+                        END;
+                        $$;
+                    """)
                 except psycopg.errors.DuplicateObject:
-                    print("Роль уже существует, пропускаем создание.")
-                    conn.rollback() 
+                    print(f"Permission role {perm} already exists, skipping.")
+                    conn.rollback()
+
+    def fillDbRolesBasedOnADTest(self, roleList):
+        for role in roleList:
+            r = role.lower()
+            with self.pool.connection() as conn:
+                # Create role if missing (use lowercase — PG stores all role names lowercase)
+                conn.execute(
+                    pgsql.SQL("""
+                        DO $body$
+                        BEGIN
+                            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = {role_name}) THEN
+                                CREATE ROLE {role_ident} WITH NOLOGIN;
+                            END IF;
+                        END;
+                        $body$;
+                    """).format(
+                        role_name=pgsql.Literal(r),
+                        role_ident=pgsql.Identifier(r),
+                    )
+                )
+                # Always re-apply grants (idempotent — safe on every startup)
+                conn.execute(pgsql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(pgsql.Identifier(r)))
+                conn.execute(pgsql.SQL("GRANT INSERT, UPDATE ON public.application TO {}").format(pgsql.Identifier(r)))
+                conn.execute(pgsql.SQL("GRANT INSERT, DELETE ON public.employee_to_application TO {}").format(pgsql.Identifier(r)))
+                conn.execute(pgsql.SQL("GRANT INSERT, UPDATE ON public.delegated TO {}").format(pgsql.Identifier(r)))
+                conn.execute(pgsql.SQL("GRANT UPDATE ON public.notification TO {}").format(pgsql.Identifier(r)))
+                conn.execute(pgsql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(pgsql.Identifier(r)))
+                if "lead" in r:
+                    conn.execute(
+                        pgsql.SQL("GRANT INSERT, UPDATE ON public.department, public.employee, public.types_of_works TO {}").format(
+                            pgsql.Identifier(r)
+                        )
+                    )
                
 
 
