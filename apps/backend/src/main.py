@@ -9,8 +9,27 @@ from pydantic import model_validator
 from typing import Annotated, Literal, Optional
 from datetime import datetime
 import uuid
+import os
+import boto3
 import psycopg
 from src.seed import seed_database
+
+S3_BUCKET       = os.environ.get("S3_BUCKET_NAME", "")
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL")
+S3_REGION       = os.environ.get("S3_REGION", "auto")
+_s3_client: boto3.client = None
+
+def get_s3():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=S3_ENDPOINT_URL,
+            aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
+            region_name=S3_REGION,
+        )
+    return _s3_client
 
 # ─────────────────────────── App bootstrap ───────────────────────────
 
@@ -794,13 +813,18 @@ def get_application(
                         delegation = DelegationOut.model_validate(d).model_dump()
 
         row["availableActions"] = _available_actions(row, user_role)
-        row["attachments"]      = [
+        s3 = get_s3()
+        row["attachments"] = [
             {
                 "id": str(p["photo_id"]),
                 "applicationId": str(p["application_id"]),
-                "name": f"photo_{p['photo_id']}",
+                "name": p["name"],
                 "type": "photo",
-                "url": None,
+                "url": s3.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": S3_BUCKET, "Key": p["s3_key"]},
+                    ExpiresIn=3600,
+                ),
             }
             for p in photos
         ]
@@ -1016,16 +1040,27 @@ async def upload_attachments(
         rows = db.getRowFromTable("application", "application_id", int(applicationId))
         row_or_404(rows, "Application not found")
 
+        s3 = get_s3()
         with db.pool.connection() as conn:
             from psycopg.rows import dict_row
             with conn.cursor(row_factory=dict_row) as cur:
                 for f in files:
                     content = await f.read()
-                    import base64
-                    encoded = base64.b64encode(content).decode("utf-8")
+                    filename     = f.filename or "upload"
+                    content_type = f.content_type or "application/octet-stream"
+                    s3_key = f"applications/{applicationId}/{uuid.uuid4()}-{filename}"
+
+                    s3.put_object(
+                        Bucket=S3_BUCKET,
+                        Key=s3_key,
+                        Body=content,
+                        ContentType=content_type,
+                    )
+
                     photo_id = cur.execute(
-                        "INSERT INTO public.photo (value, application_id) VALUES (%s, %s) RETURNING photo_id",
-                        (encoded, int(applicationId))
+                        """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
+                           VALUES (%s, %s, %s, %s, %s) RETURNING photo_id""",
+                        (s3_key, filename, content_type, len(content), int(applicationId))
                     ).fetchone()["photo_id"]
                     ids.append({"id": str(photo_id)})
 

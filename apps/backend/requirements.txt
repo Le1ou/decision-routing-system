@@ -5,3 +5,4 @@ psycopg-pool
 ldap3
 pydantic
 python-multipart
+boto3
