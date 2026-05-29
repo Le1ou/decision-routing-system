@@ -41,12 +41,28 @@ services:
       timeout: 5s
       retries: 5
 
-  # frontend:
-  #   build: ../../apps/frontend
-  #   ports:
-  #     - "5173:5173"
-  #   depends_on:
-  #     - backend
+  frontend:
+    build:
+      context: ../../apps/frontend
+
+    container_name: project_frontend
+
+    #env_file:
+      #- ../../.env
+
+    environment:
+      VITE_API_URL: ${VITE_API_URL}
+
+    ports:
+      - "5173:5173"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    volumes:
+      - ../../apps/frontend:/app
+      - /app/node_modules
 
 volumes:
   postgres_data:
