@@ -30,8 +30,12 @@ services:
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     container_name: project_backend
-    env_file:
-      - .env
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
     depends_on:
       db:
         condition: service_healthy
@@ -66,4 +70,3 @@ services:
 
 volumes:
   postgres_data:
-  

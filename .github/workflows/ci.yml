@@ -69,4 +69,4 @@ jobs:
 
       - name: Stop compose
         if: always()
-        run: docker compose -f infra/compose/docker-compose.local.yml down -v
+        run: docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml down -v

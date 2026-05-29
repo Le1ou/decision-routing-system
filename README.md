@@ -25,10 +25,10 @@ docker compose version
 ## Переменные среды
 
 Создайте файл `.env` на основе шаблона:
-cp.env.example.env
+cp .env.example .env
 
 Основные переменные:
-DB_HOST=localhost
+DB_HOST=db
 DB_PORT=5432
 DB_USER=postgres
 DB_PASSWORD=postgres
@@ -36,11 +36,13 @@ DB_NAME=app_db
 BACKEND_PORT=3000
 VITE_API_URL=http://localhost:3000
 
-## Запустить инфраструктуру (DB + Backend)
+Для backend, запущенного локально вне Docker, используйте `DB_HOST=localhost`.
 
-docker compose -f infra/compose/docker-compose.local.yml up --build
+## Запустить инфраструктуру (DB + Backend + Frontend)
+
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml up --build
 или
-docker compose -f infra/compose/docker-compose.local.yml up -d
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d
 
 ## После запуска:
 
@@ -57,15 +59,15 @@ http://localhost:3000/health
 
 ## Остановка контейнеров:
 
-docker compose -f infra/compose/docker-compose.local.yml down
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml down
 
 ## Удаление вместе с данными:
 
-docker compose -f infra/compose/docker-compose.local.yml down -v
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml down -v
 
-## Frontend (локальный запуск)
+## Frontend (локальный запуск вне Docker)
 
-Frontend запускается отдельно:
+Если frontend нужно запустить без Docker:
 
 cd apps/frontend
 npm install
@@ -140,9 +142,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 Пример содержимого requirements.txt:
-fastapi==0.110.0
-uvicorn==0.29.0
-psycopg2-binary==2.9.9
+fastapi
+uvicorn[standard]
+psycopg[binary]
+psycopg-pool
+ldap3
+pydantic
 
 ## CI/CD
 
