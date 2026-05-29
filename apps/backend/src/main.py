@@ -1,4 +1,4 @@
-from apps.backend.src.application_module import (
+from src.application_module import (
     PgDbOperator, ActiveDirectoryAuth, configData, project_timezone
 )
 from fastapi import FastAPI, Depends, HTTPException, status, Query, UploadFile, File, Path
@@ -10,7 +10,7 @@ from typing import Annotated, Literal, Optional
 from datetime import datetime
 import uuid
 import psycopg
-from apps.backend.src.seed import seed_database
+from src.seed import seed_database
 
 # ─────────────────────────── App bootstrap ───────────────────────────
 
@@ -533,6 +533,13 @@ def _build_application_list_query(filters: dict) -> tuple[str, list]:
 # ═══════════════════════════════════════════════════════════════
 #  ROUTES
 # ═══════════════════════════════════════════════════════════════
+
+# ─── Health ─────────────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 
 # ─── Auth ───────────────────────────────────────────────────────
 

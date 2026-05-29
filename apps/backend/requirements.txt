@@ -4,3 +4,4 @@ psycopg[binary]
 psycopg-pool
 ldap3
 pydantic
+python-multipart
