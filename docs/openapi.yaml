@@ -1190,17 +1190,13 @@ components:
 
     PrioritySettings:
       type: object
-      required: [department, position, workType, deadline, managerAuthor]
+      required: [department, position, deadline, managerAuthor]
       properties:
         department:
           type: number
           minimum: 0
           maximum: 1
         position:
-          type: number
-          minimum: 0
-          maximum: 1
-        workType:
           type: number
           minimum: 0
           maximum: 1
