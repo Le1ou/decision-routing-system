@@ -42,6 +42,12 @@ docker compose -f infra/compose/docker-compose.local.yml up --build
 или
 docker compose -f infra/compose/docker-compose.local.yml up -d
 
+## После запуска:
+
+Frontend: http://localhost:5173
+Backend: http://localhost:3000
+PostgreSQL: localhost:5432
+
 ## Проверить backend
 
 http://localhost:3000/health
@@ -160,6 +166,12 @@ GET /health
 
 PostgreSQL:
 managed via pg_isready
+
+## Compose поднимает:
+
+- db — PostgreSQL
+- backend — FastAPI application
+- frontend — React/Vite frontend
 
 ## Важные особенности
 SQL init выполняется только при первом создании volume

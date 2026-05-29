@@ -58,3 +58,15 @@ jobs:
       - name: Build frontend image
         run: |
           docker build -t decision-routing-frontend ./apps/frontend
+
+      - name: Start compose
+        run: docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml up -d --build
+
+      - name: Wait backend
+        run: |
+          sleep 15
+          curl --fail http://localhost:3000/health
+
+      - name: Stop compose
+        if: always()
+        run: docker compose -f infra/compose/docker-compose.local.yml down -v
