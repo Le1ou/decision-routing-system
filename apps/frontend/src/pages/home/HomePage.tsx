@@ -15,7 +15,8 @@ const sections = [
 
 export function HomePage() {
   const { currentUser } = useAuth();
-  const visibleSections = sections.filter((section) => !section.managerOnly || currentUser?.role === "manager");
+  const hasManagementAccess = currentUser?.role === "manager" || currentUser?.role === "top-manager";
+  const visibleSections = sections.filter((section) => !section.managerOnly || hasManagementAccess);
   const visibleApplications = currentUser ? filterApplicationsByRole(applications, currentUser) : [];
   const activeApplications = visibleApplications.filter((application) => application.status !== "completed" && application.status !== "rejected");
   const criticalApplications = visibleApplications.filter((application) => application.priority === "critical");

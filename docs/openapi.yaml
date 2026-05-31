@@ -30,7 +30,7 @@ paths:
     get:
       tags: [Auth]
       summary: Получить текущего пользователя
-      description: Возвращает пользователя, найденного через Basic Auth/Active Directory, его роль, отдел, должность и права frontend.
+      description: Возвращает пользователя, найденного через Basic Auth/Active Directory, его роли, отдел, должность и права frontend.
       responses:
         "200":
           description: Текущий пользователь
@@ -43,10 +43,10 @@ paths:
                   id: "user-manager"
                   login: "manager"
                   fullName: "Орлова Мария Викторовна"
-                  role: "manager"
+                  roles: ["author", "executor", "top-manager"]
                   departmentId: "it"
                   postName: "Руководитель"
-                  positionId: "grade-chief"
+                  positionId: "department-head"
                   isActive: true
                 permissions:
                   canManageEmployees: true
@@ -202,6 +202,13 @@ paths:
                 value:
                   action: changeWorkType
                   workTypeId: "it-server-setup"
+              cancel:
+                value:
+                  action: cancel
+                  comment: "Заявка создана ошибочно."
+              archive:
+                value:
+                  action: archive
       responses:
         "204":
           description: Действие выполнено. Если frontend нужно обновить карточку, он делает GET /applications/{applicationId}.
@@ -278,6 +285,9 @@ paths:
     get:
       tags: [Directories]
       summary: Получить сотрудников, подключенных к системе
+      description: >
+        Обычный руководитель получает сотрудников только своего отдела.
+        top-manager может получать сотрудников всех отделов и фильтровать по departmentId.
       parameters:
         - name: departmentId
           in: query
@@ -308,10 +318,11 @@ paths:
           $ref: "#/components/responses/Unauthorized"
     post:
       tags: [Directories]
-      summary: Добавить AD-пользователя в систему как исполнителя
+      summary: Добавить AD-пользователя в систему
       description: >
         Не создает человека в AD. Backend создает локальную запись участия в системе
-        для уже существующего AD-пользователя. Роль нового сотрудника - executor.
+        для уже существующего AD-пользователя. Роль сотрудника выбирает руководитель.
+        Обычный руководитель может добавлять сотрудников только в свой отдел, top-manager - в любой отдел.
       requestBody:
         required: true
         content:
@@ -337,7 +348,8 @@ paths:
   /employees/{employeeId}:
     patch:
       tags: [Directories]
-      summary: Изменить позицию сотрудника или участие в распределении
+      summary: Изменить роль сотрудника или участие в распределении
+      description: Обычный руководитель может менять только сотрудников своего отдела, top-manager - сотрудников любого отдела.
       parameters:
         - $ref: "#/components/parameters/EmployeeId"
       requestBody:
@@ -357,15 +369,59 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Directories]
+      summary: Удалить сотрудника из системы
+      description: >
+        Удаляет локальную запись участия сотрудника в системе, не удаляя пользователя из AD.
+        После удаления пользователь снова может появляться в /ad/users для повторного добавления.
+        Обычный руководитель может удалять только сотрудников своего отдела, top-manager - сотрудников любого отдела.
+      parameters:
+        - $ref: "#/components/parameters/EmployeeId"
+      responses:
+        "204":
+          description: Сотрудник удален из системы
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /departments/{departmentId}/delegation-settings:
+    patch:
+      tags: [Directories]
+      summary: Изменить подтверждение делегирования внутри отдела
+      parameters:
+        - name: departmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDepartmentDelegationSettingsPayload"
+      responses:
+        "204":
+          description: Настройка обновлена
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /positions:
     get:
       tags: [Directories]
-      summary: Получить позиции
-      description: Позиции - это грейды из `post_grade`, которые руководитель назначает сотрудникам.
+      summary: Получить должности
+      description: Должность сотрудника приходит из AD и не редактируется руководителем вручную.
       responses:
         "200":
-          description: Список позиций
+          description: Список должностей
           content:
             application/json:
               schema:
@@ -376,6 +432,27 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Position"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /grades:
+    get:
+      tags: [Directories]
+      summary: Получить грейды
+      description: Грейды используются только в матрице допустимости вида работ и не являются должностью сотрудника.
+      responses:
+        "200":
+          description: Список грейдов
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Grade"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -412,6 +489,9 @@ paths:
     get:
       tags: [Directories]
       summary: Получить виды работ
+      description: >
+        Обычный руководитель видит виды работ только своего отдела.
+        top-manager видит все отделы и может фильтровать по departmentId.
       parameters:
         - name: departmentId
           in: query
@@ -435,6 +515,7 @@ paths:
     post:
       tags: [Directories]
       summary: Создать вид работ
+      description: Обычный руководитель создает виды работ только для своего отдела, top-manager - для любого отдела.
       requestBody:
         required: true
         content:
@@ -458,9 +539,35 @@ paths:
           $ref: "#/components/responses/ValidationError"
 
   /work-types/{workTypeId}:
+    patch:
+      tags: [Directories]
+      summary: Изменить вид работ, сложность или допустимые должности
+      description: Обычный руководитель может менять виды работ только своего отдела, top-manager - любого отдела.
+      parameters:
+        - $ref: "#/components/parameters/WorkTypeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkTypePayload"
+      responses:
+        "204":
+          description: Вид работ обновлен
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
     delete:
       tags: [Directories]
       summary: Удалить вид работ
+      description: Обычный руководитель может удалять виды работ только своего отдела, top-manager - любого отдела.
       parameters:
         - $ref: "#/components/parameters/WorkTypeId"
       responses:
@@ -479,6 +586,9 @@ paths:
     get:
       tags: [Priority]
       summary: Получить коэффициенты расчета приоритета
+      description: >
+        Обычный руководитель получает настройки только своего отдела в режиме чтения.
+        top-manager получает все отделы и может редактировать настройки.
       responses:
         "200":
           description: Настройки приоритета
@@ -493,6 +603,7 @@ paths:
     put:
       tags: [Priority]
       summary: Сохранить коэффициенты расчета приоритета
+      description: Доступно только top-manager.
       requestBody:
         required: true
         content:
@@ -751,7 +862,7 @@ components:
 
     UserRole:
       type: string
-      enum: [author, executor, manager]
+      enum: [author, executor, manager, top-manager]
 
     ApplicationStatus:
       type: string
@@ -776,6 +887,8 @@ components:
         - delegateInternal
         - delegateExternal
         - returnToNew
+        - cancel
+        - archive
         - confirmExternalDelegation
         - declineExternalDelegation
         - changeWorkType
@@ -785,9 +898,35 @@ components:
       required: [user, permissions]
       properties:
         user:
-          $ref: "#/components/schemas/User"
+          $ref: "#/components/schemas/CurrentUser"
         permissions:
           $ref: "#/components/schemas/UserPermissions"
+
+    CurrentUser:
+      type: object
+      required: [id, login, fullName, roles, departmentId, postName, positionId, isActive]
+      properties:
+        id:
+          type: string
+        login:
+          type: string
+        fullName:
+          type: string
+        roles:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/UserRole"
+        departmentId:
+          type: string
+        postName:
+          type: string
+          description: Должность сотрудника из AD.
+        positionId:
+          type: string
+          description: Идентификатор должности сотрудника.
+        isActive:
+          type: boolean
 
     UserPermissions:
       type: object
@@ -821,7 +960,7 @@ components:
           description: Должность сотрудника из AD.
         positionId:
           type: string
-          description: Идентификатор записи `post_grade`; в русском UI называется "позиция".
+          description: Идентификатор должности сотрудника.
         isActive:
           type: boolean
 
@@ -857,7 +996,17 @@ components:
 
     Position:
       type: object
-      description: Позиция сотрудника; соответствует записи `post_grade` в SQL.
+      description: Должность сотрудника.
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    Grade:
+      type: object
+      description: Грейд исполнителя для матрицы вида работ.
       required: [id, name]
       properties:
         id:
@@ -883,7 +1032,7 @@ components:
 
     WorkType:
       type: object
-      required: [id, name, departmentId, complexity, allowedPositionIds]
+      required: [id, name, departmentId, complexity, allowedGradeIds]
       properties:
         id:
           type: string
@@ -893,9 +1042,9 @@ components:
           type: string
         complexity:
           $ref: "#/components/schemas/Complexity"
-        allowedPositionIds:
+        allowedGradeIds:
           type: array
-          description: Допустимые позиции `post_grade` для выполнения вида работ.
+          description: Допустимые грейды для выполнения вида работ.
           items:
             type: string
 
@@ -933,6 +1082,10 @@ components:
           type: string
         delegatedByDepartmentId:
           type: string
+          description: Отдел, инициировавший делегирование.
+        delegatedByEmployeeId:
+          type: string
+          description: Сотрудник, инициировавший делегирование. Нужен UI для блока "Кто делегировал".
         delegatedFromDepartmentId:
           type: string
         delegatedToDepartmentId:
@@ -1005,6 +1158,11 @@ components:
               type: string
             resultText:
               type: string
+              description: Результат работы. Заполняется при завершении и показывается только для completed.
+            archivedAt:
+              type: string
+              format: date-time
+              description: Если заполнено, заявка скрывается из основного UI. Архив не является статусом.
             delegationId:
               type: string
             delegatedFromDepartmentId:
@@ -1027,6 +1185,9 @@ components:
               type: string
               format: date-time
             startedAt:
+              type: string
+              format: date-time
+            finishedAt:
               type: string
               format: date-time
             closedById:
@@ -1131,6 +1292,9 @@ components:
       properties:
         action:
           $ref: "#/components/schemas/ApplicationAction"
+          description: >
+            archive не меняет статус заявки и доступен для rejected и completed.
+            Backend должен заполнить archivedAt и скрывать такие заявки из основного списка.
         executorId:
           type: string
           description: Обязательно для assignExecutor.
@@ -1155,14 +1319,13 @@ components:
 
     CreateEmployeePayload:
       type: object
-      required: [adUserId, positionId, isActive]
+      required: [adUserId, role, isActive]
       properties:
         adUserId:
           type: string
           description: Идентификатор пользователя в AD.
-        positionId:
-          type: string
-          description: Идентификатор записи `post_grade`.
+        role:
+          $ref: "#/components/schemas/UserRole"
         isActive:
           type: boolean
 
@@ -1170,15 +1333,21 @@ components:
       type: object
       minProperties: 1
       properties:
-        positionId:
-          type: string
-          description: Идентификатор записи `post_grade`.
+        role:
+          $ref: "#/components/schemas/UserRole"
         isActive:
+          type: boolean
+
+    UpdateDepartmentDelegationSettingsPayload:
+      type: object
+      required: [delegatedToSameDepartment]
+      properties:
+        delegatedToSameDepartment:
           type: boolean
 
     CreateWorkTypePayload:
       type: object
-      required: [name, departmentId, complexity]
+      required: [name, departmentId, complexity, allowedGradeIds]
       properties:
         name:
           type: string
@@ -1187,27 +1356,52 @@ components:
           type: string
         complexity:
           $ref: "#/components/schemas/Complexity"
+        allowedGradeIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+
+    UpdateWorkTypePayload:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+        departmentId:
+          type: string
+        complexity:
+          $ref: "#/components/schemas/Complexity"
+        allowedGradeIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
 
     PrioritySettings:
       type: object
-      required: [department, position, deadline, managerAuthor]
+      required: [department, deadline, managerAuthor]
       properties:
         department:
-          type: number
-          minimum: 0
-          maximum: 1
-        position:
-          type: number
-          minimum: 0
-          maximum: 1
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+          description: Коэффициент отдела автора, ключ - departmentId.
         deadline:
           type: number
           minimum: 0
           maximum: 1
+          description: Вес фактора срока исполнения. Чем ближе deadline, тем выше фактор срока.
         managerAuthor:
-          type: number
-          minimum: 0
-          maximum: 1
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+          description: Коэффициент руководителя-автора по отделам, ключ - departmentId.
 
     Notification:
       type: object

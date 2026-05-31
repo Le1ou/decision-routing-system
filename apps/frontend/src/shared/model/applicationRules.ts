@@ -18,6 +18,10 @@ export type ApplicationFilter = {
 };
 
 export function canViewApplication(application: Application, user: User) {
+  if (application.archivedAt || isAutoHiddenRejectedApplication(application)) {
+    return false;
+  }
+
   if (user.role === "author") {
     return application.authorId === user.id;
   }
@@ -31,7 +35,11 @@ export function canViewApplication(application: Application, user: User) {
     );
   }
 
-  return application.authorId === user.id || application.departmentId === user.departmentId;
+  if (user.role === "manager") {
+    return application.authorId === user.id || application.departmentId === user.departmentId;
+  }
+
+  return true;
 }
 
 export function filterApplicationsByRole(applications: Application[], user: User) {
@@ -45,9 +53,13 @@ export function getAvailableApplicationActions(application: Application, user: U
     actions.push("editDescription");
   }
 
-  if (user.role === "manager") {
+  if (application.authorId === user.id && application.status === "new") {
+    actions.push("cancel");
+  }
+
+  if (user.role === "manager" || user.role === "top-manager") {
     if (application.status === "new") {
-      actions.push("assignExecutor", "changeWorkType");
+      actions.push("assignExecutor", "changeWorkType", "cancel");
     }
 
     if (application.status === "assigned") {
@@ -73,7 +85,22 @@ export function getAvailableApplicationActions(application: Application, user: U
     }
   }
 
+  if (["rejected", "completed"].includes(application.status)) {
+    actions.push("archive");
+  }
+
   return actions;
+}
+
+function isAutoHiddenRejectedApplication(application: Application) {
+  if (application.status !== "rejected") {
+    return false;
+  }
+
+  const updatedAt = new Date(application.updatedAt).getTime();
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+  return Date.now() - updatedAt >= sevenDaysMs;
 }
 
 export function sortApplications(applications: Application[], sortKey: ApplicationSortKey) {

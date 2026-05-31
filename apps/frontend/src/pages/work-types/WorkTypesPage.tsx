@@ -1,7 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { departments, workTypes } from "@mocks/mockData";
+import { departments, grades, workTypes } from "@mocks/mockData";
 import type { Complexity, WorkType } from "@shared/model/domain";
 import { Button } from "@shared/ui";
 
@@ -11,6 +11,7 @@ type WorkTypeForm = {
   name: string;
   departmentId: string;
   complexity: Complexity;
+  allowedGradeIds: string[];
 };
 
 type WorkTypeErrors = Partial<Record<keyof WorkTypeForm, string>>;
@@ -22,16 +23,19 @@ const complexityLabels: Record<Complexity, string> = {
   critical: "Критичная",
 };
 
-const allowedPositionsByComplexity: Record<Complexity, string[]> = {
-  easy: ["Младший", "Старший", "Ведущий", "Главный"],
-  medium: ["Младший", "Старший", "Ведущий", "Главный"],
-  hard: ["Старший", "Ведущий", "Главный"],
-  critical: ["Ведущий", "Главный"],
+const defaultAllowedGradeIdsByComplexity: Record<Complexity, string[]> = {
+  easy: ["junior", "middle", "senior", "lead"],
+  medium: ["junior", "middle", "senior", "lead"],
+  hard: ["senior", "lead"],
+  critical: ["lead"],
 };
 
 export function WorkTypesPage() {
   const { currentUser } = useAuth();
-  const initialDepartmentId = currentUser?.role === "manager" ? currentUser.departmentId : departments[0]?.id ?? "";
+  const availableDepartments = currentUser?.role === "manager"
+    ? departments.filter((department) => department.id === currentUser.departmentId)
+    : departments;
+  const initialDepartmentId = availableDepartments[0]?.id ?? "";
   const [items, setItems] = useState<WorkType[]>(workTypes);
   const [departmentId, setDepartmentId] = useState(initialDepartmentId);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,6 +43,7 @@ export function WorkTypesPage() {
     name: "",
     departmentId: initialDepartmentId,
     complexity: "medium",
+    allowedGradeIds: defaultAllowedGradeIdsByComplexity.medium,
   });
   const [errors, setErrors] = useState<WorkTypeErrors>({});
   const [notice, setNotice] = useState("");
@@ -54,12 +59,12 @@ export function WorkTypesPage() {
       departments.map((department) => ({
         ...department,
         workTypesCount: items.filter((item) => item.departmentId === department.id).length,
-      })),
-    [items],
+      })).filter((department) => availableDepartments.some((availableDepartment) => availableDepartment.id === department.id)),
+    [availableDepartments, items],
   );
 
   const openCreateModal = () => {
-    setForm({ name: "", departmentId, complexity: "medium" });
+    setForm({ name: "", departmentId, complexity: "medium", allowedGradeIds: defaultAllowedGradeIdsByComplexity.medium });
     setErrors({});
     setIsModalOpen(true);
   };
@@ -79,6 +84,10 @@ export function WorkTypesPage() {
       nextErrors.name = "Такой вид работ уже есть в выбранном отделе.";
     }
 
+    if (form.allowedGradeIds.length === 0) {
+      nextErrors.complexity = "Выберите хотя бы один допустимый грейд.";
+    }
+
     setErrors(nextErrors);
 
     return Object.keys(nextErrors).length === 0;
@@ -96,6 +105,7 @@ export function WorkTypesPage() {
       name: form.name.trim(),
       departmentId: form.departmentId,
       complexity: form.complexity,
+      allowedGradeIds: form.allowedGradeIds,
     };
 
     setItems((current) => [createdItem, ...current]);
@@ -107,6 +117,35 @@ export function WorkTypesPage() {
   const handleDelete = (item: WorkType) => {
     setItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
     setNotice(`Вид работ «${item.name}» удален из mock-справочника.`);
+  };
+
+  const updateWorkTypeComplexity = (item: WorkType, complexity: Complexity) => {
+    setItems((current) =>
+      current.map((currentItem) =>
+        currentItem.id === item.id
+          ? { ...currentItem, complexity, allowedGradeIds: defaultAllowedGradeIdsByComplexity[complexity] }
+          : currentItem,
+      ),
+    );
+    setNotice(`Для вида работ «${item.name}» обновлены сложность и допустимые грейды.`);
+  };
+
+  const toggleWorkTypeGrade = (item: WorkType, gradeId: string) => {
+    const nextGradeIds = item.allowedGradeIds.includes(gradeId)
+      ? item.allowedGradeIds.filter((id) => id !== gradeId)
+      : [...item.allowedGradeIds, gradeId];
+
+    if (nextGradeIds.length === 0) {
+      setNotice("У вида работ должен остаться хотя бы один допустимый грейд.");
+      return;
+    }
+
+    setItems((current) =>
+      current.map((currentItem) =>
+        currentItem.id === item.id ? { ...currentItem, allowedGradeIds: nextGradeIds } : currentItem,
+      ),
+    );
+    setNotice(`Матрица грейдов для вида работ «${item.name}» обновлена.`);
   };
 
   return (
@@ -144,7 +183,7 @@ export function WorkTypesPage() {
             <label>
               Отдел
               <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
-                {departments.map((department) => (
+                {availableDepartments.map((department) => (
                   <option value={department.id} key={department.id}>
                     {department.name}
                   </option>
@@ -160,7 +199,7 @@ export function WorkTypesPage() {
             <div className="work-types-table__row work-types-table__row--head" role="row">
               <span role="columnheader">Название</span>
               <span role="columnheader">Сложность</span>
-              <span role="columnheader">Допустимые позиции</span>
+              <span role="columnheader">Допустимые грейды</span>
               <span role="columnheader">Использование</span>
               <span role="columnheader">Действия</span>
             </div>
@@ -170,13 +209,31 @@ export function WorkTypesPage() {
                 <div className="work-types-table__row" role="row" key={item.id}>
                   <span role="cell">{item.name}</span>
                   <span role="cell">
-                    <span className={`work-types-complexity work-types-complexity--${item.complexity}`}>
-                      {complexityLabels[item.complexity]}
-                    </span>
+                    <select
+                      className={`work-types-complexity-select work-types-complexity-select--${item.complexity}`}
+                      value={item.complexity}
+                      onChange={(event) => updateWorkTypeComplexity(item, event.target.value as Complexity)}
+                      aria-label={`Сложность ${item.name}`}
+                    >
+                      {Object.entries(complexityLabels).map(([value, label]) => (
+                        <option value={value} key={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
                   </span>
                   <span role="cell">
-                    <span className="work-types-positions">
-                      {allowedPositionsByComplexity[item.complexity].join(", ")}
+                    <span className="work-types-grades">
+                      {grades.map((grade) => (
+                        <label key={grade.id}>
+                          <input
+                            type="checkbox"
+                            checked={item.allowedGradeIds.includes(grade.id)}
+                            onChange={() => toggleWorkTypeGrade(item, grade.id)}
+                          />
+                          {grade.name}
+                        </label>
+                      ))}
                     </span>
                   </span>
                   <span role="cell">Доступен для новых заявок</span>
@@ -226,7 +283,7 @@ export function WorkTypesPage() {
                   setErrors((current) => ({ ...current, departmentId: undefined }));
                 }}
               >
-                {departments.map((department) => (
+                {availableDepartments.map((department) => (
                   <option value={department.id} key={department.id}>
                     {department.name}
                   </option>
@@ -239,7 +296,15 @@ export function WorkTypesPage() {
               Сложность
               <select
                 value={form.complexity}
-                onChange={(event) => setForm((current) => ({ ...current, complexity: event.target.value as Complexity }))}
+                onChange={(event) => {
+                  const complexity = event.target.value as Complexity;
+
+                  setForm((current) => ({
+                    ...current,
+                    complexity,
+                    allowedGradeIds: defaultAllowedGradeIdsByComplexity[complexity],
+                  }));
+                }}
               >
                 {Object.entries(complexityLabels).map(([value, label]) => (
                   <option value={value} key={value}>
@@ -249,9 +314,29 @@ export function WorkTypesPage() {
               </select>
             </label>
 
-            <div className="work-types-matrix-preview" aria-label="Допустимые позиции">
-              <span>Допустимые позиции</span>
-              <strong>{allowedPositionsByComplexity[form.complexity].join(", ")}</strong>
+            <div className="work-types-matrix-preview" aria-label="Допустимые грейды">
+              <span>Допустимые грейды</span>
+              <div className="work-types-grade-checks">
+                {grades.map((grade) => (
+                  <label key={grade.id}>
+                    <input
+                      type="checkbox"
+                      checked={form.allowedGradeIds.includes(grade.id)}
+                      onChange={(event) => {
+                        setForm((current) => ({
+                          ...current,
+                          allowedGradeIds: event.target.checked
+                            ? [...current.allowedGradeIds, grade.id]
+                            : current.allowedGradeIds.filter((id) => id !== grade.id),
+                        }));
+                        setErrors((current) => ({ ...current, complexity: undefined }));
+                      }}
+                    />
+                    {grade.name}
+                  </label>
+                ))}
+              </div>
+              {errors.complexity ? <small>{errors.complexity}</small> : null}
             </div>
 
             <footer>

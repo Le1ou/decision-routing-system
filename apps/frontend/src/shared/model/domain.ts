@@ -1,4 +1,4 @@
-export type UserRole = "author" | "executor" | "manager";
+export type UserRole = "author" | "executor" | "manager" | "top-manager";
 
 export type ApplicationStatus =
   | "new"
@@ -19,6 +19,8 @@ export type ApplicationAction =
   | "delegateInternal"
   | "delegateExternal"
   | "returnToNew"
+  | "cancel"
+  | "archive"
   | "confirmExternalDelegation"
   | "declineExternalDelegation"
   | "changeWorkType";
@@ -34,10 +36,15 @@ export type Department = {
   deadlineNotificationRatio: number;
 };
 
-export type Position = {
+export type JobTitle = {
   id: string;
   name: string;
   isTop: boolean;
+};
+
+export type Grade = {
+  id: string;
+  name: string;
 };
 
 export type User = {
@@ -46,7 +53,7 @@ export type User = {
   fullName: string;
   role: UserRole;
   departmentId: string;
-  positionId: string;
+  jobTitleId: string;
   isActive: boolean;
 };
 
@@ -55,6 +62,7 @@ export type WorkType = {
   name: string;
   departmentId: string;
   complexity: Complexity;
+  allowedGradeIds: string[];
 };
 
 export type Attachment = {
@@ -68,6 +76,7 @@ export type Delegation = {
   id: string;
   applicationId: string;
   delegatedByDepartmentId: string;
+  delegatedByEmployeeId?: string;
   delegatedFromDepartmentId: string;
   delegatedToDepartmentId: string;
   comment: string;
@@ -90,6 +99,7 @@ export type Application = {
   executorComment?: string;
   managerComment?: string;
   resultText?: string;
+  archivedAt?: string;
   delegationId?: string;
   delegatedFromDepartmentId?: string;
   delegatedToDepartmentId?: string;

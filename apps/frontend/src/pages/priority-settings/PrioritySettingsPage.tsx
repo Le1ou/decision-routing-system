@@ -1,65 +1,89 @@
 import { useMemo, useState } from "react";
 
-import { departments, mockUsers, positions, applications } from "@mocks/mockData";
+import { useAuth } from "@app/providers/AuthProvider";
+import { departments, mockUsers, applications } from "@mocks/mockData";
 import type { ApplicationPriority } from "@shared/model/domain";
 import { priorityLabels } from "@shared/model/labels";
 import { Button } from "@shared/ui";
 
 import "./PrioritySettingsPage.css";
 
-type PrioritySettingKey = "department" | "position" | "deadline" | "managerAuthor";
-type PrioritySettings = Record<PrioritySettingKey, number>;
-
-const initialSettings: PrioritySettings = {
-  department: 0.25,
-  position: 0.15,
-  deadline: 0.25,
-  managerAuthor: 0.1,
+type PrioritySettings = {
+  department: Record<string, number>;
+  deadline: number;
+  managerAuthor: Record<string, number>;
 };
 
-const settingLabels: Record<PrioritySettingKey, { title: string; hint: string }> = {
+const initialSettings: PrioritySettings = {
   department: {
-    title: "Отдел автора",
-    hint: "Учитывает приоритетность подразделения, из которого создана заявка.",
+    it: 0.28,
+    oge: 0.34,
+    production: 0.22,
+    okk: 0.3,
+    ogm: 0.32,
+    warehouse: 0.14,
+    supply: 0.18,
   },
-  position: {
-    title: "Должность автора",
-    hint: "Повышает вес заявок от руководящих или ключевых должностей.",
-  },
-  deadline: {
-    title: "Срок исполнения",
-    hint: "Чем ближе срок, тем выше предварительная оценка.",
-  },
+  deadline: 0.25,
   managerAuthor: {
-    title: "Руководитель как автор",
-    hint: "Дополнительный вес, если заявку создал руководитель.",
+    it: 0.1,
+    oge: 0.1,
+    production: 0.12,
+    okk: 0.08,
+    ogm: 0.1,
+    warehouse: 0.05,
+    supply: 0.06,
   },
 };
 
 export function PrioritySettingsPage() {
+  const { currentUser } = useAuth();
+  const canEdit = currentUser?.role === "top-manager";
+  const availableDepartments = currentUser?.role === "manager"
+    ? departments.filter((department) => department.id === currentUser.departmentId)
+    : departments;
+  const availableDepartmentIds = new Set(availableDepartments.map((department) => department.id));
+  const sampleApplications = applications.filter((application) => {
+    const author = mockUsers.find((user) => user.id === application.authorId);
+
+    return availableDepartmentIds.has(author?.departmentId ?? application.departmentId);
+  });
   const [savedSettings, setSavedSettings] = useState<PrioritySettings>(initialSettings);
   const [draftSettings, setDraftSettings] = useState<PrioritySettings>(initialSettings);
   const [sampleApplicationId, setSampleApplicationId] = useState(applications[0]?.id ?? "");
   const [notice, setNotice] = useState("");
 
-  const sampleApplication = applications.find((application) => application.id === sampleApplicationId) ?? applications[0];
+  const sampleApplication = sampleApplications.find((application) => application.id === sampleApplicationId) ?? sampleApplications[0];
   const preview = useMemo(
     () => (sampleApplication ? calculatePriorityPreview(sampleApplication.id, draftSettings) : null),
     [draftSettings, sampleApplication],
   );
-  const hasChanges = Object.keys(draftSettings).some(
-    (key) => draftSettings[key as PrioritySettingKey] !== savedSettings[key as PrioritySettingKey],
-  );
+  const hasChanges = JSON.stringify(draftSettings) !== JSON.stringify(savedSettings);
 
-  const updateSetting = (key: PrioritySettingKey, value: number) => {
+  const updateDepartmentSetting = (departmentId: string, key: "department" | "managerAuthor", value: number) => {
     const nextValue = Math.min(1, Math.max(0, value));
 
-    setDraftSettings((current) => ({ ...current, [key]: nextValue }));
+    setDraftSettings((current) => ({
+      ...current,
+      [key]: {
+        ...current[key],
+        [departmentId]: nextValue,
+      },
+    }));
+    setNotice("");
+  };
+
+  const updateDeadlineSetting = (value: number) => {
+    const nextValue = Math.min(1, Math.max(0, value));
+
+    setDraftSettings((current) => ({ ...current, deadline: nextValue }));
     setNotice("");
   };
 
   const saveSettings = () => {
-    const totalWeight = Object.values(draftSettings).reduce((sum, value) => sum + value, 0);
+    const totalWeight = Object.values(draftSettings.department).reduce((sum, value) => sum + value, 0) +
+      Object.values(draftSettings.managerAuthor).reduce((sum, value) => sum + value, 0) +
+      draftSettings.deadline;
 
     if (totalWeight <= 0) {
       setNotice("Хотя бы один коэффициент должен быть больше 0.");
@@ -80,7 +104,7 @@ export function PrioritySettingsPage() {
       <header className="priority-page__header">
         <div>
           <h1>Изменение приоритетности заявки</h1>
-          <p>Настройка влияния факторов на предварительный расчет приоритета в mock-режиме.</p>
+          <p>{canEdit ? "Топ-менеджер настраивает коэффициенты расчета приоритета." : "Руководитель видит коэффициенты, назначенные топ-менеджером."}</p>
         </div>
       </header>
 
@@ -90,41 +114,74 @@ export function PrioritySettingsPage() {
         <article className="priority-settings">
           <header>
             <h2>Коэффициенты</h2>
-            <span>Значение каждого параметра от 0 до 1</span>
+            <span>Формула: приоритет = k отдела автора + k руководителя-автора + k срока исполнения</span>
           </header>
 
           <div className="priority-settings__list">
-            {(Object.keys(settingLabels) as PrioritySettingKey[]).map((key) => (
-              <label className="priority-setting" key={key}>
+            <div className="priority-setting priority-setting--head" role="row">
+              <span>Отдел</span>
+              <span>k отдела</span>
+              <span>k руководителя отдела</span>
+            </div>
+            {availableDepartments.map((department) => (
+              <div className="priority-setting priority-setting--department" key={department.id}>
                 <span>
-                  <strong>{settingLabels[key].title}</strong>
-                  <small>{settingLabels[key].hint}</small>
+                  <strong>{department.name}</strong>
+                  <small>Коэффициенты применяются к заявкам авторов из этого отдела.</small>
                 </span>
                 <input
-                  type="range"
+                  type="number"
                   min="0"
                   max="1"
                   step="0.05"
-                  value={draftSettings[key]}
-                  onChange={(event) => updateSetting(key, Number(event.target.value))}
+                  value={draftSettings.department[department.id]}
+                  onChange={(event) => updateDepartmentSetting(department.id, "department", Number(event.target.value))}
+                  aria-label={`Коэффициент отдела ${department.name}`}
+                  disabled={!canEdit}
                 />
                 <input
                   type="number"
                   min="0"
                   max="1"
                   step="0.05"
-                  value={draftSettings[key]}
-                  onChange={(event) => updateSetting(key, Number(event.target.value))}
-                  aria-label={settingLabels[key].title}
+                  value={draftSettings.managerAuthor[department.id]}
+                  onChange={(event) => updateDepartmentSetting(department.id, "managerAuthor", Number(event.target.value))}
+                  aria-label={`Коэффициент руководителя отдела ${department.name}`}
+                  disabled={!canEdit}
                 />
-              </label>
+              </div>
             ))}
+            <label className="priority-setting priority-setting--deadline">
+              <span>
+                <strong>Срок исполнения</strong>
+                <small>Чем меньше времени осталось до дедлайна, тем ближе фактор срока к 1 и тем сильнее он поднимает итоговый приоритет.</small>
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={draftSettings.deadline}
+                onChange={(event) => updateDeadlineSetting(Number(event.target.value))}
+                disabled={!canEdit}
+              />
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                value={draftSettings.deadline}
+                onChange={(event) => updateDeadlineSetting(Number(event.target.value))}
+                aria-label="Коэффициент срока исполнения"
+                disabled={!canEdit}
+              />
+            </label>
           </div>
           <footer className="priority-settings__actions">
             <Button type="button" variant="secondary" onClick={resetSettings} disabled={!hasChanges}>
               Отмена
             </Button>
-            <Button type="button" onClick={saveSettings} disabled={!hasChanges}>
+            <Button type="button" onClick={saveSettings} disabled={!hasChanges || !canEdit}>
               Подтвердить
             </Button>
           </footer>
@@ -136,7 +193,7 @@ export function PrioritySettingsPage() {
             <label>
               Тестовая заявка
               <select value={sampleApplication?.id ?? ""} onChange={(event) => setSampleApplicationId(event.target.value)}>
-                {applications.map((application) => (
+                {sampleApplications.map((application) => (
                   <option value={application.id} key={application.id}>
                     ID {application.id} · {application.title}
                   </option>
@@ -179,28 +236,23 @@ function calculatePriorityPreview(applicationId: string, settings: PrioritySetti
   }
 
   const author = mockUsers.find((user) => user.id === application.authorId);
-  const department = departments.find((item) => item.id === author?.departmentId);
-  const position = positions.find((item) => item.id === author?.positionId);
+  const departmentId = author?.departmentId ?? application.departmentId;
+  const isManagerAuthor = author?.role === "manager" || author?.role === "top-manager";
+  const deadlinePressure = getDeadlinePressure(application.deadlineAt);
   const factorValues = {
-    department: department?.value ?? 0,
-    position: position?.isTop ? 1 : 0.45,
-    deadline: getDeadlinePressure(application.deadlineAt),
-    managerAuthor: author?.role === "manager" ? 1 : 0,
+    department: settings.department[departmentId] ?? 0,
+    deadline: deadlinePressure * settings.deadline,
+    managerAuthor: isManagerAuthor ? settings.managerAuthor[departmentId] ?? 0 : 0,
   };
 
-  const weightedSum = (Object.keys(settings) as PrioritySettingKey[]).reduce(
-    (sum, key) => sum + settings[key] * factorValues[key],
-    0,
-  );
-  const weightTotal = Object.values(settings).reduce((sum, value) => sum + value, 0) || 1;
-  const score = Math.min(1, weightedSum / weightTotal);
+  const weightedSum = factorValues.department + factorValues.deadline + factorValues.managerAuthor;
+  const score = Math.min(1, weightedSum);
 
   return {
     score,
     priority: getPriorityByScore(score),
     factors: [
       { label: "Отдел", value: factorValues.department },
-      { label: "Должность", value: factorValues.position },
       { label: "Срок", value: factorValues.deadline },
       { label: "Автор-руководитель", value: factorValues.managerAuthor },
     ],

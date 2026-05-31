@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
-import { attachments, departments, positions, workTypes, mockUsers } from "@mocks/mockData";
+import { attachments, delegations, departments, jobTitles, workTypes, mockUsers } from "@mocks/mockData";
 import type { Complexity, Application, ApplicationAction, ApplicationStatus } from "@shared/model/domain";
 import { actionLabels, priorityLabels, statusLabels } from "@shared/model/labels";
 import {
@@ -21,9 +21,6 @@ export function ApplicationsPage() {
   const { currentUser } = useAuth();
   const { applicationItems, updateApplication } = useApplicationsStore();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [departmentSettings, setDepartmentSettings] = useState(() =>
-    Object.fromEntries(departments.map((department) => [department.id, department.delegatedToSameDepartment])),
-  );
   const [sortKey, setSortKey] = useState<ApplicationSortKey>("priority");
   const [filters, setFilters] = useState<ApplicationFilter>({});
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
@@ -72,20 +69,29 @@ export function ApplicationsPage() {
     }
   }, [searchParams, selectedApplicationId, visibleApplications]);
 
+  useEffect(() => {
+    setNotice("");
+    setActionError("");
+    setPendingAction(null);
+  }, [selectedApplicationId]);
+
   const selectedApplication = visibleApplications.find((application) => application.id === selectedApplicationId) ?? visibleApplications[0];
-  const applicationActions = currentUser && selectedApplication ? getAvailableApplicationActions(selectedApplication, currentUser) : [];
-  const managerDepartment = currentUser?.role === "manager"
-    ? departments.find((department) => department.id === currentUser.departmentId)
-    : undefined;
+  const applicationActions = currentUser && selectedApplication
+    ? Array.from(new Set(getAvailableApplicationActions(selectedApplication, currentUser)))
+    : [];
   const applicationDepartment = departments.find((department) => department.id === selectedApplication?.departmentId);
   const applicationWorkType = workTypes.find((workType) => workType.id === selectedApplication?.workTypeId);
+  const applicationDelegation = delegations.find((delegation) => delegation.id === selectedApplication?.delegationId);
   const author = mockUsers.find((user) => user.id === selectedApplication?.authorId);
   const executor = mockUsers.find((user) => user.id === selectedApplication?.executorId);
   const previousExecutor = mockUsers.find((user) => user.id === selectedApplication?.previousExecutorId);
+  const delegatingExecutor = mockUsers.find((user) => user.id === applicationDelegation?.delegatedByEmployeeId) ?? previousExecutor;
   const authorDepartment = departments.find((department) => department.id === author?.departmentId);
-  const authorPosition = positions.find((position) => position.id === author?.positionId);
+  const authorJobTitle = jobTitles.find((jobTitle) => jobTitle.id === author?.jobTitleId);
   const executorDepartment = departments.find((department) => department.id === executor?.departmentId);
-  const executorPosition = positions.find((position) => position.id === executor?.positionId);
+  const executorJobTitle = jobTitles.find((jobTitle) => jobTitle.id === executor?.jobTitleId);
+  const delegatingExecutorDepartment = departments.find((department) => department.id === delegatingExecutor?.departmentId);
+  const delegatingExecutorJobTitle = jobTitles.find((jobTitle) => jobTitle.id === delegatingExecutor?.jobTitleId);
   const applicationAttachmentNames = [
     ...attachments.filter((attachment) => attachment.applicationId === selectedApplication?.id).map((attachment) => attachment.name),
     ...(selectedApplication?.attachmentNames ?? []),
@@ -103,6 +109,7 @@ export function ApplicationsPage() {
     "complete",
     "changeWorkType",
     "reject",
+    "cancel",
   ];
 
   const handleApplicationAction = (action: ApplicationAction) => {
@@ -126,21 +133,6 @@ export function ApplicationsPage() {
     }
 
     applyAction(action);
-  };
-
-  const toggleDelegationConfirmation = () => {
-    if (!managerDepartment) {
-      return;
-    }
-
-    const nextValue = !departmentSettings[managerDepartment.id];
-
-    setDepartmentSettings((current) => ({ ...current, [managerDepartment.id]: nextValue }));
-    setNotice(
-      nextValue
-        ? `Для отдела «${managerDepartment.name}» включено подтверждение делегирования внутри отдела.`
-        : `Для отдела «${managerDepartment.name}» подтверждение делегирования внутри отдела отключено.`,
-    );
   };
 
   const applyAction = (action: ApplicationAction, payload: MockActionPayload = {}) => {
@@ -228,7 +220,7 @@ export function ApplicationsPage() {
               Назначенные на меня
             </label>
           ) : null}
-          {currentUser.role === "manager" ? (
+          {currentUser.role === "manager" || currentUser.role === "top-manager" ? (
             <label>
               <input
                 type="checkbox"
@@ -242,20 +234,6 @@ export function ApplicationsPage() {
           ) : null}
         </div>
 
-        {managerDepartment ? (
-          <section className="applications-manager-settings" aria-label="Настройки отдела">
-            <strong>Делегирование внутри отдела</strong>
-            <label>
-              <input
-                type="checkbox"
-                checked={Boolean(departmentSettings[managerDepartment.id])}
-                onChange={toggleDelegationConfirmation}
-              />
-              Подтверждать руководителем
-            </label>
-          </section>
-        ) : null}
-
         <div className="applications-list">
           {visibleApplications.length > 0 ? (
             visibleApplications.map((application) => (
@@ -266,10 +244,16 @@ export function ApplicationsPage() {
                 onClick={() => {
                   setSelectedApplicationId(application.id);
                   setSearchParams({ application: application.id });
+                  setNotice("");
+                  setPendingAction(null);
+                  setActionError("");
                 }}
               >
                 <strong>Заявка ID {application.id}</strong>
                 <span>{application.title}</span>
+                <small>
+                  {statusLabels[application.status]} · {priorityLabels[application.priority]}
+                </small>
               </button>
             ))
           ) : (
@@ -303,6 +287,14 @@ export function ApplicationsPage() {
           <input value={selectedApplication.title} readOnly aria-label="Тема заявки" />
         </header>
 
+        <div className="application-card__actions application-card__actions--top">
+          {applicationActions.map((action) => (
+            <button type="button" key={action} onClick={() => handleApplicationAction(action)}>
+              {actionLabels[action]}
+            </button>
+          ))}
+        </div>
+
         <div className="application-card__main">
           <section className="application-card__workarea">
             <div className="application-card__section-header">
@@ -317,19 +309,33 @@ export function ApplicationsPage() {
             <label className="application-card__comment">
               <span>Комментарий исполнителя:</span>
               <textarea
-                value={selectedApplication.executorComment ?? selectedApplication.resultText ?? ""}
+                value={selectedApplication.executorComment ?? ""}
                 placeholder="Комментарий появится после назначения или выполнения работ"
                 readOnly
                 aria-label="Комментарий исполнителя"
               />
             </label>
-            <div className="application-card__actions">
-              {applicationActions.map((action) => (
-                <button type="button" key={action} onClick={() => handleApplicationAction(action)}>
-                  {actionLabels[action]}
-                </button>
-              ))}
-            </div>
+            {selectedApplication.managerComment ? (
+              <label className="application-card__comment">
+                <span>Комментарий руководителя:</span>
+                <textarea
+                  value={selectedApplication.managerComment}
+                  readOnly
+                  aria-label="Комментарий руководителя"
+                />
+              </label>
+            ) : null}
+            {selectedApplication.status === "completed" ? (
+              <label className="application-card__comment">
+                <span>Результат работы:</span>
+                <textarea
+                  value={selectedApplication.resultText ?? ""}
+                  placeholder="Результат появится после завершения заявки"
+                  readOnly
+                  aria-label="Результат работы"
+                />
+              </label>
+            ) : null}
             <section className="application-card__attachments">
               <h2>Вложения</h2>
               {applicationAttachmentNames.length > 0 ? (
@@ -360,21 +366,37 @@ export function ApplicationsPage() {
                 Вид работ:
                 <input value={applicationWorkType?.name ?? "-"} readOnly />
               </label>
+              <label>
+                Сложность:
+                <input value={complexityLabels[selectedApplication.assignedComplexity ?? applicationWorkType?.complexity ?? "medium"]} readOnly />
+              </label>
             </div>
 
             <section className="application-info-box">
               <h2>Автор заявки</h2>
               <p><b>ФИО:</b> {author?.fullName ?? "-"}</p>
               <p><b>Отдел:</b> {authorDepartment?.name ?? "-"}</p>
-              <p><b>Должность:</b> {authorPosition?.name ?? "-"}</p>
+              <p><b>Должность:</b> {authorJobTitle?.name ?? "-"}</p>
             </section>
 
             <section className="application-info-box">
               <h2>Исполнитель</h2>
               <p><b>ФИО:</b> {executor?.fullName ?? "-"}</p>
               <p><b>Отдел:</b> {executorDepartment?.name ?? "-"}</p>
-              <p><b>Должность:</b> {executorPosition?.name ?? "-"}</p>
+              <p><b>Должность:</b> {executorJobTitle?.name ?? "-"}</p>
             </section>
+
+            {selectedApplication.delegatedFromDepartmentId || applicationDelegation ? (
+              <section className="application-info-box">
+                <h2>Делегирование</h2>
+                <p><b>Из отдела:</b> {departments.find((department) => department.id === selectedApplication.delegatedFromDepartmentId)?.name ?? "-"}</p>
+                <p><b>В отдел:</b> {departments.find((department) => department.id === selectedApplication.delegatedToDepartmentId)?.name ?? "-"}</p>
+                <p><b>Комментарий:</b> {applicationDelegation?.comment ?? selectedApplication.executorComment ?? "-"}</p>
+                <p><b>Кто делегировал:</b> {delegatingExecutor?.fullName ?? "-"}</p>
+                <p><b>Отдел:</b> {delegatingExecutorDepartment?.name ?? "-"}</p>
+                <p><b>Должность:</b> {delegatingExecutorJobTitle?.name ?? "-"}</p>
+              </section>
+            ) : null}
 
             <section className="application-info-box application-info-box--dates">
               <h2>Информация о заявке</h2>
@@ -596,6 +618,10 @@ function getActionValidationError(
     return "Укажите причину отклонения заявки.";
   }
 
+  if (action === "cancel" && !payload.comment?.trim()) {
+    return "Укажите причину отмены заявки.";
+  }
+
   if (action === "complete" && !payload.resultText?.trim()) {
     return "Заполните состав или результат выполненных работ.";
   }
@@ -694,6 +720,23 @@ function applyMockAction(
     };
   }
 
+  if (action === "cancel") {
+    return {
+      ...application,
+      status: "rejected",
+      updatedAt,
+      managerComment: payload.comment?.trim() ?? application.managerComment,
+    };
+  }
+
+  if (action === "archive") {
+    return {
+      ...application,
+      archivedAt: updatedAt,
+      updatedAt,
+    };
+  }
+
   if (action === "delegateInternal" || action === "returnToNew") {
     return {
       ...application,
@@ -783,6 +826,14 @@ function getMockActionNotice(action: ApplicationAction) {
 
   if (action === "reject") {
     return "Заявка отклонена.";
+  }
+
+  if (action === "cancel") {
+    return "Заявка отменена.";
+  }
+
+  if (action === "archive") {
+    return "Заявка перемещена в архив и скрыта из списка.";
   }
 
   if (action === "delegateExternal") {

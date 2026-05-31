@@ -4,6 +4,7 @@ export const roleLabels: Record<UserRole, string> = {
   author: "Автор",
   executor: "Исполнитель",
   manager: "Руководитель",
+  "top-manager": "Топ-менеджер",
 };
 
 export const statusLabels: Record<ApplicationStatus, string> = {
@@ -31,6 +32,8 @@ export const actionLabels: Record<ApplicationAction, string> = {
   delegateInternal: "Делегировать внутри отдела",
   delegateExternal: "Делегировать в другой отдел",
   returnToNew: "Вернуть в Новый",
+  cancel: "Отменить заявку",
+  archive: "В архив",
   confirmExternalDelegation: "Подтвердить делегирование",
   declineExternalDelegation: "Отклонить делегирование",
   changeWorkType: "Изменить вид работ",
