@@ -27,18 +27,20 @@ class ActiveDirectoryAuth:
         pass
     def authenticate_user_test(self, credentials: HTTPBasicCredentials = Depends(security)):
         username = credentials.username
-        if username not in configData["MOCK_USERS_DB"]:
+        # Only AD people who have been onboarded into the system (inSystem) and
+        # therefore carry a password may authenticate. AD-only candidates cannot.
+        entry = configData["MOCK_AD"].get(username)
+        if not entry or not entry.get("inSystem") or "password" not in entry:
             raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User with that username does not exists"
         )
         password = credentials.password
-        stored_password = configData["MOCK_USERS_DB"][username]["password"]
-        if password == stored_password:
+        if password == entry["password"]:
             return [username, password]
         else:
             raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Password does not match username"
         )
             
@@ -134,11 +136,38 @@ class PgDbOperator:
                     print(f"Permission role {perm} already exists, skipping.")
                     conn.rollback()
 
-    def fillDbRolesBasedOnADTest(self, roleList):
-        for role in roleList:
-            r = role.lower()
+    def setupRoleTableGrants(self):
+        """
+        Create the two Postgres group roles that back the application's AD role
+        model and grant them table privileges. Per-user membership in these roles
+        is assigned in createUserRole(), derived from the user's AD role:
+
+            app_table_base    every authenticated user — read everything, write
+                              their own applications / delegations / notifications.
+            app_table_manage  managers & top-managers — manage the directories
+                              (departments, employees, work types and their grades).
+
+        Department-level access (a manager only touching their own department) is
+        enforced in the API layer, not via Postgres roles.
+        """
+        base_grants = [
+            "GRANT USAGE ON SCHEMA public TO app_table_base",
+            "GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_table_base",
+            "GRANT INSERT, UPDATE ON public.application TO app_table_base",
+            "GRANT INSERT, DELETE ON public.employee_to_application TO app_table_base",
+            "GRANT INSERT, UPDATE ON public.delegated TO app_table_base",
+            "GRANT UPDATE ON public.notification TO app_table_base",
+            "GRANT INSERT, UPDATE ON public.photo TO app_table_base",
+        ]
+        manage_grants = [
+            "GRANT USAGE ON SCHEMA public TO app_table_manage",
+            "GRANT INSERT, UPDATE, DELETE ON "
+            "public.department, public.employee, public.types_of_works, "
+            "public.type_of_work_to_grade TO app_table_manage",
+        ]
+        # Create the group roles (idempotent).
+        for role_name in ("app_table_base", "app_table_manage"):
             with self.pool.connection() as conn:
-                # Create role if missing (use lowercase — PG stores all role names lowercase)
                 conn.execute(
                     pgsql.SQL("""
                         DO $body$
@@ -149,24 +178,15 @@ class PgDbOperator:
                         END;
                         $body$;
                     """).format(
-                        role_name=pgsql.Literal(r),
-                        role_ident=pgsql.Identifier(r),
+                        role_name=pgsql.Literal(role_name),
+                        role_ident=pgsql.Identifier(role_name),
                     )
                 )
-                # Always re-apply grants (idempotent — safe on every startup)
-                conn.execute(pgsql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(pgsql.Identifier(r)))
-                conn.execute(pgsql.SQL("GRANT INSERT, UPDATE ON public.application TO {}").format(pgsql.Identifier(r)))
-                conn.execute(pgsql.SQL("GRANT INSERT, DELETE ON public.employee_to_application TO {}").format(pgsql.Identifier(r)))
-                conn.execute(pgsql.SQL("GRANT INSERT, UPDATE ON public.delegated TO {}").format(pgsql.Identifier(r)))
-                conn.execute(pgsql.SQL("GRANT UPDATE ON public.notification TO {}").format(pgsql.Identifier(r)))
-                conn.execute(pgsql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(pgsql.Identifier(r)))
-                if "lead" in r:
-                    conn.execute(
-                        pgsql.SQL("GRANT INSERT, UPDATE ON public.department, public.employee, public.types_of_works TO {}").format(
-                            pgsql.Identifier(r)
-                        )
-                    )
-               
+        # Re-apply grants on every startup (idempotent).
+        with self.pool.connection() as conn:
+            for stmt in base_grants + manage_grants:
+                conn.execute(stmt)
+
 
 
     ######
