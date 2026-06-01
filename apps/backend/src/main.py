@@ -1,4 +1,4 @@
-from apps.backend.src.application_module import (
+from src.application_module import (
     PgDbOperator, ActiveDirectoryAuth, configData, project_timezone
 )
 from fastapi import FastAPI, Depends, HTTPException, status, Query, UploadFile, File, Path
@@ -9,8 +9,27 @@ from pydantic import model_validator
 from typing import Annotated, Literal, Optional
 from datetime import datetime
 import uuid
+import os
+import boto3
 import psycopg
-from apps.backend.src.seed import seed_database
+from src.seed import seed_database
+
+S3_BUCKET       = os.environ.get("S3_BUCKET_NAME", "")
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL")
+S3_REGION       = os.environ.get("S3_REGION", "auto")
+_s3_client: boto3.client = None
+
+def get_s3():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=S3_ENDPOINT_URL,
+            aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
+            region_name=S3_REGION,
+        )
+    return _s3_client
 
 # ─────────────────────────── App bootstrap ───────────────────────────
 
@@ -23,7 +42,18 @@ authObj = ActiveDirectoryAuth()
 seed_database(DBController)
 for _username, _user_cfg in configData["MOCK_USERS_DB"].items():
     DBController.createUserRole(_username, _user_cfg["password"], _user_cfg["pgRoles"])
-app = FastAPI(title="Decision Routing System API", version="0.1.0")
+app = FastAPI(
+    title="Decision Routing System API",
+    version="0.1.0",
+    openapi_tags=[
+        {"name": "Auth",          "description": "Текущий пользователь"},
+        {"name": "Applications",  "description": "Производственные заявки"},
+        {"name": "Directories",   "description": "Отделы, сотрудники, должности и виды работ"},
+        {"name": "Priority",      "description": "Настройки расчета приоритета"},
+        {"name": "Notifications", "description": "Уведомления текущего пользователя"},
+        {"name": "Reports",       "description": "Отчеты и XLS-выгрузка"},
+    ],
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -326,6 +356,18 @@ class CreateApplicationPayload(BaseModel):
     deadlineAt: datetime
     description: str = Field(max_length=1000)
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "Настройка сервера",
+                "departmentId": "1",
+                "workTypeId": "2",
+                "deadlineAt": "2026-06-15T12:00:00Z",
+                "description": "Необходимо настроить новый сервер отдела.",
+            }
+        }
+    }
+
 class ApplicationActionPayload(BaseModel):
     action: str
     executorId: Optional[str]  = None
@@ -335,6 +377,7 @@ class ApplicationActionPayload(BaseModel):
     complexity: Optional[str]  = None
     resultText: Optional[str]  = None
     description: Optional[str] = None
+
 
 # ── Priority settings ──
 
@@ -394,6 +437,58 @@ class ApplicationReportRowOut(BaseModel):
         return v.isoformat() if isinstance(v, datetime) else str(v)
 
     model_config = {"populate_by_name": True}
+
+# ─────────────────────────── Response wrappers ───────────────────────
+
+class PaginationOut(BaseModel):
+    page: int     = Field(ge=1)
+    pageSize: int = Field(ge=1)
+    total: int    = Field(ge=0)
+
+class IdResponse(BaseModel):
+    id: str
+
+class CurrentUserResponse(BaseModel):
+    user: UserOut
+    permissions: UserPermissionsOut
+
+class ApplicationListResponse(BaseModel):
+    items: list[ApplicationListItemOut]
+    pagination: PaginationOut
+
+class ApplicationDetailResponse(BaseModel):
+    application: ApplicationDetailOut
+
+class AttachmentUploadResponse(BaseModel):
+    items: list[IdResponse]
+
+class DepartmentListResponse(BaseModel):
+    items: list[DepartmentOut]
+
+class EmployeeListResponse(BaseModel):
+    items: list[UserOut]
+
+class PositionListResponse(BaseModel):
+    items: list[PositionOut]
+
+class AdUserListResponse(BaseModel):
+    items: list[AdUserOut]
+
+class WorkTypeListResponse(BaseModel):
+    items: list[WorkTypeOut]
+
+class NotificationsResponse(BaseModel):
+    items: list[NotificationOut]
+    unreadCount: int = Field(ge=0)
+
+class ReportSummaryOut(BaseModel):
+    total: int              = Field(ge=0)
+    completed: int          = Field(ge=0)
+    inProgressOrAssigned: int = Field(ge=0)
+
+class ApplicationReportResponse(BaseModel):
+    items: list[ApplicationReportRowOut]
+    summary: ReportSummaryOut
 
 # ─────────────────────────── Business logic helpers ──────────────────
 
@@ -534,9 +629,18 @@ def _build_application_list_query(filters: dict) -> tuple[str, list]:
 #  ROUTES
 # ═══════════════════════════════════════════════════════════════
 
+# ─── Health ─────────────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 # ─── Auth ───────────────────────────────────────────────────────
 
-@app.get("/auth/me")
+@app.get("/auth/me", tags=["Auth"], summary="Получить текущего пользователя",
+         description="Возвращает пользователя, найденного через Basic Auth/Active Directory, его роль, отдел, должность и права frontend.",
+         response_model=CurrentUserResponse)
 def get_current_user(userData=Depends(authObj.authenticate_user_test)):
     try:
         db = get_db_user(userData)
@@ -586,7 +690,9 @@ def get_current_user(userData=Depends(authObj.authenticate_user_test)):
 
 # ─── Applications ────────────────────────────────────────────────
 
-@app.get("/applications")
+@app.get("/applications", tags=["Applications"], summary="Получить список заявок",
+         description="Без query-параметров backend возвращает список заявок по умолчанию для текущего пользователя. Видимость заявок определяется ролью пользователя на backend.",
+         response_model=ApplicationListResponse)
 def list_applications(
     userData=Depends(authObj.authenticate_user_test),
     status_filter: Optional[str] = Query(default=None, alias="status"),
@@ -669,7 +775,9 @@ def list_applications(
         _raise_for_db_error(e)
 
 
-@app.post("/applications", status_code=201)
+@app.post("/applications", status_code=201, tags=["Applications"], summary="Создать заявку",
+          description="Создает заявку от имени текущего пользователя. Приоритет и статус рассчитывает backend. Вложения загружаются отдельным запросом, если frontend реально отправляет файлы.",
+          response_model=IdResponse)
 def create_application(
     payload: CreateApplicationPayload,
     userData=Depends(authObj.authenticate_user_test),
@@ -732,7 +840,8 @@ def create_application(
         _raise_for_db_error(e)
 
 
-@app.get("/applications/{applicationId}")
+@app.get("/applications/{applicationId}", tags=["Applications"], summary="Получить карточку заявки",
+         response_model=ApplicationDetailResponse)
 def get_application(
     applicationId: int = Path(...),
     userData=Depends(authObj.authenticate_user_test),
@@ -787,16 +896,33 @@ def get_application(
                         delegation = DelegationOut.model_validate(d).model_dump()
 
         row["availableActions"] = _available_actions(row, user_role)
-        row["attachments"]      = [
-            {
-                "id": str(p["photo_id"]),
-                "applicationId": str(p["application_id"]),
-                "name": f"photo_{p['photo_id']}",
-                "type": "photo",
-                "url": None,
-            }
-            for p in photos
-        ]
+        if S3_ENDPOINT_URL and S3_BUCKET:
+            s3 = get_s3()
+            row["attachments"] = [
+                {
+                    "id": str(p["photo_id"]),
+                    "applicationId": str(p["application_id"]),
+                    "name": p["name"],
+                    "type": "photo",
+                    "url": s3.generate_presigned_url(
+                        "get_object",
+                        Params={"Bucket": S3_BUCKET, "Key": p["s3_key"]},
+                        ExpiresIn=3600,
+                    ),
+                }
+                for p in photos
+            ]
+        else:
+            row["attachments"] = [
+                {
+                    "id": str(p["photo_id"]),
+                    "applicationId": str(p["application_id"]),
+                    "name": p["name"],
+                    "type": "photo",
+                    "url": None,
+                }
+                for p in photos
+            ]
         row["delegation"] = delegation
 
         detail = ApplicationDetailOut.model_validate(row)
@@ -808,7 +934,24 @@ def get_application(
         _raise_for_db_error(e)
 
 
-@app.post("/applications/{applicationId}/actions", status_code=204)
+@app.post("/applications/{applicationId}/actions", status_code=204, tags=["Applications"], summary="Выполнить действие над заявкой",
+          description="Единая точка для действий из карточки заявки. Backend проверяет роль пользователя, текущий статус заявки и обязательность полей для конкретного action.",
+          openapi_extra={
+              "requestBody": {
+                  "required": True,
+                  "content": {
+                      "application/json": {
+                          "schema": {"$ref": "#/components/schemas/ApplicationActionPayload"},
+                          "examples": {
+                              "assignExecutor":   {"summary": "assignExecutor",   "value": {"action": "assignExecutor",   "executorId": "2",        "comment": "Назначено вручную руководителем."}},
+                              "delegateExternal": {"summary": "delegateExternal", "value": {"action": "delegateExternal", "departmentId": "oge",     "comment": "Работы относятся к ОГЭ."}},
+                              "complete":         {"summary": "complete",         "value": {"action": "complete",         "resultText": "Работы выполнены, доступ проверен."}},
+                              "changeWorkType":   {"summary": "changeWorkType",   "value": {"action": "changeWorkType",   "workTypeId": "3"}},
+                          },
+                      }
+                  },
+              }
+          })
 def application_action(
     applicationId: int = Path(...),
     payload: ApplicationActionPayload = ...,
@@ -995,7 +1138,9 @@ def application_action(
         _raise_for_db_error(e)
 
 
-@app.post("/applications/{applicationId}/attachments", status_code=201)
+@app.post("/applications/{applicationId}/attachments", status_code=201, tags=["Applications"], summary="Загрузить вложения к заявке",
+          description="Frontend отправляет файлы на backend через multipart/form-data. Backend проверяет права, загружает файлы в S3 и сохраняет метаданные вложений в БД. Frontend не работает с S3 напрямую.",
+          response_model=AttachmentUploadResponse)
 async def upload_attachments(
     applicationId: int = Path(...),
     files: list[UploadFile] = File(...),
@@ -1009,16 +1154,27 @@ async def upload_attachments(
         rows = db.getRowFromTable("application", "application_id", int(applicationId))
         row_or_404(rows, "Application not found")
 
+        s3 = get_s3()
         with db.pool.connection() as conn:
             from psycopg.rows import dict_row
             with conn.cursor(row_factory=dict_row) as cur:
                 for f in files:
                     content = await f.read()
-                    import base64
-                    encoded = base64.b64encode(content).decode("utf-8")
+                    filename     = f.filename or "upload"
+                    content_type = f.content_type or "application/octet-stream"
+                    s3_key = f"applications/{applicationId}/{uuid.uuid4()}-{filename}"
+
+                    s3.put_object(
+                        Bucket=S3_BUCKET,
+                        Key=s3_key,
+                        Body=content,
+                        ContentType=content_type,
+                    )
+
                     photo_id = cur.execute(
-                        "INSERT INTO public.photo (value, application_id) VALUES (%s, %s) RETURNING photo_id",
-                        (encoded, int(applicationId))
+                        """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
+                           VALUES (%s, %s, %s, %s, %s) RETURNING photo_id""",
+                        (s3_key, filename, content_type, len(content), int(applicationId))
                     ).fetchone()["photo_id"]
                     ids.append({"id": str(photo_id)})
 
@@ -1032,7 +1188,7 @@ async def upload_attachments(
 
 # ─── Directories ────────────────────────────────────────────────
 
-@app.get("/departments")
+@app.get("/departments", tags=["Directories"], summary="Получить отделы", response_model=DepartmentListResponse)
 def get_departments(userData=Depends(authObj.authenticate_user_test)):
     try:
         db = get_db_user(userData)
@@ -1045,7 +1201,7 @@ def get_departments(userData=Depends(authObj.authenticate_user_test)):
         _raise_for_db_error(e)
 
 
-@app.get("/employees")
+@app.get("/employees", tags=["Directories"], summary="Получить сотрудников, подключенных к системе", response_model=EmployeeListResponse)
 def get_employees(
     userData=Depends(authObj.authenticate_user_test),
     departmentId: Optional[str] = Query(default=None),
@@ -1103,7 +1259,9 @@ def get_employees(
         _raise_for_db_error(e)
 
 
-@app.post("/employees", status_code=201)
+@app.post("/employees", status_code=201, tags=["Directories"], summary="Добавить AD-пользователя в систему как исполнителя",
+          description="Не создает человека в AD. Backend создает локальную запись участия в системе для уже существующего AD-пользователя. Роль нового сотрудника — executor.",
+          response_model=IdResponse)
 def add_employee(
     payload: CreateEmployeePayload,
     userData=Depends(authObj.authenticate_user_test),
@@ -1135,7 +1293,7 @@ def add_employee(
         _raise_for_db_error(e)
 
 
-@app.patch("/employees/{employeeId}", status_code=204)
+@app.patch("/employees/{employeeId}", status_code=204, tags=["Directories"], summary="Изменить позицию сотрудника или участие в распределении")
 def update_employee(
     payload: UpdateEmployeePayload,
     employeeId: int = Path(...),
@@ -1170,7 +1328,9 @@ def update_employee(
         _raise_for_db_error(e)
 
 
-@app.get("/positions")
+@app.get("/positions", tags=["Directories"], summary="Получить позиции",
+         description="Позиции — это грейды из post_grade, которые руководитель назначает сотрудникам.",
+         response_model=PositionListResponse)
 def get_positions(userData=Depends(authObj.authenticate_user_test)):
     try:
         db = get_db_user(userData)
@@ -1197,7 +1357,7 @@ def get_positions(userData=Depends(authObj.authenticate_user_test)):
         _raise_for_db_error(e)
 
 
-@app.get("/ad/users")
+@app.get("/ad/users", tags=["Directories"], summary="Найти пользователей AD для добавления в систему", response_model=AdUserListResponse)
 def get_ad_users(
     userData=Depends(authObj.authenticate_user_test),
     query: Optional[str]        = Query(default=None),
@@ -1227,7 +1387,7 @@ def get_ad_users(
         _raise_for_db_error(e)
 
 
-@app.get("/work-types")
+@app.get("/work-types", tags=["Directories"], summary="Получить виды работ", response_model=WorkTypeListResponse)
 def get_work_types_all(
     userData=Depends(authObj.authenticate_user_test),
     departmentId: Optional[str] = Query(default=None),
@@ -1264,7 +1424,7 @@ def get_work_types_all(
         _raise_for_db_error(e)
 
 
-@app.post("/work-types", status_code=201)
+@app.post("/work-types", status_code=201, tags=["Directories"], summary="Создать вид работ", response_model=IdResponse)
 def create_work_type(
     payload: CreateWorkTypePayload,
     userData=Depends(authObj.authenticate_user_test),
@@ -1289,7 +1449,7 @@ def create_work_type(
         _raise_for_db_error(e)
 
 
-@app.delete("/work-types/{workTypeId}", status_code=204)
+@app.delete("/work-types/{workTypeId}", status_code=204, tags=["Directories"], summary="Удалить вид работ")
 def delete_work_type(
     workTypeId: int = Path(...),
     userData=Depends(authObj.authenticate_user_test),
@@ -1326,7 +1486,7 @@ _priority_settings: dict = {
     "managerAuthor": 0.2,
 }
 
-@app.get("/priority-settings")
+@app.get("/priority-settings", tags=["Priority"], summary="Получить коэффициенты расчета приоритета", response_model=PrioritySettingsModel)
 def get_priority_settings(userData=Depends(authObj.authenticate_user_test)):
     try:
         require_permission(userData, "canManagePrioritySettings")
@@ -1337,7 +1497,7 @@ def get_priority_settings(userData=Depends(authObj.authenticate_user_test)):
         _raise_for_db_error(e)
 
 
-@app.put("/priority-settings")
+@app.put("/priority-settings", tags=["Priority"], summary="Сохранить коэффициенты расчета приоритета", response_model=PrioritySettingsModel)
 def update_priority_settings(
     payload: PrioritySettingsModel,
     userData=Depends(authObj.authenticate_user_test),
@@ -1354,7 +1514,9 @@ def update_priority_settings(
 
 # ─── Notifications ───────────────────────────────────────────────
 
-@app.get("/notifications")
+@app.get("/notifications", tags=["Notifications"], summary="Получить уведомления текущего пользователя",
+         description="Текущий контракт рассчитан на pull-модель: backend создает уведомления при событиях системы, frontend периодически запрашивает список или обновляет его после действий пользователя.",
+         response_model=NotificationsResponse)
 def get_notifications(
     userData=Depends(authObj.authenticate_user_test),
     unreadOnly: bool = Query(default=False),
@@ -1391,7 +1553,7 @@ def get_notifications(
         _raise_for_db_error(e)
 
 
-@app.post("/notifications/{notificationId}/read", status_code=204)
+@app.post("/notifications/{notificationId}/read", status_code=204, tags=["Notifications"], summary="Отметить уведомление прочитанным")
 def mark_notification_read(
     notificationId: int = Path(...),
     userData=Depends(authObj.authenticate_user_test),
@@ -1415,7 +1577,7 @@ def mark_notification_read(
         _raise_for_db_error(e)
 
 
-@app.post("/notifications/read-all", status_code=204)
+@app.post("/notifications/read-all", status_code=204, tags=["Notifications"], summary="Отметить все уведомления текущего пользователя прочитанными")
 def mark_all_notifications_read(userData=Depends(authObj.authenticate_user_test)):
     try:
         db = get_db_user(userData)
@@ -1485,7 +1647,9 @@ def _build_report_query(
     return base, params
 
 
-@app.get("/reports/applications")
+@app.get("/reports/applications", tags=["Reports"], summary="Сформировать предварительный отчет по заявкам",
+         description="Возвращает JSON-данные для предпросмотра отчета. Фильтры передаются query-параметрами, потому что формирование отчета не меняет состояние backend.",
+         response_model=ApplicationReportResponse)
 def report_applications(
     userData=Depends(authObj.authenticate_user_test),
     createdFrom:  Optional[str] = Query(default=None),
@@ -1528,7 +1692,8 @@ def report_applications(
         _raise_for_db_error(e)
 
 
-@app.get("/reports/applications.xls")
+@app.get("/reports/applications.xls", tags=["Reports"], summary="Скачать XLS-отчет по заявкам",
+         description="Возвращает готовый XLS-файл по тем же фильтрам, что и предпросмотр отчета. Генерация файла выполняется на backend.")
 def report_applications_xls(
     userData=Depends(authObj.authenticate_user_test),
     createdFrom:  Optional[str] = Query(default=None),

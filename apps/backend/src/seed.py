@@ -541,17 +541,35 @@ def seed_database(db_operator) -> None:
             )
         print("[seed] notification → done")
 
-        # ── 15. photo (schema only has value + application_id) ────────────────
-        TINY_PNG_B64 = (
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
-            "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-        )
-        for app_key in ("completed_1", "completed_2", "in_progress_sec"):
-            conn.execute(
-                "INSERT INTO public.photo (value, application_id) VALUES (%s, %s)",
-                (TINY_PNG_B64, app_ids[app_key])
+        # ── 15. photo ─────────────────────────────────────────────────────────
+        # Photos are now stored in S3. Seed inserts placeholder rows only when
+        # S3_BUCKET_NAME is configured so the bucket actually exists.
+        import os, uuid, base64, boto3
+        bucket = os.environ.get("S3_BUCKET_NAME", "")
+        if bucket:
+            TINY_PNG = base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+                "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
             )
-        print("[seed] photo → done")
+            s3 = boto3.client(
+                "s3",
+                endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
+                aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
+                region_name=os.environ.get("S3_REGION", "auto"),
+            )
+            for app_key in ("completed_1", "completed_2", "in_progress_sec"):
+                app_id = app_ids[app_key]
+                s3_key = f"applications/{app_id}/{uuid.uuid4()}-seed.png"
+                s3.put_object(Bucket=bucket, Key=s3_key, Body=TINY_PNG, ContentType="image/png")
+                conn.execute(
+                    """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (s3_key, "seed.png", "image/png", len(TINY_PNG), app_id)
+                )
+            print("[seed] photo → done")
+        else:
+            print("[seed] photo → skipped (S3_BUCKET_NAME not set)")
 
     # psycopg auto-commits on clean context-manager exit
     print("[seed] ✅ Database seeded successfully.")

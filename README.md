@@ -48,6 +48,7 @@ docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d
 
 Frontend: http://localhost:5173
 Backend: http://localhost:3000
+swagger: http://localhost:3000/docs#/
 PostgreSQL: localhost:5432
 
 ## Проверить backend

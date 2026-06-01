@@ -47,8 +47,12 @@ CREATE TABLE IF NOT EXISTS public.status
 
 CREATE TABLE IF NOT EXISTS public.photo
 (
-    photo_id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
-    value character varying(1000000),
+    photo_id     integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
+    s3_key       character varying(1000) NOT NULL,
+    name         character varying(500)  NOT NULL DEFAULT 'upload',
+    content_type character varying(100)  NOT NULL DEFAULT 'application/octet-stream',
+    size_bytes   integer,
+    uploaded_at  timestamp with time zone NOT NULL DEFAULT NOW(),
     application_id integer,
     PRIMARY KEY (photo_id)
 );
