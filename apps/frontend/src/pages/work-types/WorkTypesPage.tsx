@@ -85,7 +85,7 @@ export function WorkTypesPage() {
     }
 
     if (form.allowedGradeIds.length === 0) {
-      nextErrors.complexity = "Выберите хотя бы один допустимый грейд.";
+      nextErrors.complexity = "Выберите хотя бы одну допустимую позицию.";
     }
 
     setErrors(nextErrors);
@@ -127,7 +127,7 @@ export function WorkTypesPage() {
           : currentItem,
       ),
     );
-    setNotice(`Для вида работ «${item.name}» обновлены сложность и допустимые грейды.`);
+    setNotice(`Для вида работ «${item.name}» обновлены сложность и допустимые позиции.`);
   };
 
   const toggleWorkTypeGrade = (item: WorkType, gradeId: string) => {
@@ -136,7 +136,7 @@ export function WorkTypesPage() {
       : [...item.allowedGradeIds, gradeId];
 
     if (nextGradeIds.length === 0) {
-      setNotice("У вида работ должен остаться хотя бы один допустимый грейд.");
+      setNotice("У вида работ должна остаться хотя бы одна допустимая позиция.");
       return;
     }
 
@@ -145,7 +145,7 @@ export function WorkTypesPage() {
         currentItem.id === item.id ? { ...currentItem, allowedGradeIds: nextGradeIds } : currentItem,
       ),
     );
-    setNotice(`Матрица грейдов для вида работ «${item.name}» обновлена.`);
+    setNotice(`Матрица позиций для вида работ «${item.name}» обновлена.`);
   };
 
   return (
@@ -199,7 +199,7 @@ export function WorkTypesPage() {
             <div className="work-types-table__row work-types-table__row--head" role="row">
               <span role="columnheader">Название</span>
               <span role="columnheader">Сложность</span>
-              <span role="columnheader">Допустимые грейды</span>
+              <span role="columnheader">Допустимые позиции</span>
               <span role="columnheader">Использование</span>
               <span role="columnheader">Действия</span>
             </div>
@@ -314,8 +314,8 @@ export function WorkTypesPage() {
               </select>
             </label>
 
-            <div className="work-types-matrix-preview" aria-label="Допустимые грейды">
-              <span>Допустимые грейды</span>
+            <div className="work-types-matrix-preview" aria-label="Допустимые позиции">
+              <span>Допустимые позиции</span>
               <div className="work-types-grade-checks">
                 {grades.map((grade) => (
                   <label key={grade.id}>
