@@ -2,7 +2,7 @@ import { FormEvent, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { departments, mockUsers } from "@mocks/mockData";
-import type { Position, User } from "@shared/model/domain";
+import type { User, UserRole } from "@shared/model/domain";
 import { roleLabels } from "@shared/model/labels";
 import { Button } from "@shared/ui";
 
@@ -14,25 +14,19 @@ type AdUser = Pick<User, "id" | "login" | "fullName" | "departmentId"> & {
 
 type EmployeeForm = {
   adUserId: string;
-  positionId: string;
+  role: UserRole;
   isActive: boolean;
 };
 
 type EmployeeErrors = Partial<Record<keyof EmployeeForm, string>>;
 type ActivityFilter = "all" | "active" | "inactive";
 
-const initialPositions: Position[] = [
-  { id: "grade-junior", name: "Младший", isTop: false },
-  { id: "grade-senior", name: "Старший", isTop: false },
-  { id: "grade-lead", name: "Ведущий", isTop: true },
-  { id: "grade-chief", name: "Главный", isTop: true },
-];
-
 const initialEmployees: User[] = mockUsers.map((user) => ({
   ...user,
-  positionId: getInitialPositionId(user.login),
-  isActive: user.role === "manager" ? false : user.isActive,
+  isActive: user.isActive,
 }));
+
+const assignableRoles: UserRole[] = ["author", "executor", "manager", "top-manager"];
 
 const adUsers: AdUser[] = [
   ...mockUsers.map((user) => ({
@@ -60,15 +54,21 @@ const adUsers: AdUser[] = [
 
 export function EmployeesPage() {
   const { currentUser } = useAuth();
-  const initialDepartmentId = currentUser?.role === "manager" ? currentUser.departmentId : departments[0]?.id ?? "";
+  const availableDepartments = currentUser?.role === "manager"
+    ? departments.filter((department) => department.id === currentUser.departmentId)
+    : departments;
+  const initialDepartmentId = availableDepartments[0]?.id ?? "";
   const [employees, setEmployees] = useState<User[]>(initialEmployees);
   const [departmentId, setDepartmentId] = useState(initialDepartmentId);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
+  const [departmentSettings, setDepartmentSettings] = useState(() =>
+    Object.fromEntries(departments.map((department) => [department.id, department.delegatedToSameDepartment])),
+  );
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState<EmployeeForm>({
     adUserId: "",
-    positionId: initialPositions[0]?.id ?? "",
+    role: "executor",
     isActive: true,
   });
   const [errors, setErrors] = useState<EmployeeErrors>({});
@@ -88,7 +88,11 @@ export function EmployeesPage() {
   );
 
   const employeeLogins = new Set(employees.map((employee) => employee.login));
-  const availableAdUsers = adUsers.filter((user) => !employeeLogins.has(user.login));
+  const availableAdUsers = adUsers.filter(
+    (user) =>
+      !employeeLogins.has(user.login) &&
+      availableDepartments.some((departmentItem) => departmentItem.id === user.departmentId),
+  );
   const selectedAdUser = adUsers.find((user) => user.id === form.adUserId);
   const department = departments.find((item) => item.id === departmentId);
   const totalInDepartment = employees.filter((employee) => employee.departmentId === departmentId).length;
@@ -99,7 +103,7 @@ export function EmployeesPage() {
 
     setForm({
       adUserId: firstAvailableAdUser?.id ?? "",
-      positionId: initialPositions[0]?.id ?? "",
+      role: "executor",
       isActive: true,
     });
     setErrors({});
@@ -117,8 +121,8 @@ export function EmployeesPage() {
       nextErrors.adUserId = "Этот пользователь уже добавлен в систему.";
     }
 
-    if (!form.positionId) {
-      nextErrors.positionId = "Выберите позицию.";
+    if (!form.role) {
+      nextErrors.role = "Выберите роль.";
     }
 
     setErrors(nextErrors);
@@ -137,9 +141,9 @@ export function EmployeesPage() {
       id: `user-${Date.now()}`,
       login: selectedAdUser.login,
       fullName: selectedAdUser.fullName,
-      role: "executor",
+      role: form.role,
       departmentId: selectedAdUser.departmentId,
-      positionId: form.positionId,
+      jobTitleId: getJobTitleIdByAdPostName(selectedAdUser.adPostName),
       isActive: form.isActive,
     };
 
@@ -163,15 +167,20 @@ export function EmployeesPage() {
     );
   };
 
-  const updateEmployeePosition = (employee: User, positionId: string) => {
-    const nextPosition = initialPositions.find((position) => position.id === positionId);
+  const deleteEmployee = (employee: User) => {
+    setEmployees((current) => current.filter((currentEmployee) => currentEmployee.id !== employee.id));
+    setNotice(`Запрос на удаление сотрудника «${employee.fullName}» выполнен в mock-режиме.`);
+  };
 
-    setEmployees((current) =>
-      current.map((currentEmployee) =>
-        currentEmployee.id === employee.id ? { ...currentEmployee, positionId } : currentEmployee,
-      ),
+  const toggleDelegationConfirmation = () => {
+    const nextValue = !departmentSettings[departmentId];
+
+    setDepartmentSettings((current) => ({ ...current, [departmentId]: nextValue }));
+    setNotice(
+      nextValue
+        ? `Для отдела «${department?.name ?? "-"}» включено подтверждение делегирования внутри отдела.`
+        : `Для отдела «${department?.name ?? "-"}» подтверждение делегирования внутри отдела отключено.`,
     );
-    setNotice(`Сотруднику «${employee.fullName}» назначена позиция «${nextPosition?.name ?? "-"}».`);
   };
 
   return (
@@ -179,7 +188,7 @@ export function EmployeesPage() {
       <header className="employees-page__header">
         <div>
           <h1>Управление сотрудниками</h1>
-          <p>Руководитель добавляет из AD сотрудников-исполнителей и настраивает их позицию и участие в распределении заявок.</p>
+          <p>Руководитель добавляет из AD сотрудников и настраивает их роль и участие в распределении заявок.</p>
         </div>
       </header>
 
@@ -205,7 +214,7 @@ export function EmployeesPage() {
           <label>
             Отдел AD
             <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
-              {departments.map((departmentItem) => (
+              {availableDepartments.map((departmentItem) => (
                 <option value={departmentItem.id} key={departmentItem.id}>
                   {departmentItem.name}
                 </option>
@@ -225,13 +234,27 @@ export function EmployeesPage() {
           </Button>
         </header>
 
+        <section className="employees-delegation-setting" aria-label="Настройки делегирования отдела">
+          <div>
+            <strong>Делегирование внутри отдела</strong>
+            <span>{department?.name ?? "-"}</span>
+          </div>
+          <label>
+            <input
+              type="checkbox"
+              checked={Boolean(departmentSettings[departmentId])}
+              onChange={toggleDelegationConfirmation}
+            />
+            Подтверждать руководителем
+          </label>
+        </section>
+
         <div className="employees-table__grid" role="table" aria-label="Сотрудники">
           <div className="employees-table__row employees-table__row--head" role="row">
             <span role="columnheader">ФИО из AD</span>
             <span role="columnheader">Логин AD</span>
             <span role="columnheader">Роль</span>
-            <span role="columnheader">Должность AD</span>
-            <span role="columnheader">Позиция</span>
+            <span role="columnheader">Должность</span>
             <span role="columnheader">Статус</span>
             <span role="columnheader">Действие</span>
           </div>
@@ -245,28 +268,19 @@ export function EmployeesPage() {
                   <span role="cell">{roleLabels[employee.role]}</span>
                   <span role="cell">{getMockAdPostName(employee.login)}</span>
                   <span role="cell">
-                    <select
-                      className="employees-position-select"
-                      value={employee.positionId}
-                      onChange={(event) => updateEmployeePosition(employee, event.target.value)}
-                      aria-label={`Позиция ${employee.fullName}`}
-                    >
-                      {initialPositions.map((position) => (
-                        <option value={position.id} key={position.id}>
-                          {position.name}
-                        </option>
-                      ))}
-                    </select>
-                  </span>
-                  <span role="cell">
                     <span className={employee.isActive ? "employees-status employees-status--active" : "employees-status"}>
                       {employee.isActive ? "Принимает заявки" : "Не принимает"}
                     </span>
                   </span>
                   <span role="cell">
-                    <button type="button" onClick={() => toggleActivity(employee)}>
-                      {employee.isActive ? "Отключить" : "Включить"}
-                    </button>
+                    <div className="employees-actions">
+                      <button type="button" onClick={() => toggleActivity(employee)}>
+                        {employee.isActive ? "Отключить" : "Включить"}
+                      </button>
+                      <button type="button" onClick={() => deleteEmployee(employee)}>
+                        Удалить
+                      </button>
+                    </div>
                   </span>
                 </div>
               );
@@ -313,15 +327,33 @@ export function EmployeesPage() {
                     <strong>{getDepartmentName(selectedAdUser?.departmentId)}</strong>
                   </div>
                   <div>
-                    <span>Должность AD</span>
+                    <span>Должность</span>
                     <strong>{selectedAdUser?.adPostName ?? "-"}</strong>
                   </div>
                 </div>
 
+                <label>
+                  Роль в системе
+                  <select
+                    value={form.role}
+                    onChange={(event) => {
+                      setForm((current) => ({ ...current, role: event.target.value as UserRole }));
+                      setErrors((current) => ({ ...current, role: undefined }));
+                    }}
+                  >
+                    {assignableRoles.map((role) => (
+                      <option value={role} key={role}>
+                        {roleLabels[role]}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.role ? <small>{errors.role}</small> : null}
+                </label>
+
                 <div className="employees-ad-card" aria-label="Параметры системы">
                   <div>
                     <span>Роль в системе</span>
-                    <strong>Исполнитель</strong>
+                    <strong>{roleLabels[form.role]}</strong>
                   </div>
                   <div>
                     <span>Участие в распределении</span>
@@ -340,23 +372,6 @@ export function EmployeesPage() {
                   </select>
                 </label>
 
-                <label>
-                  Позиция
-                  <select
-                    value={form.positionId}
-                    onChange={(event) => {
-                      setForm((current) => ({ ...current, positionId: event.target.value }));
-                      setErrors((current) => ({ ...current, positionId: undefined }));
-                    }}
-                  >
-                    {initialPositions.map((position) => (
-                      <option value={position.id} key={position.id}>
-                        {position.name}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.positionId ? <small>{errors.positionId}</small> : null}
-                </label>
               </>
             ) : (
               <div className="employees-table__empty">Все mock-пользователи AD уже добавлены в систему.</div>
@@ -385,19 +400,21 @@ function getMockAdPostName(login: string) {
     author: "Инженер",
     executor: "Инженер",
     manager: "Руководитель",
+    top: "Топ-менеджер",
     executor2: "Инженер",
   };
 
   return adPosts[login] ?? "Специалист";
 }
 
-function getInitialPositionId(login: string) {
-  const positionByLogin: Record<string, string> = {
-    author: "grade-junior",
-    executor: "grade-lead",
-    manager: "grade-chief",
-    executor2: "grade-senior",
-  };
+function getJobTitleIdByAdPostName(postName: string) {
+  if (postName.toLowerCase().includes("руковод")) {
+    return "department-head";
+  }
 
-  return positionByLogin[login] ?? "grade-junior";
+  if (postName.toLowerCase().includes("вед")) {
+    return "lead-engineer";
+  }
+
+  return "engineer";
 }

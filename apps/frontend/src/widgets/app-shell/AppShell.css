@@ -8,6 +8,7 @@
   min-height: 58px;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 12px;
   border-bottom: 1px solid #d7dde8;
   background: rgba(255, 255, 255, 0.92);
@@ -32,6 +33,7 @@
 
 .app-shell__home-link {
   flex: 1;
+  min-width: 160px;
   color: #1f2a44;
   font-size: 15px;
   font-weight: 800;
@@ -214,6 +216,16 @@
 }
 
 @media (max-width: 640px) {
+  .app-shell__header {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .app-shell__home-link {
+    min-width: 0;
+    font-size: 13px;
+  }
+
   .app-shell__back {
     width: 38px;
     padding: 0;
@@ -228,11 +240,33 @@
 
   .app-shell__profile {
     min-width: auto;
+    width: 38px;
+    justify-content: center;
     padding-right: 8px;
     font-size: 15px;
   }
 
+  .app-shell__profile strong {
+    display: none;
+  }
+
   .app-shell__notifications {
+    width: 38px;
     font-size: 0;
+    padding: 0;
+  }
+
+  .app-shell__notifications-panel {
+    position: fixed;
+    top: 62px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+
+  .app-shell__logout {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 13px;
   }
 }

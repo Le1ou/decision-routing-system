@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
-import { departments, positions, workTypes } from "@mocks/mockData";
+import { departments, jobTitles, workTypes } from "@mocks/mockData";
 import type { Application } from "@shared/model/domain";
 import { Button } from "@shared/ui";
 
@@ -41,7 +41,7 @@ export function CreateApplicationPage() {
     () => workTypes.filter((workType) => workType.departmentId === form.departmentId),
     [form.departmentId],
   );
-  const authorPosition = positions.find((position) => position.id === currentUser?.positionId);
+  const authorJobTitle = jobTitles.find((jobTitle) => jobTitle.id === currentUser?.jobTitleId);
   const authorDepartment = departments.find((department) => department.id === currentUser?.departmentId);
 
   const updateField = <Key extends keyof CreateApplicationForm>(field: Key, value: CreateApplicationForm[Key]) => {
@@ -135,7 +135,7 @@ export function CreateApplicationPage() {
         <div className="create-window__author">
           <span>Автор: <b>{currentUser?.fullName}</b></span>
           <span>Отдел: <b>{authorDepartment?.name ?? "-"}</b></span>
-          <span>Должность: <b>{authorPosition?.name ?? "-"}</b></span>
+          <span>Должность: <b>{authorJobTitle?.name ?? "-"}</b></span>
         </div>
 
         <div className="create-window__row create-window__row--topic">

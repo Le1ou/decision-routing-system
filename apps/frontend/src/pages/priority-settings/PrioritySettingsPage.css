@@ -91,11 +91,28 @@
 
 .priority-setting {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) 88px;
+  grid-template-columns: minmax(220px, 1fr) 120px 170px;
   gap: 16px;
   align-items: center;
   border-bottom: 1px solid #edf0f5;
   padding: 16px 18px;
+}
+
+.priority-setting--head {
+  min-height: 42px;
+  background: #fbfcfe;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.priority-setting--department {
+  grid-template-columns: minmax(220px, 1fr) 120px 170px;
+}
+
+.priority-setting--deadline {
+  background: #fbfcfe;
 }
 
 .priority-setting span {
@@ -126,6 +143,12 @@
   background: #ffffff;
   color: #1f2a44;
   padding: 0 10px;
+}
+
+.priority-setting input:disabled {
+  background: #f3f5f8;
+  color: #667085;
+  cursor: not-allowed;
 }
 
 .priority-preview {
