@@ -15,24 +15,16 @@ type PrioritySettings = {
 };
 
 const initialSettings: PrioritySettings = {
-  department: {
-    it: 0.28,
-    oge: 0.34,
-    production: 0.22,
-    okk: 0.3,
-    ogm: 0.32,
-    warehouse: 0.14,
-    supply: 0.18,
-  },
-  deadline: 0.25,
+  department: Object.fromEntries(departments.map((department) => [department.id, department.value])),
+  deadline: 0.75,
   managerAuthor: {
-    it: 0.1,
-    oge: 0.1,
-    production: 0.12,
-    okk: 0.08,
-    ogm: 0.1,
-    warehouse: 0.05,
-    supply: 0.06,
+    it: 0.2,
+    oge: 0.22,
+    production: 0.24,
+    okk: 0.2,
+    ogm: 0.22,
+    warehouse: 0.12,
+    supply: 0.16,
   },
 };
 
@@ -114,14 +106,14 @@ export function PrioritySettingsPage() {
         <article className="priority-settings">
           <header>
             <h2>Коэффициенты</h2>
-            <span>Формула: приоритет = k отдела автора + k руководителя-автора + k срока исполнения</span>
+            <span>Формула: приоритет = коэффициент отдела автора * коэффициент срока исполнения + коэффициент руководителя-автора</span>
           </header>
 
           <div className="priority-settings__list">
             <div className="priority-setting priority-setting--head" role="row">
               <span>Отдел</span>
-              <span>k отдела</span>
-              <span>k руководителя отдела</span>
+              <span>Коэффициент отдела</span>
+              <span>Коэффициент руководителя отдела</span>
             </div>
             {availableDepartments.map((department) => (
               <div className="priority-setting priority-setting--department" key={department.id}>
@@ -245,7 +237,7 @@ function calculatePriorityPreview(applicationId: string, settings: PrioritySetti
     managerAuthor: isManagerAuthor ? settings.managerAuthor[departmentId] ?? 0 : 0,
   };
 
-  const weightedSum = factorValues.department + factorValues.deadline + factorValues.managerAuthor;
+  const weightedSum = factorValues.department * factorValues.deadline + factorValues.managerAuthor;
   const score = Math.min(1, weightedSum);
 
   return {

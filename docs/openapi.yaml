@@ -438,11 +438,11 @@ paths:
   /grades:
     get:
       tags: [Directories]
-      summary: Получить грейды
-      description: Грейды используются только в матрице допустимости вида работ и не являются должностью сотрудника.
+      summary: Получить позиции
+      description: Позиции используются только в матрице допустимости вида работ и не являются должностью сотрудника.
       responses:
         "200":
-          description: Список грейдов
+          description: Список позиций
           content:
             application/json:
               schema:
@@ -1006,7 +1006,7 @@ components:
 
     Grade:
       type: object
-      description: Грейд исполнителя для матрицы вида работ.
+      description: Позиция исполнителя для матрицы вида работ.
       required: [id, name]
       properties:
         id:
@@ -1044,7 +1044,7 @@ components:
           $ref: "#/components/schemas/Complexity"
         allowedGradeIds:
           type: array
-          description: Допустимые грейды для выполнения вида работ.
+          description: Допустимые позиции для выполнения вида работ.
           items:
             type: string
 
