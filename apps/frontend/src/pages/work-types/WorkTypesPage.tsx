@@ -1,7 +1,8 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { departments, grades, workTypes } from "@mocks/mockData";
+import { useReferenceData } from "@app/providers/ReferenceDataProvider";
+import { apiClient } from "@shared/api";
 import type { Complexity, WorkType } from "@shared/model/domain";
 import { Button } from "@shared/ui";
 
@@ -24,47 +25,56 @@ const complexityLabels: Record<Complexity, string> = {
 };
 
 const defaultAllowedGradeIdsByComplexity: Record<Complexity, string[]> = {
-  easy: ["junior", "middle", "senior", "lead"],
-  medium: ["junior", "middle", "senior", "lead"],
-  hard: ["senior", "lead"],
-  critical: ["lead"],
+  easy: [],
+  medium: [],
+  hard: [],
+  critical: [],
 };
 
 export function WorkTypesPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, credentials } = useAuth();
+  const { departments, grades, workTypes, refresh } = useReferenceData();
   const availableDepartments = currentUser?.role === "manager"
     ? departments.filter((department) => department.id === currentUser.departmentId)
     : departments;
   const initialDepartmentId = availableDepartments[0]?.id ?? "";
-  const [items, setItems] = useState<WorkType[]>(workTypes);
   const [departmentId, setDepartmentId] = useState(initialDepartmentId);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState<WorkTypeForm>({
     name: "",
     departmentId: initialDepartmentId,
     complexity: "medium",
-    allowedGradeIds: defaultAllowedGradeIdsByComplexity.medium,
+    allowedGradeIds: grades.map((grade) => grade.id),
   });
   const [errors, setErrors] = useState<WorkTypeErrors>({});
   const [notice, setNotice] = useState("");
 
-  const selectedDepartment = departments.find((department) => department.id === departmentId);
+  const activeDepartmentId = departmentId || initialDepartmentId;
+  const selectedDepartment = departments.find((department) => department.id === activeDepartmentId);
+
+  useEffect(() => {
+    if (!departmentId && initialDepartmentId) {
+      setDepartmentId(initialDepartmentId);
+      setForm((current) => ({ ...current, departmentId: initialDepartmentId, allowedGradeIds: grades.map((grade) => grade.id) }));
+    }
+  }, [departmentId, grades, initialDepartmentId]);
+
   const visibleItems = useMemo(
-    () => items.filter((item) => item.departmentId === departmentId),
-    [departmentId, items],
+    () => workTypes.filter((item) => item.departmentId === activeDepartmentId),
+    [activeDepartmentId, workTypes],
   );
 
   const departmentStats = useMemo(
     () =>
       departments.map((department) => ({
         ...department,
-        workTypesCount: items.filter((item) => item.departmentId === department.id).length,
+        workTypesCount: workTypes.filter((item) => item.departmentId === department.id).length,
       })).filter((department) => availableDepartments.some((availableDepartment) => availableDepartment.id === department.id)),
-    [availableDepartments, items],
+    [availableDepartments, workTypes],
   );
 
   const openCreateModal = () => {
-    setForm({ name: "", departmentId, complexity: "medium", allowedGradeIds: defaultAllowedGradeIdsByComplexity.medium });
+    setForm({ name: "", departmentId: activeDepartmentId, complexity: "medium", allowedGradeIds: grades.map((grade) => grade.id) });
     setErrors({});
     setIsModalOpen(true);
   };
@@ -80,7 +90,7 @@ export function WorkTypesPage() {
       nextErrors.departmentId = "Выберите отдел.";
     }
 
-    if (items.some((item) => item.departmentId === form.departmentId && item.name.trim().toLowerCase() === form.name.trim().toLowerCase())) {
+    if (workTypes.some((item) => item.departmentId === form.departmentId && item.name.trim().toLowerCase() === form.name.trim().toLowerCase())) {
       nextErrors.name = "Такой вид работ уже есть в выбранном отделе.";
     }
 
@@ -93,44 +103,58 @@ export function WorkTypesPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleCreate = (event: FormEvent<HTMLFormElement>) => {
+  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!validate()) {
+    if (!validate() || !credentials) {
       return;
     }
 
-    const createdItem: WorkType = {
-      id: `work-type-${Date.now()}`,
-      name: form.name.trim(),
-      departmentId: form.departmentId,
-      complexity: form.complexity,
-      allowedGradeIds: form.allowedGradeIds,
-    };
-
-    setItems((current) => [createdItem, ...current]);
-    setDepartmentId(form.departmentId);
-    setNotice(`Вид работ «${createdItem.name}» добавлен в mock-справочник.`);
-    setIsModalOpen(false);
+    try {
+      await apiClient.createWorkType(credentials, {
+        name: form.name.trim(),
+        departmentId: form.departmentId,
+        complexity: form.complexity,
+        allowedGradeIds: form.allowedGradeIds,
+      });
+      await refresh();
+      setDepartmentId(form.departmentId);
+      setNotice(`Вид работ «${form.name.trim()}» добавлен.`);
+      setIsModalOpen(false);
+    } catch {
+      setNotice("Backend не создал вид работ.");
+    }
   };
 
-  const handleDelete = (item: WorkType) => {
-    setItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
-    setNotice(`Вид работ «${item.name}» удален из mock-справочника.`);
+  const handleDelete = async (item: WorkType) => {
+    if (!credentials) {
+      return;
+    }
+
+    try {
+      await apiClient.deleteWorkType(credentials, item.id);
+      await refresh();
+      setNotice(`Вид работ «${item.name}» удален.`);
+    } catch {
+      setNotice("Backend не удалил вид работ.");
+    }
   };
 
-  const updateWorkTypeComplexity = (item: WorkType, complexity: Complexity) => {
-    setItems((current) =>
-      current.map((currentItem) =>
-        currentItem.id === item.id
-          ? { ...currentItem, complexity, allowedGradeIds: defaultAllowedGradeIdsByComplexity[complexity] }
-          : currentItem,
-      ),
-    );
-    setNotice(`Для вида работ «${item.name}» обновлены сложность и допустимые позиции.`);
+  const updateWorkTypeComplexity = async (item: WorkType, complexity: Complexity) => {
+    if (!credentials) {
+      return;
+    }
+
+    try {
+      await apiClient.updateWorkType(credentials, item.id, { complexity });
+      await refresh();
+      setNotice(`Для вида работ «${item.name}» обновлена сложность.`);
+    } catch {
+      setNotice("Backend не обновил сложность вида работ.");
+    }
   };
 
-  const toggleWorkTypeGrade = (item: WorkType, gradeId: string) => {
+  const toggleWorkTypeGrade = async (item: WorkType, gradeId: string) => {
     const nextGradeIds = item.allowedGradeIds.includes(gradeId)
       ? item.allowedGradeIds.filter((id) => id !== gradeId)
       : [...item.allowedGradeIds, gradeId];
@@ -140,12 +164,17 @@ export function WorkTypesPage() {
       return;
     }
 
-    setItems((current) =>
-      current.map((currentItem) =>
-        currentItem.id === item.id ? { ...currentItem, allowedGradeIds: nextGradeIds } : currentItem,
-      ),
-    );
-    setNotice(`Матрица позиций для вида работ «${item.name}» обновлена.`);
+    if (!credentials) {
+      return;
+    }
+
+    try {
+      await apiClient.updateWorkType(credentials, item.id, { allowedGradeIds: nextGradeIds });
+      await refresh();
+      setNotice(`Матрица позиций для вида работ «${item.name}» обновлена.`);
+    } catch {
+      setNotice("Backend не обновил матрицу позиций.");
+    }
   };
 
   return (
@@ -182,7 +211,7 @@ export function WorkTypesPage() {
             </div>
             <label>
               Отдел
-              <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
+              <select value={activeDepartmentId} onChange={(event) => setDepartmentId(event.target.value)}>
                 {availableDepartments.map((department) => (
                   <option value={department.id} key={department.id}>
                     {department.name}
@@ -229,7 +258,7 @@ export function WorkTypesPage() {
                           <input
                             type="checkbox"
                             checked={item.allowedGradeIds.includes(grade.id)}
-                            onChange={() => toggleWorkTypeGrade(item, grade.id)}
+                            onChange={() => void toggleWorkTypeGrade(item, grade.id)}
                           />
                           {grade.name}
                         </label>
@@ -238,7 +267,7 @@ export function WorkTypesPage() {
                   </span>
                   <span role="cell">Доступен для новых заявок</span>
                   <span role="cell">
-                    <button type="button" onClick={() => handleDelete(item)}>
+                    <button type="button" onClick={() => void handleDelete(item)}>
                       Удалить
                     </button>
                   </span>
@@ -302,7 +331,7 @@ export function WorkTypesPage() {
                   setForm((current) => ({
                     ...current,
                     complexity,
-                    allowedGradeIds: defaultAllowedGradeIdsByComplexity[complexity],
+                    allowedGradeIds: form.allowedGradeIds.length > 0 ? form.allowedGradeIds : grades.map((grade) => grade.id),
                   }));
                 }}
               >

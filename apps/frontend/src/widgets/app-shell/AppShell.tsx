@@ -1,48 +1,59 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { notifications, applications } from "@mocks/mockData";
-import { filterApplicationsByRole } from "@shared/model/applicationRules";
+import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
+import { apiClient, mapNotification } from "@shared/api";
+import type { Notification } from "@shared/model/domain";
 
 import "./AppShell.css";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, credentials, logout } = useAuth();
+  const { applicationItems } = useApplicationsStore();
   const navigate = useNavigate();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [readNotificationIds, setReadNotificationIds] = useState(
-    () => new Set(notifications.filter((notification) => notification.isRead).map((notification) => notification.id)),
-  );
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const refreshNotifications = useCallback(async () => {
+    if (!credentials) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
+    const response = await apiClient.getNotifications(credentials);
+
+    setNotifications(response.items.map(mapNotification));
+    setUnreadCount(response.unreadCount);
+  }, [credentials]);
+
+  useEffect(() => {
+    void refreshNotifications();
+  }, [refreshNotifications]);
 
   if (!currentUser) {
     return <>{children}</>;
   }
 
-  const visibleApplicationIds = new Set(filterApplicationsByRole(applications, currentUser).map((application) => application.id));
-  const visibleNotifications = notifications.filter(
-    (notification) => !notification.applicationId || visibleApplicationIds.has(notification.applicationId),
-  );
   const enrichedNotifications = useMemo(
     () =>
-      visibleNotifications.map((notification) => ({
+      notifications.map((notification) => ({
         ...notification,
-        isRead: readNotificationIds.has(notification.id),
-        application: applications.find((application) => application.id === notification.applicationId),
+        application: applicationItems.find((application) => application.id === notification.applicationId),
       })),
-    [readNotificationIds, visibleNotifications],
+    [applicationItems, notifications],
   );
-  const unreadCount = enrichedNotifications.filter((notification) => !notification.isRead).length;
   const displayName = currentUser.fullName.split(" ").slice(0, 2).join(" ");
 
-  const markAllAsRead = () => {
-    setReadNotificationIds((current) => {
-      const next = new Set(current);
+  const markAllAsRead = async () => {
+    if (!credentials) {
+      return;
+    }
 
-      enrichedNotifications.forEach((notification) => next.add(notification.id));
-
-      return next;
-    });
+    await apiClient.markAllNotificationsRead(credentials);
+    await refreshNotifications();
   };
 
   const goHome = () => {
@@ -98,8 +109,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                       }
                       to={notification.application ? `/applications?application=${notification.application.id}` : "/applications"}
                       key={notification.id}
-                      onClick={() => {
-                        setReadNotificationIds((current) => new Set(current).add(notification.id));
+                      onClick={async () => {
+                        if (credentials && !notification.isRead) {
+                          await apiClient.markNotificationRead(credentials, notification.id);
+                          await refreshNotifications();
+                        }
                         setIsNotificationsOpen(false);
                       }}
                     >

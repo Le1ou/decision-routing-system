@@ -36,6 +36,12 @@ export type Department = {
   deadlineNotificationRatio: number;
 };
 
+export type PrioritySettings = {
+  department: Record<string, number>;
+  deadline: number;
+  managerAuthor: Record<string, number>;
+};
+
 export type Position = {
   id: string;
   name: string;
@@ -63,6 +69,14 @@ export type User = {
   isActive: boolean;
 };
 
+export type AdUser = {
+  id: string;
+  login: string;
+  fullName: string;
+  departmentId: string;
+  postName: string;
+};
+
 export type UserPermissions = {
   canManageEmployees: boolean;
   canManageWorkTypes: boolean;
@@ -80,7 +94,7 @@ export type WorkType = {
 
 export type Attachment = {
   id: string;
-  applicationId: string;
+  applicationId?: string;
   name: string;
   type: "photo" | "document";
 };
@@ -126,6 +140,13 @@ export type Application = {
   startedAt?: string;
   finishedAt?: string;
   closedById?: string;
+  availableActions?: ApplicationAction[];
+  attachments?: Attachment[];
+  delegation?: Delegation;
+  workType?: WorkType;
+  author?: User;
+  executor?: User;
+  department?: Department;
 };
 
 export type Notification = {

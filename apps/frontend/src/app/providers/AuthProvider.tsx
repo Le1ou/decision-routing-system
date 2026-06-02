@@ -1,6 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
-import { mockUsers } from "@mocks/mockData";
 import { apiClient, ApiError, type ApiCredentials, mapCurrentUser } from "@shared/api";
 import type { User, UserPermissions } from "@shared/model/domain";
 
@@ -16,7 +15,6 @@ type AuthContextValue = {
   currentUser: User | null;
   permissions: UserPermissions | null;
   credentials: ApiCredentials | null;
-  availableUsers: User[];
   login: (credentials: ApiCredentials) => Promise<void>;
   logout: () => void;
 };
@@ -44,7 +42,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       currentUser: storedAuth?.user ?? null,
       permissions: storedAuth?.permissions ?? null,
       credentials: storedAuth?.credentials ?? null,
-      availableUsers: mockUsers,
       login: async (credentials) => {
         try {
           const response = await apiClient.getCurrentUser(credentials);

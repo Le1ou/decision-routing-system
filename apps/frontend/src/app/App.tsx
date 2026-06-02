@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { ApplicationsProvider } from "@app/providers/ApplicationsProvider";
+import { ReferenceDataProvider } from "@app/providers/ReferenceDataProvider";
 import type { UserPermissions } from "@shared/model/domain";
 import { AppShell } from "@widgets/app-shell";
 import {
@@ -29,8 +30,9 @@ export function App() {
   }
 
   return (
-    <AppShell>
+    <ReferenceDataProvider>
       <ApplicationsProvider>
+        <AppShell>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/applications" element={<ApplicationsPage />} />
@@ -41,8 +43,9 @@ export function App() {
           <Route path="/priority-settings" element={<RequirePermission permission="canManagePrioritySettings"><PrioritySettingsPage /></RequirePermission>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </AppShell>
       </ApplicationsProvider>
-    </AppShell>
+    </ReferenceDataProvider>
   );
 }
 

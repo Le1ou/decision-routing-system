@@ -5,7 +5,7 @@ import { useAuth } from "@app/providers/AuthProvider";
 import "./LoginPage.css";
 
 export function LoginPage() {
-  const { availableUsers, login } = useAuth();
+  const { login } = useAuth();
   const [selectedLogin, setSelectedLogin] = useState("orlova_m");
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [password, setPassword] = useState("Manager!1");
@@ -65,9 +65,6 @@ export function LoginPage() {
             <option value="kuznetsov_m" />
             <option value="ivanov_i" />
             <option value="fedorov_a" />
-            {availableUsers.map((user) => (
-              <option value={user.login} key={user.id} />
-            ))}
           </datalist>
         </label>
 

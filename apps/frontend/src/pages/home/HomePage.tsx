@@ -1,8 +1,7 @@
 import { Link } from "react-router-dom";
 
+import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
 import { useAuth } from "@app/providers/AuthProvider";
-import { applications } from "@mocks/mockData";
-import { filterApplicationsByRole } from "@shared/model/applicationRules";
 import type { UserPermissions } from "@shared/model/domain";
 import { canAccessManagement } from "@shared/model/roles";
 
@@ -17,12 +16,12 @@ const sections = [
 
 export function HomePage() {
   const { currentUser, permissions } = useAuth();
+  const { applicationItems } = useApplicationsStore();
   const hasManagementAccess = currentUser ? canAccessManagement(currentUser, permissions) : false;
   const visibleSections = sections.filter((section) => permissions?.[section.permission]);
-  const visibleApplications = currentUser ? filterApplicationsByRole(applications, currentUser) : [];
-  const activeApplications = visibleApplications.filter((application) => application.status !== "completed" && application.status !== "rejected");
-  const criticalApplications = visibleApplications.filter((application) => application.priority === "critical");
-  const inProgressApplications = visibleApplications.filter((application) => application.status === "inProgress");
+  const activeApplications = applicationItems.filter((application) => application.status !== "completed" && application.status !== "rejected");
+  const criticalApplications = applicationItems.filter((application) => application.priority === "critical");
+  const inProgressApplications = applicationItems.filter((application) => application.status === "inProgress");
 
   return (
     <section className="home-page" aria-label="Стартовая страница">
@@ -38,7 +37,7 @@ export function HomePage() {
 
           <div className="home-hero__summary" aria-label="Краткая сводка">
             <span>Видимых заявок</span>
-            <strong>{visibleApplications.length}</strong>
+            <strong>{applicationItems.length}</strong>
           </div>
         </div>
 
