@@ -10,8 +10,8 @@ privilege errors. Everything runs inside one transaction; on any error the
 whole thing rolls back and the DB is left untouched.
 
 This version matches the CURRENT schema, which means:
-  • employee has NO login / role / is_active columns — those live in
-    config.json MOCK_USERS_DB and are joined in at the API layer.
+  • employee has NO login column — login lives in the config.json MOCK_AD
+    directory and is joined in at the API layer.
   • photo has only value + application_id (no name / type / url yet).
   • there is no priority_settings table — GET/PUT /priority-settings is
     still backed by the in-memory dict in main.py.
@@ -27,7 +27,7 @@ Fill order (respecting every FK):
   → grade → post → post_grade
   → department
   → employee
-  → types_of_works → type_of_work_to_post_grade
+  → types_of_works → type_of_work_to_grade
   → delegated (application_id NULL)
   → application → employee_to_application
   → delegated (back-fill application_id)
@@ -49,8 +49,9 @@ def seed_database(db_operator) -> None:
     employee identity sequence to 1, and employees are inserted in the order
     below, so the IDs are deterministic:
         1=manager 2=executor1 3=executor2 4=executor3
-        5=executor4 6=author1 7=author2
-    config.json MOCK_USERS_DB must point each login at the matching id.
+        5=executor4 6=author1 7=author2 8=manager_oge
+    each onboarded entry in config.json MOCK_AD must point its employee_id at
+    the matching id.
     """
     now = datetime.now(PROJECT_TZ)
 
@@ -105,7 +106,7 @@ def seed_database(db_operator) -> None:
 
         # ── 4. role ───────────────────────────────────────────────────────────
         role_ids = {}
-        for name in ("author", "executor", "manager"):
+        for name in ("author", "executor", "manager", "top-manager"):
             row = conn.execute(
                 "INSERT INTO public.role (name) VALUES (%s) RETURNING role_id",
                 (name,)
@@ -180,26 +181,30 @@ def seed_database(db_operator) -> None:
         print(f"[seed] department → {dep_ids}")
 
         # ── 9. employee ───────────────────────────────────────────────────────
+        # role_key is the employee's system role in the directory (single role
+        # per the new contract's User.role). The current user's full set of roles
+        # for /auth/me is derived from the role stored in config.json MOCK_AD.
         emp_ids = {}
         employees = (
-            # key,        fio,                             dep,   pg_key           is_active
-            ("manager",   "Орлова Мария Викторовна",       "it",  "lead_lead",     True),
-            ("executor1", "Иванов Иван Иванович",          "it",  "engineer_middle",True),
-            ("executor2", "Петров Пётр Петрович",          "it",  "senior_middle",  True),
-            ("executor3", "Сидорова Анна Сергеевна",       "oge", "spec_middle",    True),
-            ("executor4", "Козлов Дмитрий Александрович",  "sec", "senior_senior",  True),
-            ("author1",   "Новикова Елена Владимировна",   "hr",  "spec_junior",    True),
-            ("author2",   "Фёдоров Алексей Николаевич",    "it",  "engineer_junior",True),
+            # key,        fio,                             dep,   pg_key            role,          is_active
+            ("manager",   "Орлова Мария Викторовна",       "it",  "lead_lead",      "top-manager", True),
+            ("executor1", "Иванов Иван Иванович",          "it",  "engineer_middle","executor",    True),
+            ("executor2", "Петров Пётр Петрович",          "it",  "senior_middle",  "executor",    True),
+            ("executor3", "Сидорова Анна Сергеевна",       "oge", "spec_middle",    "executor",    True),
+            ("executor4", "Козлов Дмитрий Александрович",  "sec", "senior_senior",  "executor",    True),
+            ("author1",   "Новикова Елена Владимировна",   "hr",  "spec_junior",    "author",      True),
+            ("author2",   "Фёдоров Алексей Николаевич",    "it",  "engineer_junior","author",      True),
+            ("manager_oge","Кузнецов Михаил Сергеевич",    "oge", "lead_senior",    "manager",     True),
         )
-        for emp_key, fio, dep_key, pg_key, is_active in employees:
+        for emp_key, fio, dep_key, pg_key, role_key, is_active in employees:
             row = conn.execute(
                 """
                 INSERT INTO public.employee
-                    (department_id, post_grade_id, fio, created_at, updated_at, is_active)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (department_id, post_grade_id, role_id, fio, created_at, updated_at, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING employee_id
                 """,
-                (dep_ids[dep_key], pg_ids[pg_key], fio, now, now, is_active)
+                (dep_ids[dep_key], pg_ids[pg_key], role_ids[role_key], fio, now, now, is_active)
             ).fetchone()
             emp_ids[emp_key] = row[0]
         print(f"[seed] employee → {emp_ids}")
@@ -230,29 +235,31 @@ def seed_database(db_operator) -> None:
             tow_ids[tow_key] = row[0]
         print(f"[seed] types_of_works → {tow_ids}")
 
-        # ── 11. type_of_work_to_post_grade ────────────────────────────────────
-        tow_pg_links = (
-            ("it_pc_repair",      ["engineer_junior", "engineer_middle"]),
-            ("it_net_setup",      ["engineer_middle", "senior_middle"]),
-            ("it_server_setup",   ["senior_middle",   "senior_senior"]),
-            ("it_security_audit", ["senior_senior",   "lead_lead"]),
-            ("oge_inspection",    ["spec_middle",     "senior_middle"]),
-            ("oge_maintenance",   ["spec_junior",     "spec_middle"]),
-            ("sec_access",        ["spec_junior",     "spec_middle"]),
-            ("sec_incident",      ["senior_senior",   "lead_lead"]),
-            ("hr_onboarding",     ["spec_junior"]),
+        # ── 11. type_of_work_to_grade ─────────────────────────────────────────
+        # New contract: a work type allows a set of GRADES (not post_grades).
+        # Relation: вид работы -> сложность -> грейды.
+        tow_grade_links = (
+            ("it_pc_repair",      ["junior", "middle"]),
+            ("it_net_setup",      ["middle", "senior"]),
+            ("it_server_setup",   ["senior", "lead"]),
+            ("it_security_audit", ["senior", "lead"]),
+            ("oge_inspection",    ["middle", "senior"]),
+            ("oge_maintenance",   ["junior", "middle"]),
+            ("sec_access",        ["junior", "middle"]),
+            ("sec_incident",      ["senior", "lead"]),
+            ("hr_onboarding",     ["junior"]),
         )
-        for tow_key, pg_keys in tow_pg_links:
-            for pg_key in pg_keys:
+        for tow_key, grade_keys in tow_grade_links:
+            for grade_key in grade_keys:
                 conn.execute(
                     """
-                    INSERT INTO public.type_of_work_to_post_grade
-                        (type_of_works_id, post_grade_id)
+                    INSERT INTO public.type_of_work_to_grade
+                        (type_of_works_id, grade_id)
                     VALUES (%s, %s)
                     """,
-                    (tow_ids[tow_key], pg_ids[pg_key])
+                    (tow_ids[tow_key], grade_ids[grade_key])
                 )
-        print("[seed] type_of_work_to_post_grade → done")
+        print("[seed] type_of_work_to_grade → done")
 
         # ── 12. delegated (application_id NULL for now) ───────────────────────
         # delegated_by / delegated_from / delegated_to are still text columns,
@@ -260,13 +267,14 @@ def seed_database(db_operator) -> None:
         deleg_row = conn.execute(
             """
             INSERT INTO public.delegated
-                (delegated_by, delegated_from, delegated_to,
+                (delegated_by, delegated_by_employee, delegated_from, delegated_to,
                  comment, created_at, decision, decided_at, application_id)
-            VALUES (%s, %s, %s, %s, %s, NULL, NULL, NULL)
+            VALUES (%s, %s, %s, %s, %s, %s, NULL, NULL, NULL)
             RETURNING delegated_id
             """,
             (
                 str(dep_ids["it"]),
+                emp_ids["manager"],
                 str(dep_ids["it"]),
                 str(dep_ids["oge"]),
                 "Работы относятся к компетенции ОГЭ.",
@@ -295,6 +303,7 @@ def seed_database(db_operator) -> None:
             delegated_id=None,
             executor_comment=None, manager_comment=None,
             previous_executor_key=None, closed_by_key=None,
+            archived_at=None,
         ):
             created  = now - timedelta(days=created_offset_days)
             deadline = created + timedelta(days=deadline_offset_days)
@@ -311,7 +320,7 @@ def seed_database(db_operator) -> None:
                     empl_assigned_complexity,
                     delegated_id,
                     deadline, created_at, updated_at,
-                    executor_at, work_at, finished_at, result_text,
+                    executor_at, work_at, finished_at, archived_at, result_text,
                     executor_comment, manager_comment,
                     previous_executor_id, closed_by_id
                 ) VALUES (
@@ -321,7 +330,7 @@ def seed_database(db_operator) -> None:
                     %s,
                     %s,
                     %s, %s, %s,
-                    %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
                     %s, %s,
                     %s, %s
                 ) RETURNING application_id
@@ -337,7 +346,7 @@ def seed_database(db_operator) -> None:
                     comp_val,
                     delegated_id,
                     deadline, created, created,
-                    executor_at, work_at, finished_at, result_text,
+                    executor_at, work_at, finished_at, archived_at, result_text,
                     executor_comment, manager_comment,
                     prev_exc, closed_by,
                 )
@@ -470,6 +479,7 @@ def seed_database(db_operator) -> None:
             created_offset_days=5,
             deadline_offset_days=2,
             closed_by_key="executor3",
+            archived_at=now - timedelta(hours=12),   # demo: completed + archived (hidden from main list)
         )
 
         # ── status: rejected (closed_by = manager, still distinct) ────────────
@@ -545,29 +555,37 @@ def seed_database(db_operator) -> None:
         # Photos are now stored in S3. Seed inserts placeholder rows only when
         # S3_BUCKET_NAME is configured so the bucket actually exists.
         import os, uuid, base64, boto3
+        from botocore.config import Config as _BotoConfig
         bucket = os.environ.get("S3_BUCKET_NAME", "")
         if bucket:
-            TINY_PNG = base64.b64decode(
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
-                "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-            )
-            s3 = boto3.client(
-                "s3",
-                endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
-                aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
-                region_name=os.environ.get("S3_REGION", "auto"),
-            )
-            for app_key in ("completed_1", "completed_2", "in_progress_sec"):
-                app_id = app_ids[app_key]
-                s3_key = f"applications/{app_id}/{uuid.uuid4()}-seed.png"
-                s3.put_object(Bucket=bucket, Key=s3_key, Body=TINY_PNG, ContentType="image/png")
-                conn.execute(
-                    """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
-                       VALUES (%s, %s, %s, %s, %s)""",
-                    (s3_key, "seed.png", "image/png", len(TINY_PNG), app_id)
+            # Demo attachments are best-effort: a missing/misconfigured bucket must
+            # never crash startup — seed the data, just skip the photos with a note.
+            try:
+                TINY_PNG = base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+                    "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
                 )
-            print("[seed] photo → done")
+                _path_style = os.environ.get("S3_FORCE_PATH_STYLE", "").strip().lower() in ("1", "true", "yes", "on")
+                s3 = boto3.client(
+                    "s3",
+                    endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
+                    aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
+                    aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
+                    region_name=os.environ.get("S3_REGION", "auto"),
+                    config=_BotoConfig(s3={"addressing_style": "path"}) if _path_style else None,
+                )
+                for app_key in ("completed_1", "completed_2", "in_progress_sec"):
+                    app_id = app_ids[app_key]
+                    s3_key = f"applications/{app_id}/{uuid.uuid4()}-seed.png"
+                    s3.put_object(Bucket=bucket, Key=s3_key, Body=TINY_PNG, ContentType="image/png")
+                    conn.execute(
+                        """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
+                           VALUES (%s, %s, %s, %s, %s)""",
+                        (s3_key, "seed.png", "image/png", len(TINY_PNG), app_id)
+                    )
+                print("[seed] photo → done")
+            except Exception as e:
+                print(f"[seed] photo → skipped (S3 upload failed: {e})")
         else:
             print("[seed] photo → skipped (S3_BUCKET_NAME not set)")
 
