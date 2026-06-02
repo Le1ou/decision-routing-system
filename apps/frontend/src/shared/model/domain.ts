@@ -36,9 +36,12 @@ export type Department = {
   deadlineNotificationRatio: number;
 };
 
-export type JobTitle = {
+export type Position = {
   id: string;
   name: string;
+};
+
+export type JobTitle = Position & {
   isTop: boolean;
 };
 
@@ -51,10 +54,20 @@ export type User = {
   id: string;
   login: string;
   fullName: string;
+  roles: UserRole[];
   role: UserRole;
   departmentId: string;
+  postName: string;
+  positionId: string;
   jobTitleId: string;
   isActive: boolean;
+};
+
+export type UserPermissions = {
+  canManageEmployees: boolean;
+  canManageWorkTypes: boolean;
+  canManagePrioritySettings: boolean;
+  canViewReports: boolean;
 };
 
 export type WorkType = {

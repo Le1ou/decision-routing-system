@@ -6,28 +6,37 @@ import "./LoginPage.css";
 
 export function LoginPage() {
   const { availableUsers, login } = useAuth();
-  const [selectedLogin, setSelectedLogin] = useState(availableUsers[0]?.login ?? "");
+  const [selectedLogin, setSelectedLogin] = useState("orlova_m");
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState("Manager!1");
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const trimmedPassword = password.trim();
+    const trimmedLogin = selectedLogin.trim();
 
-    if (!selectedLogin) {
+    if (!trimmedLogin) {
       setError("Выберите логин.");
       return;
     }
 
-    if (trimmedPassword !== "123") {
-      setError("Для mock-входа используйте пароль 123.");
+    if (!password) {
+      setError("Введите пароль.");
       return;
     }
 
     setError("");
-    login(selectedLogin);
+    setIsSubmitting(true);
+
+    try {
+      await login({ login: trimmedLogin, password });
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Ошибка авторизации.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -42,20 +51,24 @@ export function LoginPage() {
 
         <label className="login-field">
           <span>Логин</span>
-          <select
+          <input
             value={selectedLogin}
             onChange={(event) => {
               setSelectedLogin(event.target.value);
               setError("");
             }}
             aria-label="Логин"
-          >
+            list="login-suggestions"
+          />
+          <datalist id="login-suggestions">
+            <option value="orlova_m" />
+            <option value="kuznetsov_m" />
+            <option value="ivanov_i" />
+            <option value="fedorov_a" />
             {availableUsers.map((user) => (
-              <option value={user.login} key={user.id}>
-                {user.login}
-              </option>
+              <option value={user.login} key={user.id} />
             ))}
-          </select>
+          </datalist>
         </label>
 
         <label className="login-field">
@@ -79,7 +92,9 @@ export function LoginPage() {
           </div>
         </label>
 
-        <button className="login-card__submit" type="submit">Войти</button>
+        <button className="login-card__submit" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? "Вход..." : "Войти"}
+        </button>
       </form>
     </main>
   );

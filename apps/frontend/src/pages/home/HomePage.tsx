@@ -3,20 +3,22 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@app/providers/AuthProvider";
 import { applications } from "@mocks/mockData";
 import { filterApplicationsByRole } from "@shared/model/applicationRules";
+import type { UserPermissions } from "@shared/model/domain";
+import { canAccessManagement } from "@shared/model/roles";
 
 import "./HomePage.css";
 
 const sections = [
-  { title: "Отчетность", description: "Фильтры, период и выгрузка .xls", to: "/reports", managerOnly: true },
-  { title: "Сотрудники", description: "Состав отдела, должности и активность", to: "/employees", managerOnly: true },
-  { title: "Виды работ", description: "Справочник работ и сложности", to: "/work-types", managerOnly: true },
-  { title: "Приоритеты", description: "Коэффициенты расчета заявки", to: "/priority-settings", managerOnly: true },
-];
+  { title: "Отчетность", description: "Фильтры, период и выгрузка .xls", to: "/reports", permission: "canViewReports" },
+  { title: "Сотрудники", description: "Состав отдела, должности и активность", to: "/employees", permission: "canManageEmployees" },
+  { title: "Виды работ", description: "Справочник работ и сложности", to: "/work-types", permission: "canManageWorkTypes" },
+  { title: "Приоритеты", description: "Коэффициенты расчета заявки", to: "/priority-settings", permission: "canManagePrioritySettings" },
+] satisfies Array<{ title: string; description: string; to: string; permission: keyof UserPermissions }>;
 
 export function HomePage() {
-  const { currentUser } = useAuth();
-  const hasManagementAccess = currentUser?.role === "manager" || currentUser?.role === "top-manager";
-  const visibleSections = sections.filter((section) => !section.managerOnly || hasManagementAccess);
+  const { currentUser, permissions } = useAuth();
+  const hasManagementAccess = currentUser ? canAccessManagement(currentUser, permissions) : false;
+  const visibleSections = sections.filter((section) => permissions?.[section.permission]);
   const visibleApplications = currentUser ? filterApplicationsByRole(applications, currentUser) : [];
   const activeApplications = visibleApplications.filter((application) => application.status !== "completed" && application.status !== "rejected");
   const criticalApplications = visibleApplications.filter((application) => application.priority === "critical");
@@ -30,8 +32,7 @@ export function HomePage() {
             <p className="home-hero__eyebrow">Рабочая область</p>
             <h1>Добрый день, {currentUser?.fullName.split(" ")[1] ?? "пользователь"}</h1>
             <p>
-              Быстрый доступ к заявкам, справочникам и отчетности. Данные пока mock, но сценарии уже
-              собраны под роли.
+              Быстрый доступ к заявкам, справочникам и отчетности. Разделы управления показываются по правам backend.
             </p>
           </div>
 
@@ -74,7 +75,7 @@ export function HomePage() {
           </article>
         </div>
 
-        {visibleSections.length > 0 ? (
+        {hasManagementAccess && visibleSections.length > 0 ? (
           <div className="home-tools" aria-label="Разделы руководителя">
             <div className="home-tools__header">
               <h2>Управление</h2>

@@ -141,8 +141,11 @@ export function EmployeesPage() {
       id: `user-${Date.now()}`,
       login: selectedAdUser.login,
       fullName: selectedAdUser.fullName,
+      roles: [form.role],
       role: form.role,
       departmentId: selectedAdUser.departmentId,
+      postName: selectedAdUser.adPostName,
+      positionId: getJobTitleIdByAdPostName(selectedAdUser.adPostName),
       jobTitleId: getJobTitleIdByAdPostName(selectedAdUser.adPostName),
       isActive: form.isActive,
     };
