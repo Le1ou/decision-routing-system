@@ -222,8 +222,11 @@ class TestListApplicationFilters:
         mine_list = _list_ids(AUTHOR, createdByMe=True)
         assert mine in mine_list
         assert other not in mine_list
-        # the flag is what filters: without it fedorov still sees novikova's app
-        assert other in _list_ids(AUTHOR)
+        # Non-managers are scoped to their own involvement (role-based visibility),
+        # so fedorov never sees novikova's application — with or without the flag.
+        assert other not in _list_ids(AUTHOR)
+        # A top-manager, by contrast, sees every author's application.
+        assert other in _list_ids(MANAGER)
 
     def test_assigned_to_me_includes_mine_excludes_others(self):
         app = _make_app(AUTHOR)
@@ -369,8 +372,9 @@ class TestApplicationActions:
         assert r.status_code == 204
 
     def test_complete_without_result_text_400(self):
-        # APP_IN_PROGRESS is inProgress — executor can complete but resultText is required
-        r = post(f"/applications/{APP_IN_PROGRESS}/actions", EXECUTOR,
+        # APP_IN_PROGRESS is inProgress and assigned to executor2 (petrov) — only the
+        # assigned executor may complete it, and resultText is required.
+        r = post(f"/applications/{APP_IN_PROGRESS}/actions", EXECUTOR2,
                  json={"action": "complete"})
         assert r.status_code == 400
 
@@ -958,3 +962,337 @@ class TestCancelAndArchive:
     def test_executor_cannot_archive_403(self):
         r = post(f"/applications/{APP_COMPLETED}/actions", EXECUTOR, json={"action": "archive"})
         assert r.status_code == 403
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Content helpers — assert the data we get back, not just the status code
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _detail(app_id, auth):
+    r = get(f"/applications/{app_id}", auth)
+    assert r.status_code == 200, r.text
+    return r.json()["application"]
+
+
+def _act(app_id, auth, **body):
+    return post(f"/applications/{app_id}/actions", auth, json=body)
+
+
+def _create_assigned(executor_id="2"):
+    """Create a fresh application and assign it to an executor (default ivanov, emp 2)."""
+    app_id = int(_make_app(AUTHOR))
+    assert _act(app_id, MANAGER, action="assignExecutor", executorId=executor_id).status_code == 204
+    return app_id
+
+
+def _set_internal_confirmation(dep_id, required: bool):
+    """Toggle a department's 'confirmation required for internal delegation' flag."""
+    assert patch(f"/departments/{dep_id}/delegation-settings", MANAGER,
+                 json={"delegatedToSameDepartment": required}).status_code == 204
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /auth/me — role ladder is expanded correctly per user
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuthMeContent:
+    def test_top_manager_has_full_role_ladder(self):
+        roles = get("/auth/me", MANAGER).json()["user"]["roles"]
+        assert set(roles) == {"author", "executor", "manager", "top-manager"}
+
+    def test_plain_manager_roles_exclude_top(self):
+        roles = get("/auth/me", DEPT_MANAGER).json()["user"]["roles"]
+        assert set(roles) == {"author", "executor", "manager"}
+
+    def test_executor_roles(self):
+        roles = get("/auth/me", EXECUTOR).json()["user"]["roles"]
+        assert set(roles) == {"author", "executor"}
+
+    def test_author_roles_and_identity(self):
+        u = get("/auth/me", AUTHOR).json()["user"]
+        assert u["roles"] == ["author"]
+        assert u["fullName"] and u["departmentId"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /departments — values respect the contract's 0..1 bounds
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDepartmentsContent:
+    def test_ratios_within_contract_bounds(self):
+        items = get("/departments", MANAGER).json()["items"]
+        assert items
+        for d in items:
+            assert 0 <= d["value"] <= 1, d
+            assert 0 <= d["deadlineNotificationRatio"] <= 1, d
+            assert d["employeeApplicationDelayMinutes"] >= 0, d
+            assert isinstance(d["delegatedToSameDepartment"], bool), d
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /applications/{id} — nested author / executor / department / workType
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestApplicationDetailContent:
+    def test_nested_objects_present_and_consistent(self):
+        app_id = _create_assigned("2")  # ivanov is executor, IT department
+        d = _detail(app_id, MANAGER)
+
+        assert d["executorId"] == "2"
+        assert d["authorId"]
+
+        author = d["author"]
+        assert author and author["id"] == d["authorId"]
+        assert author["fullName"]
+        assert author["role"] in ("author", "executor", "manager", "top-manager")
+
+        ex = d["executor"]
+        assert ex and ex["id"] == "2"
+        assert ex["role"] == "executor"
+        assert ex["fullName"]
+
+        dep = d["department"]
+        assert dep and dep["id"] == d["departmentId"]
+        assert dep["name"]
+        assert 0 <= dep["deadlineNotificationRatio"] <= 1
+
+        wt = d["workType"]
+        assert wt and wt["id"] == d["workTypeId"]
+        assert wt["complexity"] in ("easy", "medium", "hard", "critical")
+        assert isinstance(wt["allowedGradeIds"], list)
+
+    def test_executor_absent_on_new_application(self):
+        app_id = int(_make_app(AUTHOR))
+        d = _detail(app_id, MANAGER)
+        assert d["author"] is not None
+        assert d["executor"] is None
+        assert d.get("executorId") is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Action comments — persisted to the actor's column and surfaced on the card
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestActionComments:
+    def test_manager_comment_persisted_on_assign(self):
+        app_id = int(_make_app(AUTHOR))
+        assert _act(app_id, MANAGER, action="assignExecutor",
+                    executorId="2", comment="Назначил вручную").status_code == 204
+        d = _detail(app_id, MANAGER)
+        assert d["managerComment"] == "Назначил вручную"
+        assert d.get("executorComment") is None
+
+    def test_executor_comment_persisted_on_reject(self):
+        app_id = _create_assigned("2")
+        assert _act(app_id, EXECUTOR, action="reject", comment="Не моя зона").status_code == 204
+        d = _detail(app_id, MANAGER)
+        assert d["executorComment"] == "Не моя зона"
+
+    def test_result_text_persisted_on_complete(self):
+        app_id = _create_assigned("2")
+        assert _act(app_id, EXECUTOR, action="startWork").status_code == 204
+        assert _act(app_id, EXECUTOR, action="complete", resultText="Готово").status_code == 204
+        d = _detail(app_id, MANAGER)
+        assert d["status"] == "completed"
+        assert d["resultText"] == "Готово"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# delegateInternal — executor re-addresses within the department
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDelegateInternal:
+    def test_available_to_assigned_executor(self):
+        app_id = _create_assigned("2")
+        assert "delegateInternal" in _detail(app_id, EXECUTOR)["availableActions"]
+
+    def test_requires_complexity_400(self):
+        app_id = _create_assigned("2")
+        assert _act(app_id, EXECUTOR, action="delegateInternal").status_code == 400
+
+    def test_immediate_path_returns_to_new(self):
+        _set_internal_confirmation(DEP_IT, False)
+        app_id = _create_assigned("2")
+        assert _act(app_id, EXECUTOR, action="delegateInternal",
+                    complexity="hard", comment="Слишком сложно").status_code == 204
+        d = _detail(app_id, MANAGER)
+        assert d["status"] == "new"
+        assert d["isUnfinished"] is True
+        assert d["assignedComplexity"] == "hard"
+        assert d["previousExecutorId"] == "2"
+        assert d["executorComment"] == "Слишком сложно"   # executor action comment
+
+    def test_complexity_cannot_be_lowered_400(self):
+        _set_internal_confirmation(DEP_IT, False)
+        app_id = _create_assigned("2")
+        # raise the assigned complexity to hard
+        assert _act(app_id, EXECUTOR, action="delegateInternal", complexity="hard").status_code == 204
+        assert _act(app_id, MANAGER, action="assignExecutor", executorId="2").status_code == 204
+        # lowering below hard is rejected
+        assert _act(app_id, EXECUTOR, action="delegateInternal", complexity="easy").status_code == 400
+        # same level is accepted
+        assert _act(app_id, EXECUTOR, action="delegateInternal", complexity="hard").status_code == 204
+
+    def test_optional_work_type_change_applied(self):
+        _set_internal_confirmation(DEP_IT, False)
+        app_id = _create_assigned("2")
+        assert _act(app_id, EXECUTOR, action="delegateInternal",
+                    complexity="medium", workTypeId="2").status_code == 204
+        assert _detail(app_id, MANAGER)["workTypeId"] == "2"
+
+    def test_confirmation_required_then_confirm(self):
+        _set_internal_confirmation(DEP_IT, True)
+        try:
+            app_id = _create_assigned("2")
+            assert _act(app_id, EXECUTOR, action="delegateInternal",
+                        complexity="medium", comment="Нужен специалист").status_code == 204
+            d = _detail(app_id, MANAGER)
+            assert d["status"] == "delegated"
+            assert d["assignedComplexity"] == "medium"
+            deleg = d["delegation"]
+            assert deleg is not None
+            assert deleg["delegatedByEmployeeId"] == "2"
+            # internal delegation: source and target department are the same
+            assert deleg["delegatedFromDepartmentId"] == deleg["delegatedToDepartmentId"]
+
+            assert _act(app_id, MANAGER, action="confirmExternalDelegation").status_code == 204
+            d2 = _detail(app_id, MANAGER)
+            assert d2["status"] == "new"
+            assert d2["isUnfinished"] is True
+            assert d2["previousExecutorId"] == "2"
+            assert d2.get("delegationId") is None
+        finally:
+            _set_internal_confirmation(DEP_IT, False)
+
+    def test_confirmation_required_then_decline_keeps_executor(self):
+        _set_internal_confirmation(DEP_IT, True)
+        try:
+            app_id = _create_assigned("2")
+            assert _act(app_id, EXECUTOR, action="delegateInternal", complexity="medium").status_code == 204
+            assert _detail(app_id, MANAGER)["status"] == "delegated"
+            # manager refuses → executor keeps it; work never started → back to assigned
+            assert _act(app_id, MANAGER, action="declineExternalDelegation").status_code == 204
+            d = _detail(app_id, MANAGER)
+            assert d["status"] == "assigned"
+            assert d.get("delegationId") is None
+        finally:
+            _set_internal_confirmation(DEP_IT, False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Role-based list visibility (#1) — verified by what each role can/can't see
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestRoleVisibility:
+    def test_executor_sees_only_apps_they_are_involved_in(self):
+        uninvolved = _make_app(AUTHOR2)            # ivanov is neither author nor executor
+        assert uninvolved not in _list_ids(EXECUTOR)
+        mine = _make_app(AUTHOR)
+        assert _act(int(mine), MANAGER, action="assignExecutor", executorId="2").status_code == 204
+        assert mine in _list_ids(EXECUTOR)         # now ivanov is the executor
+
+    def test_plain_manager_scoped_to_own_department(self):
+        it_app = _make_app(AUTHOR)                 # IT department, not delegated
+        assert it_app not in _list_ids(DEPT_MANAGER)   # OGE manager can't see it
+        assert _act(int(it_app), MANAGER, action="delegateExternal",
+                    departmentId=str(DEP_OGE), comment="to OGE").status_code == 204
+        assert it_app in _list_ids(DEPT_MANAGER)       # now delegated into OGE → visible
+
+    def test_top_manager_sees_every_department(self):
+        a = _make_app(AUTHOR)
+        b = _make_app(AUTHOR2)
+        seen = _list_ids(MANAGER)
+        assert a in seen and b in seen
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DELETE /employees — soft-delete frees the AD person for re-adding (#4)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestEmployeeReadd:
+    def test_deleted_employee_reappears_in_ad_and_can_be_readded(self):
+        candidates = get("/ad/users", MANAGER).json()["items"]
+        assert candidates, "expected at least one addable AD user"
+        ad_id = candidates[0]["adUserId"]
+
+        emp_id = post("/employees", MANAGER,
+                      json={"adUserId": ad_id, "role": "executor", "isActive": True}).json()["id"]
+        # onboarded → no longer an addable candidate
+        assert all(c["adUserId"] != ad_id for c in get("/ad/users", MANAGER).json()["items"])
+
+        assert delete(f"/employees/{emp_id}", MANAGER).status_code == 204
+        # freed → reappears as a candidate
+        assert any(c["adUserId"] == ad_id for c in get("/ad/users", MANAGER).json()["items"])
+        # and can be added again
+        assert post("/employees", MANAGER,
+                    json={"adUserId": ad_id, "role": "executor", "isActive": True}).status_code == 201
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# returnToNew — manager sends an active application back for redistribution
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestReturnToNew:
+    def test_manager_returns_assigned_to_new_unfinished(self):
+        app_id = _create_assigned("2")
+        assert "returnToNew" in _detail(app_id, MANAGER)["availableActions"]
+        assert _act(app_id, MANAGER, action="returnToNew").status_code == 204
+        d = _detail(app_id, MANAGER)
+        assert d["status"] == "new"
+        assert d["isUnfinished"] is True
+        assert d["previousExecutorId"] == "2"
+
+    def test_manager_returns_in_progress_to_new(self):
+        app_id = _create_assigned("2")
+        assert _act(app_id, EXECUTOR, action="startWork").status_code == 204
+        assert "returnToNew" in _detail(app_id, MANAGER)["availableActions"]
+        assert _act(app_id, MANAGER, action="returnToNew").status_code == 204
+        assert _detail(app_id, MANAGER)["status"] == "new"
+
+    def test_executor_cannot_return_to_new_403(self):
+        app_id = _create_assigned("2")
+        assert "returnToNew" not in _detail(app_id, EXECUTOR)["availableActions"]
+        assert _act(app_id, EXECUTOR, action="returnToNew").status_code == 403
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# External delegation is a tool executors can use too — only from `assigned` (§7.3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExecutorExternalDelegation:
+    def test_executor_can_delegate_externally_from_assigned(self):
+        app_id = _create_assigned("2")
+        assert "delegateExternal" in _detail(app_id, EXECUTOR)["availableActions"]
+        assert _act(app_id, EXECUTOR, action="delegateExternal",
+                    departmentId=str(DEP_OGE), comment="Не профиль отдела").status_code == 204
+        assert _detail(app_id, MANAGER)["status"] == "delegated"
+
+    def test_executor_cannot_delegate_externally_in_progress_403(self):
+        app_id = _create_assigned("2")
+        assert _act(app_id, EXECUTOR, action="startWork").status_code == 204
+        assert "delegateExternal" not in _detail(app_id, EXECUTOR)["availableActions"]
+        assert _act(app_id, EXECUTOR, action="delegateExternal",
+                    departmentId=str(DEP_OGE), comment="x").status_code == 403
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Involvement-based action gating — executor identity + manager-as-executor
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestInvolvementGating:
+    def test_unassigned_executor_has_no_actions_and_is_forbidden(self):
+        app_id = _create_assigned("2")           # assigned to ivanov (emp 2)
+        d = _detail(app_id, EXECUTOR2)           # petrov is not involved
+        assert d["availableActions"] == []
+        assert _act(app_id, EXECUTOR2, action="startWork").status_code == 403
+
+    def test_manager_assigned_as_executor_gets_executor_actions(self):
+        # The OGE manager (kuznetsov, emp 8) is assigned as executor of an IT app.
+        app_id = int(_make_app(AUTHOR))
+        assert _act(app_id, MANAGER, action="assignExecutor", executorId="8").status_code == 204
+        d = _detail(app_id, DEPT_MANAGER)
+        # out-of-department manager → no manager-tier actions, but executor-tier via involvement
+        assert "startWork" in d["availableActions"]
+        assert "assignExecutor" not in d["availableActions"]
+        assert _act(app_id, DEPT_MANAGER, action="startWork").status_code == 204
+        assert _detail(app_id, MANAGER)["status"] == "inProgress"

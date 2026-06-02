@@ -555,29 +555,37 @@ def seed_database(db_operator) -> None:
         # Photos are now stored in S3. Seed inserts placeholder rows only when
         # S3_BUCKET_NAME is configured so the bucket actually exists.
         import os, uuid, base64, boto3
+        from botocore.config import Config as _BotoConfig
         bucket = os.environ.get("S3_BUCKET_NAME", "")
         if bucket:
-            TINY_PNG = base64.b64decode(
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
-                "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-            )
-            s3 = boto3.client(
-                "s3",
-                endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
-                aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
-                region_name=os.environ.get("S3_REGION", "auto"),
-            )
-            for app_key in ("completed_1", "completed_2", "in_progress_sec"):
-                app_id = app_ids[app_key]
-                s3_key = f"applications/{app_id}/{uuid.uuid4()}-seed.png"
-                s3.put_object(Bucket=bucket, Key=s3_key, Body=TINY_PNG, ContentType="image/png")
-                conn.execute(
-                    """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
-                       VALUES (%s, %s, %s, %s, %s)""",
-                    (s3_key, "seed.png", "image/png", len(TINY_PNG), app_id)
+            # Demo attachments are best-effort: a missing/misconfigured bucket must
+            # never crash startup — seed the data, just skip the photos with a note.
+            try:
+                TINY_PNG = base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+                    "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
                 )
-            print("[seed] photo → done")
+                _path_style = os.environ.get("S3_FORCE_PATH_STYLE", "").strip().lower() in ("1", "true", "yes", "on")
+                s3 = boto3.client(
+                    "s3",
+                    endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
+                    aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
+                    aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
+                    region_name=os.environ.get("S3_REGION", "auto"),
+                    config=_BotoConfig(s3={"addressing_style": "path"}) if _path_style else None,
+                )
+                for app_key in ("completed_1", "completed_2", "in_progress_sec"):
+                    app_id = app_ids[app_key]
+                    s3_key = f"applications/{app_id}/{uuid.uuid4()}-seed.png"
+                    s3.put_object(Bucket=bucket, Key=s3_key, Body=TINY_PNG, ContentType="image/png")
+                    conn.execute(
+                        """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
+                           VALUES (%s, %s, %s, %s, %s)""",
+                        (s3_key, "seed.png", "image/png", len(TINY_PNG), app_id)
+                    )
+                print("[seed] photo → done")
+            except Exception as e:
+                print(f"[seed] photo → skipped (S3 upload failed: {e})")
         else:
             print("[seed] photo → skipped (S3_BUCKET_NAME not set)")
 

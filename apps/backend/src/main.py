@@ -12,23 +12,30 @@ import uuid
 import os
 import threading
 import boto3
+from botocore.config import Config
 import psycopg
 from src.seed import seed_database
 
 S3_BUCKET       = os.environ.get("S3_BUCKET_NAME", "")
 S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL")
 S3_REGION       = os.environ.get("S3_REGION", "auto")
+# Path-style addressing (http://endpoint/bucket/key) instead of virtual-hosted
+# (http://bucket.endpoint/key). Required by self-hosted S3 like MinIO; harmless
+# for providers that support both. Off by default so existing setups are unchanged.
+S3_FORCE_PATH_STYLE = os.environ.get("S3_FORCE_PATH_STYLE", "").strip().lower() in ("1", "true", "yes", "on")
 _s3_client: boto3.client = None
 
 def get_s3():
     global _s3_client
     if _s3_client is None:
+        cfg = Config(s3={"addressing_style": "path"}) if S3_FORCE_PATH_STYLE else None
         _s3_client = boto3.client(
             "s3",
             endpoint_url=S3_ENDPOINT_URL,
             aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
             aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
             region_name=S3_REGION,
+            config=cfg,
         )
     return _s3_client
 
@@ -115,6 +122,12 @@ with DBController.pool.connection() as _conn:
     _conn.execute("ALTER TABLE public.employee ADD COLUMN IF NOT EXISTS role_id integer")
     _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone")
     _conn.execute("ALTER TABLE public.delegated ADD COLUMN IF NOT EXISTS delegated_by_employee integer")
+    # Photo metadata for S3-backed attachments (older DBs only had value/application_id).
+    _conn.execute("ALTER TABLE public.photo ADD COLUMN IF NOT EXISTS s3_key character varying(1000)")
+    _conn.execute("ALTER TABLE public.photo ADD COLUMN IF NOT EXISTS name character varying(500)")
+    _conn.execute("ALTER TABLE public.photo ADD COLUMN IF NOT EXISTS content_type character varying(100)")
+    _conn.execute("ALTER TABLE public.photo ADD COLUMN IF NOT EXISTS size_bytes integer")
+    _conn.execute("ALTER TABLE public.photo ADD COLUMN IF NOT EXISTS uploaded_at timestamp with time zone DEFAULT NOW()")
     _conn.execute("""
         CREATE TABLE IF NOT EXISTS public.type_of_work_to_grade (
             id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
@@ -129,8 +142,12 @@ DBController.setupRoleTableGrants()
 DBController.fillPermissionRoles(configData["PERMISSIONS"])
 authObj = ActiveDirectoryAuth()
 seed_database(DBController)
+# Pre-create a Postgres login role for every onboarded user that has a known
+# password. In mock mode that's everyone; in AD mode (where AD owns the password)
+# entries may have none — those roles are created lazily on first login instead.
 for _username, _ucfg in _system_users().items():
-    DBController.createUserRole(_username, _ucfg["password"], _pg_roles_for(_username))
+    if _ucfg.get("password"):
+        DBController.createUserRole(_username, _ucfg["password"], _pg_roles_for(_username))
 app = FastAPI(
     title="Decision Routing System API",
     version="0.1.0",
@@ -494,6 +511,9 @@ class ApplicationDetailOut(ApplicationListItemOut):
     attachments: list[dict]       = Field(default_factory=list)
     delegation: Optional[dict]    = Field(default=None)
     workType: Optional[dict]      = Field(default=None)
+    author: Optional[dict]        = Field(default=None)
+    executor: Optional[dict]      = Field(default=None)
+    department: Optional[dict]    = Field(default=None)
 
     @field_validator("archivedAt", mode="before")
     @classmethod
@@ -680,40 +700,121 @@ class ApplicationReportResponse(BaseModel):
 
 # ─────────────────────────── Business logic helpers ──────────────────
 
-def _available_actions(app_row: dict, user_role: str) -> list[str]:
-    """Derive which actions are available based on current status and user role."""
+def _available_actions(app_row: dict, user_role: str, *,
+                       is_author: bool = False,
+                       is_assigned_executor: bool = False,
+                       manager_in_scope: bool = False) -> list[str]:
+    """Derive available actions from status + the caller's *involvement*.
+
+    Action tiers are unioned, not exclusive — the roles are cumulative, so a
+    manager who happens to be the assigned executor of an application gets both
+    the manager-tier and the executor-tier actions for it.
+
+      - manager tier:  granted to a manager/top-manager acting within scope
+                       (own department, the delegation target, or top-manager);
+      - executor tier: granted to whoever is the assigned executor;
+      - author tier:   granted to whoever authored the application.
+    """
     status_name = app_row.get("status_name", "")
     is_archived = app_row.get("archived_at") is not None
-    actions = []
+    actions: set[str] = set()
 
-    # Managers and top-managers share the same per-status action set.
-    if user_role in ("manager", "top-manager"):
+    # ── Manager tier (in-scope managers / top-managers) ──
+    if user_role in ("manager", "top-manager") and manager_in_scope:
         if status_name == "new":
-            actions += ["assignExecutor", "delegateExternal", "editDescription", "changeWorkType", "cancel"]
+            actions |= {"assignExecutor", "delegateExternal", "editDescription", "changeWorkType", "cancel"}
         elif status_name == "assigned":
-            actions += ["assignExecutor", "delegateExternal", "reject"]
+            actions |= {"assignExecutor", "delegateExternal", "reject", "returnToNew"}
         elif status_name == "delegated":
-            actions += ["assignExecutor", "confirmExternalDelegation", "declineExternalDelegation"]
+            actions |= {"assignExecutor", "confirmExternalDelegation", "declineExternalDelegation"}
         elif status_name == "inProgress":
-            actions += ["assignExecutor", "reject"]
+            actions |= {"assignExecutor", "reject", "returnToNew"}
+        if not is_archived and status_name in ("completed", "rejected"):
+            actions.add("archive")
 
-    elif user_role == "executor":
+    # ── Executor tier (the assigned executor, whatever their role) ──
+    # External delegation only from `assigned` (§7.3); internal delegation up to
+    # `inProgress` inclusive (§7.2).
+    if is_assigned_executor:
         if status_name == "assigned":
-            actions += ["startWork", "reject"]
+            actions |= {"startWork", "reject", "delegateInternal", "delegateExternal"}
         elif status_name == "inProgress":
-            actions += ["complete", "reject"]
+            actions |= {"complete", "reject", "delegateInternal"}
 
-    elif user_role == "author":
-        if status_name == "new":
-            actions += ["editDescription", "cancel"]
+    # ── Author tier (the author, whatever their role) ──
+    if is_author and status_name == "new":
+        actions |= {"editDescription", "cancel"}
 
-    # Archiving is available to managers/top-managers on finished applications
-    # (rejected or completed) that are not archived yet.
-    if user_role in ("manager", "top-manager") and not is_archived \
-            and status_name in ("completed", "rejected"):
-        actions += ["archive"]
+    return sorted(actions)
 
-    return actions
+
+def _action_scope(db: PgDbOperator, login: str, app_row: dict, user_role: str) -> tuple[bool, bool, bool]:
+    """Compute the caller's involvement with an application for action gating.
+
+    Returns (is_author, is_assigned_executor, manager_in_scope). A manager is in
+    scope for their own department, for an application delegated to their
+    department, or always if they are a top-manager.
+    """
+    caller_emp = _employee_id(login)
+    is_author = caller_emp is not None and app_row.get("author_id") == caller_emp
+    is_exec   = caller_emp is not None and app_row.get("executor_id") == caller_emp
+
+    manager_in_scope = False
+    if user_role == "top-manager":
+        manager_in_scope = True
+    elif user_role == "manager":
+        own = _user_department_id(db, login)
+        if own is not None:
+            deleg_to = app_row.get("delegated_to")
+            manager_in_scope = (app_row.get("department_id") == own) or \
+                               (deleg_to is not None and str(deleg_to) == str(own))
+    return is_author, is_exec, manager_in_scope
+
+
+def _effective_complexity_index(cur, app_row: dict) -> Optional[int]:
+    """Current complexity of an application as an int index into ComplexityValues:
+    the executor-assigned value if present, otherwise the work type's base complexity."""
+    assigned = app_row.get("empl_assigned_complexity")
+    if assigned is not None:
+        return assigned
+    tow_id = app_row.get("types_of_works")
+    if tow_id is None:
+        return None
+    row = cur.execute(
+        "SELECT complexity_value FROM public.types_of_works WHERE type_of_works_id = %s",
+        (tow_id,)
+    ).fetchone()
+    return row["complexity_value"] if row else None
+
+
+def _user_dict(cur, employee_id, login_by_emp: dict) -> Optional[dict]:
+    """Build a contract `User` dict for an employee_id, or None. Shaped like UserOut."""
+    if employee_id is None:
+        return None
+    row = cur.execute(
+        """
+        SELECT e.employee_id, e.department_id, e.fio, e.is_active,
+               r.name AS role, po.post_id AS post_id, po.name AS post_name
+        FROM public.employee e
+        LEFT JOIN public.role r        ON r.role_id = e.role_id
+        LEFT JOIN public.post_grade pg ON pg.post_grade_id = e.post_grade_id
+        LEFT JOIN public.post po       ON po.post_id = pg.post_post_id
+        WHERE e.employee_id = %s
+        """,
+        (int(employee_id),)
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id":           str(row["employee_id"]),
+        "login":        login_by_emp.get(row["employee_id"], ""),
+        "fullName":     row.get("fio") or "",
+        "role":         row.get("role") or "author",
+        "departmentId": str(row.get("department_id") or ""),
+        "postName":     row.get("post_name") or "",
+        "positionId":   str(row.get("post_id") or ""),
+        "isActive":     row.get("is_active", True),
+    }
 
 
 def _resolve_employee_id(db: PgDbOperator, login: str) -> Optional[int]:
@@ -756,6 +857,34 @@ def _require_department_scope(db: PgDbOperator, login: str, target_department_id
     if target_department_id is None or own is None or int(target_department_id) != int(own):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Out of your department scope")
+
+
+def _visibility_conditions(role: str, emp_id, my_dept) -> tuple[list, list]:
+    """Mandatory row-level visibility filter applied to every application listing.
+
+      - top-manager: sees all applications;
+      - manager: own department, or applications delegated into their department;
+      - author/executor: only applications where they are the author or executor.
+
+    Relies on the `author_link` / `exec_link` joins being present in the query.
+    Returns (conditions, params) where each condition is ANDed into the WHERE.
+    """
+    if role == "top-manager":
+        return [], []
+    if role == "manager":
+        if my_dept is None:
+            return ["1=0"], []  # a manager with no department sees nothing
+        # a.department_id is integer; delegated.delegated_to stores the id as text.
+        return (
+            ["(a.department_id = %s OR a.delegated_id IN "
+             "(SELECT delegated_id FROM public.delegated WHERE delegated_to = %s))"],
+            [int(my_dept), str(my_dept)],
+        )
+    # author / executor (and any other non-manager role)
+    if emp_id is None:
+        return ["1=0"], []
+    return (["(author_link.employee_id = %s OR exec_link.employee_id = %s)"],
+            [emp_id, emp_id])
 
 
 def _build_application_list_query(filters: dict) -> tuple[str, list]:
@@ -833,6 +962,13 @@ def _build_application_list_query(filters: dict) -> tuple[str, list]:
         """)
         params.append(str(filters["department_id"]))
 
+    # Mandatory role-based visibility (department/involvement scoping).
+    vis_conditions, vis_params = _visibility_conditions(
+        filters.get("role", "author"), filters.get("employee_id"), filters.get("department_id")
+    )
+    conditions += vis_conditions
+    params += vis_params
+
     # Always hide archived applications and rejected ones older than N days.
     cutoff = datetime.now(project_timezone) - timedelta(days=REJECTED_VISIBLE_DAYS)
     conditions.append("a.archived_at IS NULL")
@@ -876,7 +1012,7 @@ def health():
 @app.get("/auth/me", tags=["Auth"], summary="Получить текущего пользователя",
          description="Возвращает пользователя, найденного через Basic Auth/Active Directory, его роль, отдел, должность и права frontend.",
          response_model=CurrentUserResponse)
-def get_current_user(userData=Depends(authObj.authenticate_user_test)):
+def get_current_user(userData=Depends(authObj.authenticate)):
     try:
         db = get_db_user(userData)
         login = userData[0]
@@ -933,7 +1069,7 @@ def get_current_user(userData=Depends(authObj.authenticate_user_test)):
          description="Без query-параметров backend возвращает список заявок по умолчанию для текущего пользователя. Видимость заявок определяется ролью пользователя на backend.",
          response_model=ApplicationListResponse)
 def list_applications(
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
     status_filter: Optional[str] = Query(default=None, alias="status"),
     priority: Optional[str]      = Query(default=None),
     createdByMe: Optional[bool]  = Query(default=None),
@@ -951,6 +1087,7 @@ def list_applications(
         login = userData[0]
         emp_id = _employee_id(login)
         my_dept = _user_department_id(db, login)
+        role = _get_user_role(login)
 
         filters = dict(
             status=status_filter, priority=priority,
@@ -959,7 +1096,7 @@ def list_applications(
             executorName=executorName, applicationId=applicationId,
             sortBy=sortBy, sortDirection=sortDirection,
             page=page, pageSize=pageSize,
-            employee_id=emp_id, department_id=my_dept,
+            employee_id=emp_id, department_id=my_dept, role=role,
         )
 
         query, params = _build_application_list_query(filters)
@@ -1005,6 +1142,12 @@ def list_applications(
                     count_q += " AND a.delegated_id IN (SELECT delegated_id FROM public.delegated WHERE delegated_to = %s)"
                     count_params.append(str(my_dept))
 
+                # Mandatory role-based visibility — identical to the list query.
+                vis_conditions, vis_params = _visibility_conditions(role, emp_id, my_dept)
+                for cond in vis_conditions:
+                    count_q += f" AND {cond}"
+                count_params += vis_params
+
                 # Mirror the visibility rules applied in _build_application_list_query.
                 cutoff = datetime.now(project_timezone) - timedelta(days=REJECTED_VISIBLE_DAYS)
                 count_q += " AND a.archived_at IS NULL"
@@ -1031,7 +1174,7 @@ def list_applications(
           response_model=IdResponse)
 def create_application(
     payload: CreateApplicationPayload,
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         db = get_db_user(userData)
@@ -1095,7 +1238,7 @@ def create_application(
          response_model=ApplicationDetailResponse)
 def get_application(
     applicationId: int = Path(...),
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         db = get_db_user(userData)
@@ -1148,6 +1291,7 @@ def get_application(
                         # Surface the cross-department ids on the application itself.
                         row["delegated_from_department_id"] = d.get("delegated_from")
                         row["delegated_to_department_id"]   = d.get("delegated_to")
+                        row["delegated_to"]                 = d.get("delegated_to")
 
                 # Work type (nested) — lets the UI fall back to workType.complexity
                 # when the application has no assigned complexity yet.
@@ -1172,7 +1316,29 @@ def get_application(
                     if wt:
                         work_type = WorkTypeOut.model_validate(wt).model_dump()
 
-        row["availableActions"] = _available_actions(row, user_role)
+                # Nested author / executor (contract `User`) and department.
+                login_by_emp = {
+                    int(c["employee_id"]): uname
+                    for uname, c in _ad_directory().items()
+                    if c.get("employee_id") is not None
+                }
+                author_user   = _user_dict(cur, row.get("author_id"), login_by_emp)
+                executor_user = _user_dict(cur, row.get("executor_id"), login_by_emp)
+
+                department = None
+                if row.get("department_id") is not None:
+                    drow = cur.execute(
+                        "SELECT * FROM public.department WHERE department_id = %s",
+                        (row["department_id"],)
+                    ).fetchone()
+                    if drow:
+                        department = DepartmentOut.model_validate(drow).model_dump()
+
+        is_author, is_exec, mgr_scope = _action_scope(db, login, row, user_role)
+        row["availableActions"] = _available_actions(
+            row, user_role,
+            is_author=is_author, is_assigned_executor=is_exec, manager_in_scope=mgr_scope,
+        )
         if S3_ENDPOINT_URL and S3_BUCKET:
             s3 = get_s3()
             row["attachments"] = [
@@ -1202,6 +1368,9 @@ def get_application(
             ]
         row["delegation"] = delegation
         row["workType"]   = work_type
+        row["author"]     = author_user
+        row["executor"]   = executor_user
+        row["department"] = department
 
         detail = ApplicationDetailOut.model_validate(row)
         return {"application": detail.model_dump()}
@@ -1235,7 +1404,7 @@ def get_application(
 def application_action(
     applicationId: int = Path(...),
     payload: ApplicationActionPayload = ...,
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         db = get_db_user(userData)
@@ -1252,16 +1421,33 @@ def application_action(
             with conn.cursor(row_factory=dict_row) as cur:
                 app_row = cur.execute(
                     """
-                    SELECT a.*, s.name AS status_name
+                    SELECT a.*, s.name AS status_name,
+                           author_link.employee_id AS author_id,
+                           exec_link.employee_id   AS executor_id,
+                           dl.delegated_to          AS delegated_to
                     FROM public.application a
                     LEFT JOIN public.status s ON s.status_id = a.status_id
+                    LEFT JOIN public.employee_to_application author_link
+                           ON author_link.application_id = a.application_id
+                          AND author_link.role_id = (SELECT role_id FROM public.role WHERE name = 'author' LIMIT 1)
+                    LEFT JOIN public.employee_to_application exec_link
+                           ON exec_link.application_id = a.application_id
+                          AND exec_link.role_id = (SELECT role_id FROM public.role WHERE name = 'executor' LIMIT 1)
+                    LEFT JOIN public.delegated dl ON dl.delegated_id = a.delegated_id
                     WHERE a.application_id = %s
                     """,
                     (int(applicationId),)
                 ).fetchone()
                 row_or_404(app_row, "Application not found")
 
-                available = _available_actions(app_row, user_role)
+                # Gate the action by the caller's actual involvement, not role alone:
+                # this also enforces that only the assigned executor can run executor
+                # actions and that managers act only within their department scope.
+                is_author, is_exec, mgr_scope = _action_scope(db, login, app_row, user_role)
+                available = _available_actions(
+                    app_row, user_role,
+                    is_author=is_author, is_assigned_executor=is_exec, manager_in_scope=mgr_scope,
+                )
                 if payload.action not in available:
                     raise HTTPException(status_code=403, detail="Action not permitted in current state")
 
@@ -1342,10 +1528,23 @@ def application_action(
                         )
 
                 elif action == "returnToNew":
+                    # Manager returns an assigned/in-progress application to `new`
+                    # for redistribution (§8.1), flagging it Unfinished and recording
+                    # who had it (§6.5 / status model row "→ Новый").
+                    exec_role = cur.execute(
+                        "SELECT role_id FROM public.role WHERE name = 'executor' LIMIT 1"
+                    ).fetchone()
+                    prev_exec = None
+                    if exec_role:
+                        link = cur.execute(
+                            "SELECT employee_id FROM public.employee_to_application WHERE application_id = %s AND role_id = %s",
+                            (int(applicationId), exec_role["role_id"])
+                        ).fetchone()
+                        prev_exec = link["employee_id"] if link else None
                     set_status("new")
                     cur.execute(
-                        "UPDATE public.application SET updated_at = %s WHERE application_id = %s",
-                        (now, int(applicationId))
+                        "UPDATE public.application SET is_unfinished = true, previous_executor_id = %s, updated_at = %s WHERE application_id = %s",
+                        (prev_exec, now, int(applicationId))
                     )
 
                 elif action == "delegateExternal":
@@ -1372,25 +1571,107 @@ def application_action(
                         (delegated_id, now, int(applicationId))
                     )
 
-                elif action == "confirmExternalDelegation":
-                    if app_row.get("delegated_id"):
-                        cur.execute(
-                            "UPDATE public.delegated SET decision = 'confirmed' WHERE delegated_id = %s",
-                            (app_row["delegated_id"],)
-                        )
-                    set_status("new")
+                elif action == "delegateInternal":
+                    # Executor re-addresses a task within their own department because
+                    # they can't handle it (§7.2, §9.2, §13.1). They set a complexity
+                    # (not lower than the current one) directly on the application and
+                    # may change the work type. If the department requires manager
+                    # confirmation (§7.6, delegated_to_same_dep) it goes to `delegated`
+                    # first; otherwise it returns straight to `new` for redistribution.
+                    if not payload.complexity:
+                        raise HTTPException(status_code=400, detail="complexity required")
+                    new_idx = ComplexityValues.index(payload.complexity)
+                    cur_idx = _effective_complexity_index(cur, app_row)
+                    if cur_idx is not None and new_idx < cur_idx:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="complexity cannot be lower than the current complexity")
+
+                    # Complexity (and optional work type) are set on the application now.
                     cur.execute(
-                        "UPDATE public.application SET updated_at = %s WHERE application_id = %s",
-                        (now, int(applicationId))
+                        "UPDATE public.application SET empl_assigned_complexity = %s, updated_at = %s WHERE application_id = %s",
+                        (new_idx, now, int(applicationId))
                     )
+                    if payload.workTypeId:
+                        cur.execute(
+                            "UPDATE public.application SET types_of_works = %s WHERE application_id = %s",
+                            (int(payload.workTypeId), int(applicationId))
+                        )
+
+                    dep_row = cur.execute(
+                        "SELECT delegated_to_same_dep FROM public.department WHERE department_id = %s",
+                        (app_row["department_id"],)
+                    ).fetchone()
+                    needs_confirmation = bool(dep_row and dep_row.get("delegated_to_same_dep"))
+
+                    if needs_confirmation:
+                        # Pending manager confirmation: record an internal delegation
+                        # (delegated_from == delegated_to == own department).
+                        own_dep = str(app_row["department_id"])
+                        delegated_id = cur.execute(
+                            """
+                            INSERT INTO public.delegated
+                                (delegated_by, delegated_by_employee, delegated_from, delegated_to, comment, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s) RETURNING delegated_id
+                            """,
+                            (own_dep, emp_id, own_dep, own_dep, payload.comment or "", now)
+                        ).fetchone()["delegated_id"]
+                        set_status("delegated")
+                        cur.execute(
+                            "UPDATE public.application SET delegated_id = %s, updated_at = %s WHERE application_id = %s",
+                            (delegated_id, now, int(applicationId))
+                        )
+                    else:
+                        # No confirmation needed → return to `new` for redistribution.
+                        set_status("new")
+                        cur.execute(
+                            "UPDATE public.application SET is_unfinished = true, previous_executor_id = %s, updated_at = %s WHERE application_id = %s",
+                            (emp_id, now, int(applicationId))
+                        )
+
+                elif action == "confirmExternalDelegation":
+                    deleg = None
+                    if app_row.get("delegated_id"):
+                        deleg = cur.execute(
+                            "SELECT * FROM public.delegated WHERE delegated_id = %s",
+                            (app_row["delegated_id"],)
+                        ).fetchone()
+                        cur.execute(
+                            "UPDATE public.delegated SET decision = 'confirmed', decided_at = %s WHERE delegated_id = %s",
+                            (now, app_row["delegated_id"])
+                        )
+                    is_internal = bool(deleg and deleg.get("delegated_from") == deleg.get("delegated_to"))
+                    set_status("new")
+                    if is_internal:
+                        # Internal re-addressing confirmed → redistribute within the dept.
+                        cur.execute(
+                            "UPDATE public.application SET is_unfinished = true, previous_executor_id = %s, delegated_id = NULL, updated_at = %s WHERE application_id = %s",
+                            (deleg.get("delegated_by_employee"), now, int(applicationId))
+                        )
+                    else:
+                        cur.execute(
+                            "UPDATE public.application SET updated_at = %s WHERE application_id = %s",
+                            (now, int(applicationId))
+                        )
 
                 elif action == "declineExternalDelegation":
+                    deleg = None
                     if app_row.get("delegated_id"):
-                        cur.execute(
-                            "UPDATE public.delegated SET decision = 'declined' WHERE delegated_id = %s",
+                        deleg = cur.execute(
+                            "SELECT * FROM public.delegated WHERE delegated_id = %s",
                             (app_row["delegated_id"],)
+                        ).fetchone()
+                        cur.execute(
+                            "UPDATE public.delegated SET decision = 'declined', decided_at = %s WHERE delegated_id = %s",
+                            (now, app_row["delegated_id"])
                         )
-                    set_status("new")
+                    is_internal = bool(deleg and deleg.get("delegated_from") == deleg.get("delegated_to"))
+                    if is_internal:
+                        # Manager refused the internal re-addressing → the executor keeps
+                        # it. Restore the working status (inProgress if work had started).
+                        set_status("inProgress" if app_row.get("work_at") else "assigned")
+                    else:
+                        set_status("new")
                     cur.execute(
                         "UPDATE public.application SET delegated_id = NULL, updated_at = %s WHERE application_id = %s",
                         (now, int(applicationId))
@@ -1429,6 +1710,21 @@ def application_action(
                         (now, now, int(applicationId))
                     )
 
+                # Persist a free-text comment to the actor's column (overwrite).
+                # Managers/top-managers write manager_comment; executors write
+                # executor_comment. (`complete` carries its note in resultText.)
+                if payload.comment:
+                    if user_role in ("manager", "top-manager"):
+                        cur.execute(
+                            "UPDATE public.application SET manager_comment = %s, updated_at = %s WHERE application_id = %s",
+                            (payload.comment, now, int(applicationId))
+                        )
+                    elif user_role == "executor":
+                        cur.execute(
+                            "UPDATE public.application SET executor_comment = %s, updated_at = %s WHERE application_id = %s",
+                            (payload.comment, now, int(applicationId))
+                        )
+
         return Response(status_code=204)
 
     except HTTPException:
@@ -1443,7 +1739,7 @@ def application_action(
 async def upload_attachments(
     applicationId: int = Path(...),
     files: list[UploadFile] = File(...),
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         db = get_db_user(userData)
@@ -1488,7 +1784,7 @@ async def upload_attachments(
 # ─── Directories ────────────────────────────────────────────────
 
 @app.get("/departments", tags=["Directories"], summary="Получить отделы", response_model=DepartmentListResponse)
-def get_departments(userData=Depends(authObj.authenticate_user_test)):
+def get_departments(userData=Depends(authObj.authenticate)):
     try:
         db = get_db_user(userData)
         rows = db.getAllRowsFromTable("department")
@@ -1504,7 +1800,7 @@ def get_departments(userData=Depends(authObj.authenticate_user_test)):
          description="Обычный руководитель получает сотрудников только своего отдела. top-manager может получать сотрудников всех отделов и фильтровать по departmentId.",
          response_model=EmployeeListResponse)
 def get_employees(
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
     departmentId: Optional[str] = Query(default=None),
     isActive: Optional[bool]    = Query(default=None),
     role: Optional[str]         = Query(default=None),
@@ -1587,7 +1883,7 @@ def get_employees(
           response_model=IdResponse)
 def add_employee(
     payload: CreateEmployeePayload,
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         require_permission(userData, "canManageEmployees")
@@ -1661,7 +1957,7 @@ def add_employee(
 def update_employee(
     payload: UpdateEmployeePayload,
     employeeId: int = Path(...),
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         require_permission(userData, "canManageEmployees")
@@ -1706,7 +2002,7 @@ def update_employee(
             description="Удаляет локальную запись участия сотрудника в системе, не удаляя пользователя из AD. Обычный руководитель может удалять только сотрудников своего отдела, top-manager — любого отдела.")
 def delete_employee(
     employeeId: int = Path(...),
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         require_permission(userData, "canManageEmployees")
@@ -1728,6 +2024,16 @@ def delete_employee(
                     (now, now, int(employeeId))
                 )
 
+        # Reverse of add_employee: free the AD person in the in-memory directory so
+        # they reappear as an addable candidate in /ad/users (mock-only; not deleted
+        # from AD). Resets on restart.
+        for _entry in _ad_directory().values():
+            if _entry.get("employee_id") == int(employeeId):
+                _entry["inSystem"] = False
+                _entry.pop("employee_id", None)
+                _entry.pop("role", None)
+                break
+
         return Response(status_code=204)
 
     except HTTPException:
@@ -1742,7 +2048,7 @@ def delete_employee(
 def update_department_delegation_settings(
     payload: UpdateDepartmentDelegationSettingsPayload,
     departmentId: int = Path(...),
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         db = get_db_user(userData)
@@ -1772,7 +2078,7 @@ def update_department_delegation_settings(
 @app.get("/positions", tags=["Directories"], summary="Получить должности",
          description="Должность сотрудника приходит из AD и не редактируется руководителем вручную. Соответствует таблице post.",
          response_model=PositionListResponse)
-def get_positions(userData=Depends(authObj.authenticate_user_test)):
+def get_positions(userData=Depends(authObj.authenticate)):
     try:
         db = get_db_user(userData)
         with db.pool.connection() as conn:
@@ -1794,7 +2100,7 @@ def get_positions(userData=Depends(authObj.authenticate_user_test)):
 @app.get("/grades", tags=["Directories"], summary="Получить грейды",
          description="Грейды используются только в матрице допустимости вида работ и не являются должностью сотрудника. Соответствует таблице grade.",
          response_model=GradeListResponse)
-def get_grades(userData=Depends(authObj.authenticate_user_test)):
+def get_grades(userData=Depends(authObj.authenticate)):
     try:
         db = get_db_user(userData)
         with db.pool.connection() as conn:
@@ -1815,7 +2121,7 @@ def get_grades(userData=Depends(authObj.authenticate_user_test)):
 
 @app.get("/ad/users", tags=["Directories"], summary="Найти пользователей AD для добавления в систему", response_model=AdUserListResponse)
 def get_ad_users(
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
     query: Optional[str]        = Query(default=None),
     departmentId: Optional[str] = Query(default=None),
 ):
@@ -1849,7 +2155,7 @@ def get_ad_users(
          description="Обычный руководитель видит виды работ только своего отдела. top-manager видит все отделы и может фильтровать по departmentId.",
          response_model=WorkTypeListResponse)
 def get_work_types_all(
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
     departmentId: Optional[str] = Query(default=None),
 ):
     try:
@@ -1899,7 +2205,7 @@ def get_work_types_all(
           response_model=IdResponse)
 def create_work_type(
     payload: CreateWorkTypePayload,
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         require_permission(userData, "canManageWorkTypes")
@@ -1944,7 +2250,7 @@ def create_work_type(
 def update_work_type(
     payload: UpdateWorkTypePayload,
     workTypeId: int = Path(...),
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         require_permission(userData, "canManageWorkTypes")
@@ -2004,7 +2310,7 @@ def update_work_type(
             description="Обычный руководитель может удалять виды работ только своего отдела, top-manager — любого.")
 def delete_work_type(
     workTypeId: int = Path(...),
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         require_permission(userData, "canManageWorkTypes")
@@ -2066,7 +2372,7 @@ def _ensure_priority_defaults(db: PgDbOperator) -> None:
 @app.get("/priority-settings", tags=["Priority"], summary="Получить коэффициенты расчета приоритета",
          description="Обычный руководитель получает настройки только своего отдела в режиме чтения. top-manager получает все отделы и может редактировать.",
          response_model=PrioritySettingsModel)
-def get_priority_settings(userData=Depends(authObj.authenticate_user_test)):
+def get_priority_settings(userData=Depends(authObj.authenticate)):
     try:
         require_permission(userData, "canManagePrioritySettings")
         db = get_db_user(userData)
@@ -2095,7 +2401,7 @@ def get_priority_settings(userData=Depends(authObj.authenticate_user_test)):
          response_model=PrioritySettingsModel)
 def update_priority_settings(
     payload: PrioritySettingsModel,
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         require_permission(userData, "canManagePrioritySettings")
@@ -2117,7 +2423,7 @@ def update_priority_settings(
          description="Текущий контракт рассчитан на pull-модель: backend создает уведомления при событиях системы, frontend периодически запрашивает список или обновляет его после действий пользователя.",
          response_model=NotificationsResponse)
 def get_notifications(
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
     unreadOnly: bool = Query(default=False),
 ):
     try:
@@ -2155,7 +2461,7 @@ def get_notifications(
 @app.post("/notifications/{notificationId}/read", status_code=204, tags=["Notifications"], summary="Отметить уведомление прочитанным")
 def mark_notification_read(
     notificationId: int = Path(...),
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
 ):
     try:
         db = get_db_user(userData)
@@ -2177,7 +2483,7 @@ def mark_notification_read(
 
 
 @app.post("/notifications/read-all", status_code=204, tags=["Notifications"], summary="Отметить все уведомления текущего пользователя прочитанными")
-def mark_all_notifications_read(userData=Depends(authObj.authenticate_user_test)):
+def mark_all_notifications_read(userData=Depends(authObj.authenticate)):
     try:
         db = get_db_user(userData)
         login = userData[0]
@@ -2250,7 +2556,7 @@ def _build_report_query(
          description="Возвращает JSON-данные для предпросмотра отчета. Фильтры передаются query-параметрами, потому что формирование отчета не меняет состояние backend.",
          response_model=ApplicationReportResponse)
 def report_applications(
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
     createdFrom:  Optional[str] = Query(default=None),
     createdTo:    Optional[str] = Query(default=None),
     finishedFrom: Optional[str] = Query(default=None),
@@ -2294,7 +2600,7 @@ def report_applications(
 @app.get("/reports/applications.xls", tags=["Reports"], summary="Скачать XLS-отчет по заявкам",
          description="Возвращает готовый XLS-файл по тем же фильтрам, что и предпросмотр отчета. Генерация файла выполняется на backend.")
 def report_applications_xls(
-    userData=Depends(authObj.authenticate_user_test),
+    userData=Depends(authObj.authenticate),
     createdFrom:  Optional[str] = Query(default=None),
     createdTo:    Optional[str] = Query(default=None),
     finishedFrom: Optional[str] = Query(default=None),

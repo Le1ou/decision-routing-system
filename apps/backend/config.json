@@ -2,11 +2,16 @@
   "dep_configs": {
     "empl_appl_delay": 360,
     "delegated_to_same_dep": false,
-    "deadline_notification": 25
+    "deadline_notification": 0.25
   },
   "AD_auth": {
     "server_adress": "your_ad_server.yourdomain.local",
-    "Domain": "yourdomain"
+    "Domain": "yourdomain",
+    "use_ssl": true,
+    "port": 636,
+    "role_source": "system",
+    "search_base": "",
+    "group_role_map": {}
   },
   "MOCK_AD": {
     "orlova_m": {
