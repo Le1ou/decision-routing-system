@@ -11,7 +11,7 @@
 
 ## Статус
 
-Инициализация проекта
+Frontend интегрирован с локальным backend API. Docker Compose поднимает PostgreSQL, MinIO, backend и frontend для локальной разработки и проверки сценариев.
 
 ## Требования
 
@@ -19,15 +19,20 @@
 - Docker Compose
 
 Проверка установки:
+```bash
 docker --version
 docker compose version
+```
 
 ## Переменные среды
 
 Создайте файл `.env` на основе шаблона:
+```bash
 cp .env.example .env
+```
 
 Основные переменные:
+```env
 DB_HOST=db
 DB_PORT=5432
 DB_USER=postgres
@@ -35,48 +40,75 @@ DB_PASSWORD=postgres
 DB_NAME=app_db
 BACKEND_PORT=3000
 VITE_API_URL=http://localhost:3000
+```
 
 Для backend, запущенного локально вне Docker, используйте `DB_HOST=localhost`.
 
 ## Запустить инфраструктуру (DB + Backend + Frontend)
 
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d --build
+```
+
+Для запуска в foreground:
+
+```bash
 docker compose --env-file .env -f infra/compose/docker-compose.local.yml up --build
-или
-docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d
+```
 
 ## После запуска:
 
-Frontend: http://localhost:5173
-Backend: http://localhost:3000
-swagger: http://localhost:3000/docs#/
-PostgreSQL: localhost:5432
+- Frontend: http://localhost:5173
+- Backend: http://localhost:3000
+- Swagger: http://localhost:3000/docs#/
+- PostgreSQL: localhost:5432
+- MinIO console: http://localhost:9001
+
+## Тестовый вход
+
+```text
+Логин: orlova_m
+Пароль: Manager!1
+```
 
 ## Проверить backend
 
-http://localhost:3000/health
+```bash
+curl http://localhost:3000/health
+```
 
 Ожидаемый ответ: 
+```json
 {"status": "ok"}
+```
 
 ## Остановка контейнеров:
 
+```bash
 docker compose --env-file .env -f infra/compose/docker-compose.local.yml down
+```
 
 ## Удаление вместе с данными:
 
+```bash
 docker compose --env-file .env -f infra/compose/docker-compose.local.yml down -v
+```
 
 ## Frontend (локальный запуск вне Docker)
 
 Если frontend нужно запустить без Docker:
 
+```bash
 cd apps/frontend
 npm install
 npm run dev
+```
 
 URL backend для frontend:
 
+```env
 VITE_API_URL=http://localhost:3000
+```
 
 ## Подключение к базе данных
 
