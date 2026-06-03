@@ -18,26 +18,48 @@ from src.seed import seed_database
 
 S3_BUCKET       = os.environ.get("S3_BUCKET_NAME", "")
 S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL")
+# Endpoint used to SIGN URLs handed to the browser. The backend reaches MinIO at
+# the internal docker host (minio:9000), but the browser can't resolve that — so
+# presigned links must be signed against a host the browser can reach
+# (e.g. http://localhost:9000). Falls back to S3_ENDPOINT_URL when not set, which
+# is correct for a real cloud S3 whose endpoint is public anyway.
+S3_PUBLIC_ENDPOINT_URL = os.environ.get("S3_PUBLIC_ENDPOINT_URL") or S3_ENDPOINT_URL
 S3_REGION       = os.environ.get("S3_REGION", "auto")
 # Path-style addressing (http://endpoint/bucket/key) instead of virtual-hosted
 # (http://bucket.endpoint/key). Required by self-hosted S3 like MinIO; harmless
 # for providers that support both. Off by default so existing setups are unchanged.
 S3_FORCE_PATH_STYLE = os.environ.get("S3_FORCE_PATH_STYLE", "").strip().lower() in ("1", "true", "yes", "on")
 _s3_client: boto3.client = None
+_s3_public_client: boto3.client = None
+
+
+def _make_s3(endpoint_url):
+    cfg = Config(s3={"addressing_style": "path"}) if S3_FORCE_PATH_STYLE else None
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
+        region_name=S3_REGION,
+        config=cfg,
+    )
+
 
 def get_s3():
+    """Client for server-side operations (upload) — uses the internal endpoint."""
     global _s3_client
     if _s3_client is None:
-        cfg = Config(s3={"addressing_style": "path"}) if S3_FORCE_PATH_STYLE else None
-        _s3_client = boto3.client(
-            "s3",
-            endpoint_url=S3_ENDPOINT_URL,
-            aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
-            region_name=S3_REGION,
-            config=cfg,
-        )
+        _s3_client = _make_s3(S3_ENDPOINT_URL)
     return _s3_client
+
+
+def get_s3_public():
+    """Client used only to SIGN presigned URLs for the browser — uses the public
+    endpoint so the resulting links are reachable from outside the docker network."""
+    global _s3_public_client
+    if _s3_public_client is None:
+        _s3_public_client = _make_s3(S3_PUBLIC_ENDPOINT_URL)
+    return _s3_public_client
 
 # ──────────────────── Mock Active Directory ────────────────────
 # configData["MOCK_AD"] is ONE directory keyed by login. Each entry is an AD
@@ -1350,7 +1372,7 @@ def get_application(
             is_author=is_author, is_assigned_executor=is_exec, manager_in_scope=mgr_scope,
         )
         if S3_ENDPOINT_URL and S3_BUCKET:
-            s3 = get_s3()
+            s3 = get_s3_public()   # sign links against the browser-reachable endpoint
             row["attachments"] = [
                 {
                     "id": str(p["photo_id"]),

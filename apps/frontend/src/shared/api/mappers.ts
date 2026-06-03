@@ -113,6 +113,7 @@ function mapAttachment(raw: Record<string, unknown>, applicationId: string, inde
     applicationId,
     name: String(raw.name ?? raw.fileName ?? raw.value ?? "Вложение"),
     type: String(raw.content_type ?? raw.contentType ?? "").startsWith("image/") ? "photo" : "document",
+    url: optionalString(raw.url),
   };
 }
 

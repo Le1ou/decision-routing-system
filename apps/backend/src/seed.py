@@ -12,12 +12,12 @@ whole thing rolls back and the DB is left untouched.
 This version matches the CURRENT schema, which means:
   • employee has NO login column — login lives in the config.json MOCK_AD
     directory and is joined in at the API layer.
-  • photo has only value + application_id (no name / type / url yet).
+  • photo stores S3 metadata (s3_key, name, content_type, size_bytes,
+    application_id); seed uploads real images from tests/images_for_tests.
   • there is no priority_settings table — GET/PUT /priority-settings is
     still backed by the in-memory dict in main.py.
-  • application has UNIQUE constraints on previous_executor_id and
-    closed_by_id, so every value used in those two columns is kept DISTINCT
-    here to avoid a unique-violation. (Those constraints are a bug — see notes.)
+  • previous_executor_id / closed_by_id have only FK constraints (no UNIQUE),
+    so employees may be reused freely across applications.
   • application.delegated_id ↔ delegated.application_id is a circular FK, so
     we insert the delegation with a NULL application_id, create the app, then
     back-fill delegated.application_id.
@@ -55,6 +55,11 @@ def seed_database(db_operator) -> None:
     """
     now = datetime.now(PROJECT_TZ)
 
+    # Complexity is stored 1-based in types_of_works.complexity_value and
+    # application.empl_assigned_complexity (matches main.py: complexity_int_to_str
+    # reads value-1, create/update store index+1). 1=easy 2=medium 3=hard 4=critical.
+    complexity_to_int = {"easy": 1, "medium": 2, "hard": 3, "critical": 4}
+
     with db_operator.pool.connection() as conn:
 
         # ── 0. Wipe everything ────────────────────────────────────────────────
@@ -72,14 +77,17 @@ def seed_database(db_operator) -> None:
         """)
         print("[seed] All tables cleared.")
 
-        # ── 1. complexity_value (identity starts at 0 per schema) ────────────
-        # Index maps directly to ComplexityValues in main.py:
-        #   0=easy 1=medium 2=hard 3=critical
+        # ── 1. complexity_value ──────────────────────────────────────────────
+        # 1-based to match main.py (complexity_int_to_str reads value-1; work-type
+        # create/update store index+1). types_of_works.complexity_value is an FK to
+        # this table, so the ids here must cover 1..4. We override the identity to
+        # pin the ids: 1=easy 2=medium 3=hard 4=critical.
         complexity_ids = {}
-        for name in ("easy", "medium", "hard", "critical"):
+        for cid, name in ((1, "easy"), (2, "medium"), (3, "hard"), (4, "critical")):
             row = conn.execute(
-                "INSERT INTO public.complexity_value (name) VALUES (%s) RETURNING complexity_value_id",
-                (name,)
+                "INSERT INTO public.complexity_value (complexity_value_id, name) "
+                "OVERRIDING SYSTEM VALUE VALUES (%s, %s) RETURNING complexity_value_id",
+                (cid, name)
             ).fetchone()
             complexity_ids[name] = row[0]
         print(f"[seed] complexity_value → {complexity_ids}")
@@ -160,12 +168,16 @@ def seed_database(db_operator) -> None:
 
         # ── 8. department ─────────────────────────────────────────────────────
         # empl_appl_delay is integer (minutes) per the fixed schema.
+        # Отделы и виды работ — по docs/requirements-and-type-of-work.md.
         dep_ids = {}
         for dep_key, name, group, value, same_dep, delay, notif in (
-            ("it",  "ИТ-отдел",           "Основной",         0.9,  False, 30,  0.8),
-            ("oge", "ОГЭ",                "Основной",         0.7,  True,  60,  0.7),
-            ("sec", "Отдел безопасности", "Основной",         0.85, False, 45,  0.75),
-            ("hr",  "Отдел кадров",       "Административный", 0.5,  True,  120, 0.6),
+            ("it",        "ИТ-отдел",                        "Основной",        0.9,  False, 30,  0.8),
+            ("oge",       "Отдел главного энергетика (ОГЭ)",  "Основной",        0.7,  True,  60,  0.7),
+            ("prod",      "Производственный отдел",           "Основной",        0.95, False, 30,  0.75),
+            ("okk",       "Отдел контроля качества (ОКК)",    "Основной",        0.8,  True,  45,  0.7),
+            ("ogm",       "Отдел главного механика (ОГМ)",    "Основной",        0.85, True,  60,  0.7),
+            ("warehouse", "Складской отдел",                  "Вспомогательный", 0.5,  False, 120, 0.6),
+            ("supply",    "Отдел снабжения",                  "Вспомогательный", 0.6,  False, 120, 0.6),
         ):
             row = conn.execute(
                 """
@@ -191,8 +203,8 @@ def seed_database(db_operator) -> None:
             ("executor1", "Иванов Иван Иванович",          "it",  "engineer_middle","executor",    True),
             ("executor2", "Петров Пётр Петрович",          "it",  "senior_middle",  "executor",    True),
             ("executor3", "Сидорова Анна Сергеевна",       "oge", "spec_middle",    "executor",    True),
-            ("executor4", "Козлов Дмитрий Александрович",  "sec", "senior_senior",  "executor",    True),
-            ("author1",   "Новикова Елена Владимировна",   "hr",  "spec_junior",    "author",      True),
+            ("executor4", "Козлов Дмитрий Александрович",  "prod", "senior_senior", "executor",    True),
+            ("author1",   "Новикова Елена Владимировна",   "okk",  "spec_junior",   "author",      True),
             ("author2",   "Фёдоров Алексей Николаевич",    "it",  "engineer_junior","author",      True),
             ("manager_oge","Кузнецов Михаил Сергеевич",    "oge", "lead_senior",    "manager",     True),
         )
@@ -209,19 +221,49 @@ def seed_database(db_operator) -> None:
             emp_ids[emp_key] = row[0]
         print(f"[seed] employee → {emp_ids}")
 
-        # ── 10. types_of_works ────────────────────────────────────────────────
+        # ── 10. types_of_works + 11. type_of_work_to_grade ───────────────────
+        # Виды работ по отделам (docs/requirements-and-type-of-work.md). Допустимые
+        # грейды («позиции») выводятся из сложности вида работ.
+        grades_by_complexity = {
+            "easy":     ["junior", "middle"],
+            "medium":   ["middle", "senior"],
+            "hard":     ["senior", "lead"],
+            "critical": ["senior", "lead"],
+        }
         tow_ids = {}
         work_types = (
-            # key,               name,                            dep,   complexity
-            ("it_pc_repair",     "Ремонт ПК",                    "it",  "easy"),
-            ("it_net_setup",     "Настройка сети",               "it",  "medium"),
-            ("it_server_setup",  "Развёртывание сервера",        "it",  "hard"),
-            ("it_security_audit","Аудит безопасности",           "it",  "critical"),
-            ("oge_inspection",   "Технический осмотр",           "oge", "medium"),
-            ("oge_maintenance",  "Плановое обслуживание",        "oge", "easy"),
-            ("sec_access",       "Выдача доступа",               "sec", "easy"),
-            ("sec_incident",     "Реагирование на инцидент",     "sec", "critical"),
-            ("hr_onboarding",    "Оформление нового сотрудника", "hr",  "medium"),
+            # key,            name,                                          dep,         complexity
+            ("it_replace",    "Замена оборудования",                         "it",        "easy"),
+            ("it_fix",        "Починка оборудования",                        "it",        "medium"),
+            ("it_server",     "Настройка сервера",                           "it",        "hard"),
+            ("it_sw_install", "Установка ПО",                                "it",        "easy"),
+            ("it_sw_setup",   "Настройка ПО",                                "it",        "medium"),
+            ("oge_motor",     "Ремонт электродвигателей",                    "oge",       "hard"),
+            ("oge_short",     "Устранение замыканий",                        "oge",       "critical"),
+            ("oge_wiring",    "Ремонт проводки",                             "oge",       "medium"),
+            ("oge_pipe",      "Ремонт трубопроводов",                        "oge",       "medium"),
+            ("oge_power",     "Устранение обесточивания",                    "oge",       "critical"),
+            ("prod_repair",   "Заявка на ремонт оборудования",               "prod",      "medium"),
+            ("prod_replace",  "Заявка на замену оборудования",               "prod",      "hard"),
+            ("okk_check_in",  "Проверка/приёмка покупных деталей",           "okk",       "easy"),
+            ("okk_check_out", "Проверка/приёмка готовой продукции",          "okk",       "medium"),
+            ("okk_defect",    "Фиксация брака",                              "okk",       "easy"),
+            ("okk_fix",       "Устранение брака",                            "okk",       "hard"),
+            ("ogm_repair",    "Ремонтные работы",                            "ogm",       "medium"),
+            ("ogm_parts",     "Замена комплектующих",                        "ogm",       "medium"),
+            ("ogm_oil",       "Замена масла",                                "ogm",       "easy"),
+            ("ogm_emergency", "Аварийные работы",                            "ogm",       "critical"),
+            ("wh_invoice",    "Оформление товарных накладных",               "warehouse", "easy"),
+            ("wh_ship",       "Отгрузка товара",                             "warehouse", "easy"),
+            ("wh_inventory",  "Инвентаризация",                              "warehouse", "medium"),
+            ("wh_receive",    "Приёмка товара",                              "warehouse", "easy"),
+            ("wh_writeoff",   "Списание и утилизация",                       "warehouse", "medium"),
+            ("wh_internal",   "Приёмка от производства (внутри организации)", "warehouse", "easy"),
+            ("sup_parts",     "Предоставление комплектующих/деталей",        "supply",    "medium"),
+            ("sup_order",     "Оформление заказа поставщику",                "supply",    "medium"),
+            ("sup_tender",    "Создание заявок на тендер",                   "supply",    "hard"),
+            ("sup_contract",  "Подготовка договоров",                        "supply",    "medium"),
+            ("sup_replace",   "Замена позиции в поставке",                   "supply",    "easy"),
         )
         for tow_key, name, dep_key, complexity in work_types:
             row = conn.execute(
@@ -230,59 +272,38 @@ def seed_database(db_operator) -> None:
                 VALUES (%s, %s, %s)
                 RETURNING type_of_works_id
                 """,
-                (name, complexity_ids[complexity], dep_ids[dep_key])
+                (name, complexity_to_int[complexity], dep_ids[dep_key])
             ).fetchone()
             tow_ids[tow_key] = row[0]
-        print(f"[seed] types_of_works → {tow_ids}")
-
-        # ── 11. type_of_work_to_grade ─────────────────────────────────────────
-        # New contract: a work type allows a set of GRADES (not post_grades).
-        # Relation: вид работы -> сложность -> грейды.
-        tow_grade_links = (
-            ("it_pc_repair",      ["junior", "middle"]),
-            ("it_net_setup",      ["middle", "senior"]),
-            ("it_server_setup",   ["senior", "lead"]),
-            ("it_security_audit", ["senior", "lead"]),
-            ("oge_inspection",    ["middle", "senior"]),
-            ("oge_maintenance",   ["junior", "middle"]),
-            ("sec_access",        ["junior", "middle"]),
-            ("sec_incident",      ["senior", "lead"]),
-            ("hr_onboarding",     ["junior"]),
-        )
-        for tow_key, grade_keys in tow_grade_links:
-            for grade_key in grade_keys:
+            for grade_key in grades_by_complexity[complexity]:
                 conn.execute(
-                    """
-                    INSERT INTO public.type_of_work_to_grade
-                        (type_of_works_id, grade_id)
-                    VALUES (%s, %s)
-                    """,
+                    "INSERT INTO public.type_of_work_to_grade (type_of_works_id, grade_id) VALUES (%s, %s)",
                     (tow_ids[tow_key], grade_ids[grade_key])
                 )
+        print(f"[seed] types_of_works → {tow_ids}")
         print("[seed] type_of_work_to_grade → done")
 
-        # ── 12. delegated (application_id NULL for now) ───────────────────────
-        # delegated_by / delegated_from / delegated_to are still text columns,
-        # so department ids are passed as strings.
-        deleg_row = conn.execute(
-            """
-            INSERT INTO public.delegated
-                (delegated_by, delegated_by_employee, delegated_from, delegated_to,
-                 comment, created_at, decision, decided_at, application_id)
-            VALUES (%s, %s, %s, %s, %s, %s, NULL, NULL, NULL)
-            RETURNING delegated_id
-            """,
-            (
-                str(dep_ids["it"]),
-                emp_ids["manager"],
-                str(dep_ids["it"]),
-                str(dep_ids["oge"]),
-                "Работы относятся к компетенции ОГЭ.",
-                now - timedelta(hours=1),
-            )
-        ).fetchone()
-        delegated_id = deleg_row[0]
-        print(f"[seed] delegated → delegated_id={delegated_id}")
+        # ── 12. delegated (application_id NULL for now; back-filled after apps) ─
+        # delegated_by / delegated_from / delegated_to are text columns, so
+        # department ids are passed as strings.
+        def insert_delegation(by_emp_key, from_dep, to_dep, comment, hours_ago):
+            return conn.execute(
+                """
+                INSERT INTO public.delegated
+                    (delegated_by, delegated_by_employee, delegated_from, delegated_to,
+                     comment, created_at, decision, decided_at, application_id)
+                VALUES (%s, %s, %s, %s, %s, %s, NULL, NULL, NULL)
+                RETURNING delegated_id
+                """,
+                (str(dep_ids[from_dep]), emp_ids[by_emp_key], str(dep_ids[from_dep]),
+                 str(dep_ids[to_dep]), comment, now - timedelta(hours=hours_ago))
+            ).fetchone()[0]
+
+        delegated_id_1 = insert_delegation("manager", "it", "oge",
+            "Работы относятся к компетенции ОГЭ.", 1)
+        delegated_id_2 = insert_delegation("executor4", "prod", "ogm",
+            "Требуется бригада ОГМ для замены комплектующих.", 2)
+        print(f"[seed] delegated → {delegated_id_1}, {delegated_id_2}")
 
         # ── 13. application + employee_to_application ─────────────────────────
         # IMPORTANT: previous_executor_id and closed_by_id each carry a UNIQUE
@@ -307,7 +328,7 @@ def seed_database(db_operator) -> None:
         ):
             created  = now - timedelta(days=created_offset_days)
             deadline = created + timedelta(days=deadline_offset_days)
-            comp_val = complexity_ids.get(assigned_complexity) if assigned_complexity else None
+            comp_val = complexity_to_int.get(assigned_complexity) if assigned_complexity else None
             prev_exc = emp_ids.get(previous_executor_key) if previous_executor_key else None
             closed_by = emp_ids.get(closed_by_key) if closed_by_key else None
 
@@ -377,26 +398,29 @@ def seed_database(db_operator) -> None:
 
             return app_id
 
+        # NOTE: порядок вставки задаёт application_id (1..N). Первые 12 заявок и их
+        # статусы зафиксированы (на них опираются интеграционные тесты).
+
         # ── status: new ───────────────────────────────────────────────────────
         insert_app(
             "new_simple", "Не работает принтер в 302 кабинете", "low", "new",
             "Принтер Canon LBP6030 не печатает. Горит красный индикатор.",
-            "it", "it_pc_repair", "author1",
+            "it", "it_replace", "author1",
             created_offset_days=1,
         )
         insert_app(
-            "new_unfinished", "Повторная настройка VPN для удалённых сотрудников", "medium", "new",
-            "Предыдущий исполнитель не завершил работу. Требуется повторная настройка.",
-            "it", "it_net_setup", "author2",
+            "new_unfinished", "Повторная установка ПО на рабочих станциях", "medium", "new",
+            "Предыдущий исполнитель не завершил работу. Требуется повторная установка.",
+            "it", "it_fix", "author2",
             is_unfinished=True,
-            previous_executor_key="executor1",   # UNIQUE col — only used here
+            previous_executor_key="executor1",
             manager_comment="Возвращено на доработку — предыдущий исполнитель не справился.",
             created_offset_days=3,
         )
         insert_app(
-            "new_high", "Аудит учётных записей после увольнения сотрудника", "high", "new",
-            "Необходимо проверить и отозвать все доступы уволившегося сотрудника.",
-            "sec", "sec_access", "author1",
+            "new_high", "Внеплановая проверка партии готовой продукции", "high", "new",
+            "После замены комплектующих требуется приёмка партии перед отгрузкой.",
+            "okk", "okk_check_out", "author1",
             created_offset_days=0,
         )
 
@@ -404,16 +428,16 @@ def seed_database(db_operator) -> None:
         insert_app(
             "assigned_it", "Установить рабочую станцию в бухгалтерии", "medium", "assigned",
             "Новый ПК для сотрудника Смирновой Т.В. Требуется установка ОС и 1С.",
-            "it", "it_pc_repair", "author2", "executor1",
+            "it", "it_fix", "author2", "executor1",
             executor_at=now - timedelta(hours=2),
             assigned_complexity="easy",
             manager_comment="Назначено вручную. Приоритет — до конца дня.",
             created_offset_days=2,
         )
         insert_app(
-            "assigned_oge", "Плановый осмотр серверной комнаты", "high", "assigned",
-            "Ежеквартальный технический осмотр оборудования в серверной.",
-            "oge", "oge_inspection", "author1", "executor3",
+            "assigned_oge", "Ремонт проводки в цехе №2", "high", "assigned",
+            "Повреждена проводка на участке сборки, требуется ремонт силами ОГЭ.",
+            "oge", "oge_wiring", "author1", "executor3",
             executor_at=now - timedelta(hours=5),
             assigned_complexity="medium",
             created_offset_days=1,
@@ -421,18 +445,18 @@ def seed_database(db_operator) -> None:
 
         # ── status: inProgress ────────────────────────────────────────────────
         insert_app(
-            "in_progress_net", "Настройка VLAN для нового офисного сегмента", "high", "inProgress",
-            "Требуется создание и настройка VLAN 30 на коммутаторах Cisco.",
-            "it", "it_net_setup", "author2", "executor2",
+            "in_progress_net", "Настройка сервера для отдела разработки", "high", "inProgress",
+            "Требуется развернуть и настроить новый сервер приложений.",
+            "it", "it_server", "author2", "executor2",
             executor_at=now - timedelta(days=1),
             work_at=now - timedelta(hours=3),
-            assigned_complexity="medium",
+            assigned_complexity="hard",
             created_offset_days=4,
         )
         insert_app(
-            "in_progress_sec", "Реагирование на подозрительную активность в сети", "critical", "inProgress",
-            "Зафиксированы попытки несанкционированного доступа к серверу БД.",
-            "sec", "sec_incident", "author1", "executor4",
+            "in_progress_prod", "Аварийный ремонт гидравлического пресса", "critical", "inProgress",
+            "Пресс остановлен, течь масла в гидросистеме. Требуется срочный ремонт.",
+            "prod", "prod_repair", "author1", "executor4",
             executor_at=now - timedelta(hours=6),
             work_at=now - timedelta(hours=4),
             assigned_complexity="critical",
@@ -440,75 +464,123 @@ def seed_database(db_operator) -> None:
             deadline_offset_days=1,
         )
 
-        # ── status: completed (each closed_by is DISTINCT — UNIQUE col) ───────
+        # ── status: completed ─────────────────────────────────────────────────
         insert_app(
             "completed_1", "Замена жёсткого диска на SSD в ПК директора", "high", "completed",
             "Диск Western Digital 1TB заменён на SSD Samsung 870 EVO 500GB.",
-            "it", "it_pc_repair", "author2", "executor1",
+            "it", "it_replace", "author2", "executor1",
             executor_at=now - timedelta(days=5),
             work_at=now - timedelta(days=4),
             finished_at=now - timedelta(days=3),
-            result_text="SSD установлен, система перенесена, проверена работоспособность. Скорость загрузки ОС выросла с 90 до 12 секунд.",
+            result_text="SSD установлен, система перенесена, проверена работоспособность.",
             assigned_complexity="easy",
             created_offset_days=7,
             deadline_offset_days=3,
             closed_by_key="executor1",
         )
         insert_app(
-            "completed_2", "Развёртывание GitLab на внутреннем сервере", "critical", "completed",
-            "Установить и настроить GitLab CE для отдела разработки.",
-            "it", "it_server_setup", "author1", "executor2",
+            "completed_2", "Развёртывание сервера непрерывной интеграции", "critical", "completed",
+            "Установить и настроить сервер сборки для отдела разработки.",
+            "it", "it_server", "author1", "executor2",
             executor_at=now - timedelta(days=10),
             work_at=now - timedelta(days=9),
             finished_at=now - timedelta(days=7),
-            result_text="GitLab CE 16.x развёрнут, настроен LDAP, созданы группы и проекты. Документация передана команде.",
+            result_text="Сервер развёрнут и настроен, документация передана команде.",
             assigned_complexity="hard",
             created_offset_days=14,
             deadline_offset_days=5,
             closed_by_key="executor2",
         )
         insert_app(
-            "completed_3", "Оформление нового сотрудника — Титов К.Р.", "low", "completed",
-            "Подготовить пропуск, учётную запись и рабочее место.",
-            "hr", "hr_onboarding", "author1", "executor3",
+            "completed_3", "Фиксация брака в партии №451", "low", "completed",
+            "Зафиксировать и описать брак, выявленный при приёмке партии.",
+            "okk", "okk_defect", "author1", "executor3",
             executor_at=now - timedelta(days=3),
             work_at=now - timedelta(days=2),
             finished_at=now - timedelta(days=1),
-            result_text="Учётная запись создана, пропуск выдан, рабочее место подготовлено.",
-            assigned_complexity="medium",
+            result_text="Брак зафиксирован, составлен акт, партия отправлена на доработку.",
+            assigned_complexity="easy",
             created_offset_days=5,
             deadline_offset_days=2,
             closed_by_key="executor3",
-            archived_at=now - timedelta(hours=12),   # demo: completed + archived (hidden from main list)
+            archived_at=now - timedelta(hours=12),   # demo: completed + archived (скрыта из списка)
         )
 
-        # ── status: rejected (closed_by = manager, still distinct) ────────────
+        # ── status: rejected ──────────────────────────────────────────────────
         insert_app(
             "rejected_1", "Установить игровую мышь на рабочий ПК", "low", "rejected",
             "Сотрудник просит установить игровую мышь Razer для работы.",
-            "it", "it_pc_repair", "author2",
+            "it", "it_replace", "author2",
             finished_at=now - timedelta(days=1),
             manager_comment="Отклонено: не является производственной необходимостью.",
             closed_by_key="manager",
             created_offset_days=3,
         )
 
-        # ── status: delegated (references the delegation created earlier) ─────
+        # ── status: delegated ─────────────────────────────────────────────────
         insert_app(
-            "delegated_1", "Техническое обслуживание ИБП в серверной", "medium", "delegated",
-            "Требуется проверка и замена аккумуляторов в ИБП APC 3000VA.",
-            "it", "oge_maintenance", "author1",
+            "delegated_1", "Устранение обесточивания склада", "medium", "delegated",
+            "На складе пропало электропитание, требуется бригада ОГЭ.",
+            "it", "oge_power", "author1",
             created_offset_days=2,
-            delegated_id=delegated_id,
+            delegated_id=delegated_id_1,
+        )
+        insert_app(
+            "delegated_2", "Замена комплектующих конвейера", "high", "delegated",
+            "Изношены ролики конвейера, требуется замена силами ОГМ.",
+            "prod", "ogm_parts", "author2",
+            created_offset_days=1,
+            delegated_id=delegated_id_2,
         )
 
-        # Back-fill the circular FK now that the application row exists.
-        conn.execute(
-            "UPDATE public.delegated SET application_id = %s WHERE delegated_id = %s",
-            (app_ids["delegated_1"], delegated_id)
+        # ── дополнительные заявки: больше разнообразия + заявка, созданная Орловой ─
+        insert_app(
+            "orlova_new", "Закупка и установка лицензий ПО", "medium", "new",
+            "Необходимо приобрести и установить лицензии офисного ПО на 15 рабочих мест.",
+            "it", "it_sw_install", "manager",          # автор — Орлова (top-manager)
+            created_offset_days=0,
         )
+        insert_app(
+            "assigned_okk", "Приёмка покупных деталей от поставщика", "medium", "assigned",
+            "Поступила партия комплектующих, требуется входной контроль качества.",
+            "okk", "okk_check_in", "author1", "executor3",
+            executor_at=now - timedelta(hours=8),
+            assigned_complexity="easy",
+            created_offset_days=1,
+        )
+        insert_app(
+            "completed_warehouse", "Инвентаризация склада №3", "low", "completed",
+            "Плановая инвентаризация остатков на складе №3.",
+            "warehouse", "wh_inventory", "author1", "executor1",
+            executor_at=now - timedelta(days=4),
+            work_at=now - timedelta(days=3),
+            finished_at=now - timedelta(days=2),
+            result_text="Инвентаризация проведена, расхождений не выявлено.",
+            assigned_complexity="medium",
+            created_offset_days=6,
+            deadline_offset_days=4,
+            closed_by_key="executor1",
+        )
+        insert_app(
+            "new_supply", "Оформить заказ поставщику на подшипники", "medium", "new",
+            "Закончились подшипники 6204, требуется заказ у поставщика.",
+            "supply", "sup_order", "author2",
+            created_offset_days=0,
+        )
+        insert_app(
+            "new_ogm", "Аварийные работы на участке упаковки", "high", "new",
+            "Вышел из строя упаковочный автомат, требуются аварийные работы ОГМ.",
+            "ogm", "ogm_emergency", "author1",
+            created_offset_days=0,
+        )
+
+        # Back-fill the circular FK now that the application rows exist.
+        conn.execute("UPDATE public.delegated SET application_id = %s WHERE delegated_id = %s",
+                     (app_ids["delegated_1"], delegated_id_1))
+        conn.execute("UPDATE public.delegated SET application_id = %s WHERE delegated_id = %s",
+                     (app_ids["delegated_2"], delegated_id_2))
         print(f"[seed] application + employee_to_application → {app_ids}")
-        print(f"[seed] delegated back-filled → app_id={app_ids['delegated_1']}")
+        print(f"[seed] delegated back-filled → {app_ids['delegated_1']}, {app_ids['delegated_2']}")
 
         # ── 14. notification (multiple per employee now allowed) ──────────────
         notifications = (
@@ -526,18 +598,24 @@ def seed_database(db_operator) -> None:
              "Заявка «Установить игровую мышь на рабочий ПК» отклонена.",
              "rejected_1",       True),
             ("executor4",
-             "Вам назначена заявка: «Реагирование на подозрительную активность в сети».",
-             "in_progress_sec",  False),
+             "Вам назначена заявка: «Аварийный ремонт гидравлического пресса».",
+             "in_progress_prod", False),
             ("executor2",
-             "Вам назначена заявка: «Настройка VLAN для нового офисного сегмента».",
+             "Вам назначена заявка: «Настройка сервера для отдела разработки».",
              "in_progress_net",  True),
             ("author1",
-             "Заявка «Техническое обслуживание ИБП в серверной» передана в ОГЭ.",
+             "Заявка «Устранение обесточивания склада» передана в ОГЭ.",
              "delegated_1",      False),
-            # second notification for executor1 — proves the dropped UNIQUE works
+            # second notification for executor1 — несколько уведомлений на сотрудника
             ("executor1",
              "Заявка «Замена жёсткого диска на SSD» отмечена выполненной.",
              "completed_1",      True),
+            ("manager",
+             "Ваша заявка «Закупка и установка лицензий ПО» создана и ожидает распределения.",
+             "orlova_new",       False),
+            ("author2",
+             "Заявка «Замена комплектующих конвейера» передана в ОГМ.",
+             "delegated_2",      False),
         )
         for emp_key, text, app_key, is_read in notifications:
             conn.execute(
@@ -551,39 +629,53 @@ def seed_database(db_operator) -> None:
             )
         print("[seed] notification → done")
 
-        # ── 15. photo ─────────────────────────────────────────────────────────
-        # Photos are now stored in S3. Seed inserts placeholder rows only when
-        # S3_BUCKET_NAME is configured so the bucket actually exists.
-        import os, uuid, base64, boto3
+        # ── 15. photo (вложения в S3) ─────────────────────────────────────────
+        # Реальные изображения берём из apps/backend/tests/images_for_tests и
+        # раскладываем по нескольким заявкам. Загрузка best-effort: если бакет не
+        # настроен или недоступен — заявки засеяны, фото просто пропускаются.
+        import os, uuid, mimetypes, boto3
+        from pathlib import Path
         from botocore.config import Config as _BotoConfig
         bucket = os.environ.get("S3_BUCKET_NAME", "")
+        # Заявки, к которым прикрепляем вложения (изображения распределяются по кругу).
+        photo_targets = [
+            "completed_1", "completed_2", "in_progress_prod",
+            "orlova_new", "completed_warehouse", "delegated_2",
+        ]
         if bucket:
-            # Demo attachments are best-effort: a missing/misconfigured bucket must
-            # never crash startup — seed the data, just skip the photos with a note.
             try:
-                TINY_PNG = base64.b64decode(
-                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
-                    "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-                )
-                _path_style = os.environ.get("S3_FORCE_PATH_STYLE", "").strip().lower() in ("1", "true", "yes", "on")
-                s3 = boto3.client(
-                    "s3",
-                    endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
-                    aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
-                    aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
-                    region_name=os.environ.get("S3_REGION", "auto"),
-                    config=_BotoConfig(s3={"addressing_style": "path"}) if _path_style else None,
-                )
-                for app_key in ("completed_1", "completed_2", "in_progress_sec"):
-                    app_id = app_ids[app_key]
-                    s3_key = f"applications/{app_id}/{uuid.uuid4()}-seed.png"
-                    s3.put_object(Bucket=bucket, Key=s3_key, Body=TINY_PNG, ContentType="image/png")
-                    conn.execute(
-                        """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
-                           VALUES (%s, %s, %s, %s, %s)""",
-                        (s3_key, "seed.png", "image/png", len(TINY_PNG), app_id)
+                images_dir = Path(__file__).resolve().parent.parent / "tests" / "images_for_tests"
+                image_files = sorted(
+                    f for f in images_dir.iterdir()
+                    if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png")
+                ) if images_dir.exists() else []
+                if not image_files:
+                    print(f"[seed] photo → skipped (no images in {images_dir})")
+                else:
+                    _path_style = os.environ.get("S3_FORCE_PATH_STYLE", "").strip().lower() in ("1", "true", "yes", "on")
+                    s3 = boto3.client(
+                        "s3",
+                        endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
+                        aws_access_key_id=os.environ.get("S3_ACCESS_KEY_ID"),
+                        aws_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY"),
+                        region_name=os.environ.get("S3_REGION", "auto"),
+                        config=_BotoConfig(s3={"addressing_style": "path"}) if _path_style else None,
                     )
-                print("[seed] photo → done")
+                    count = 0
+                    for i, app_key in enumerate(photo_targets):
+                        img = image_files[i % len(image_files)]
+                        data = img.read_bytes()
+                        content_type = mimetypes.guess_type(img.name)[0] or "application/octet-stream"
+                        app_id = app_ids[app_key]
+                        s3_key = f"applications/{app_id}/{uuid.uuid4()}-{img.name}"
+                        s3.put_object(Bucket=bucket, Key=s3_key, Body=data, ContentType=content_type)
+                        conn.execute(
+                            """INSERT INTO public.photo (s3_key, name, content_type, size_bytes, application_id)
+                               VALUES (%s, %s, %s, %s, %s)""",
+                            (s3_key, img.name, content_type, len(data), app_id)
+                        )
+                        count += 1
+                    print(f"[seed] photo → done ({count} attachments from {len(image_files)} image(s))")
             except Exception as e:
                 print(f"[seed] photo → skipped (S3 upload failed: {e})")
         else:

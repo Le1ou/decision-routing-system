@@ -97,6 +97,7 @@ export type Attachment = {
   applicationId?: string;
   name: string;
   type: "photo" | "document";
+  url?: string;
 };
 
 export type Delegation = {
