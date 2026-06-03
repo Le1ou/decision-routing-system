@@ -89,10 +89,8 @@ export function ApplicationsPage() {
   const executorJobTitle = positions.find((position) => position.id === executor?.positionId);
   const delegatingExecutorDepartment = departments.find((department) => department.id === delegatingExecutor?.departmentId);
   const delegatingExecutorJobTitle = positions.find((position) => position.id === delegatingExecutor?.positionId);
-  const applicationAttachmentNames = [
-    ...(selectedApplication?.attachments ?? []).map((attachment) => attachment.name),
-    ...(selectedApplication?.attachmentNames ?? []),
-  ];
+  const applicationAttachments = selectedApplication?.attachments ?? [];
+  const applicationExtraNames = selectedApplication?.attachmentNames ?? [];
 
   const executorsForDepartment = employees.filter(
     (user) => user.role === "executor" && user.departmentId === selectedApplication?.departmentId && user.isActive,
@@ -356,9 +354,23 @@ export function ApplicationsPage() {
             ) : null}
             <section className="application-card__attachments">
               <h2>Вложения</h2>
-              {applicationAttachmentNames.length > 0 ? (
+              {applicationAttachments.length > 0 ? (
                 <ul>
-                  {applicationAttachmentNames.map((name, index) => (
+                  {applicationAttachments.map((attachment) => (
+                    <li key={attachment.id}>
+                      {attachment.url ? (
+                        <a href={attachment.url} target="_blank" rel="noopener noreferrer">
+                          {attachment.name}
+                        </a>
+                      ) : (
+                        attachment.name
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : applicationExtraNames.length > 0 ? (
+                <ul>
+                  {applicationExtraNames.map((name, index) => (
                     <li key={`${selectedApplication.id}-${name}-${index}`}>{name}</li>
                   ))}
                 </ul>
