@@ -1,64 +1,53 @@
 import { useMemo, useState } from "react";
 
+import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
 import { useAuth } from "@app/providers/AuthProvider";
-import { departments, mockUsers, applications } from "@mocks/mockData";
-import type { ApplicationPriority } from "@shared/model/domain";
+import { useReferenceData } from "@app/providers/ReferenceDataProvider";
+import { apiClient } from "@shared/api";
+import type { Application, ApplicationPriority, PrioritySettings } from "@shared/model/domain";
 import { priorityLabels } from "@shared/model/labels";
 import { Button } from "@shared/ui";
 
 import "./PrioritySettingsPage.css";
 
-type PrioritySettings = {
-  department: Record<string, number>;
-  deadline: number;
-  managerAuthor: Record<string, number>;
-};
-
-const initialSettings: PrioritySettings = {
-  department: Object.fromEntries(departments.map((department) => [department.id, department.value])),
-  deadline: 0.75,
-  managerAuthor: {
-    it: 0.2,
-    oge: 0.22,
-    production: 0.24,
-    okk: 0.2,
-    ogm: 0.22,
-    warehouse: 0.12,
-    supply: 0.16,
-  },
-};
-
 export function PrioritySettingsPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, credentials } = useAuth();
+  const { applicationItems } = useApplicationsStore();
+  const { departments, employees, prioritySettings, refresh } = useReferenceData();
   const canEdit = currentUser?.role === "top-manager";
   const availableDepartments = currentUser?.role === "manager"
     ? departments.filter((department) => department.id === currentUser.departmentId)
     : departments;
   const availableDepartmentIds = new Set(availableDepartments.map((department) => department.id));
-  const sampleApplications = applications.filter((application) => {
-    const author = mockUsers.find((user) => user.id === application.authorId);
+  const sampleApplications = applicationItems.filter((application) => {
+    const author = employees.find((user) => user.id === application.authorId);
 
     return availableDepartmentIds.has(author?.departmentId ?? application.departmentId);
   });
-  const [savedSettings, setSavedSettings] = useState<PrioritySettings>(initialSettings);
-  const [draftSettings, setDraftSettings] = useState<PrioritySettings>(initialSettings);
-  const [sampleApplicationId, setSampleApplicationId] = useState(applications[0]?.id ?? "");
+  const activeSettings = prioritySettings ?? {
+    department: Object.fromEntries(departments.map((department) => [department.id, department.value])),
+    deadline: 0,
+    managerAuthor: Object.fromEntries(departments.map((department) => [department.id, 0])),
+  };
+  const [draftSettings, setDraftSettings] = useState<PrioritySettings | null>(null);
+  const [sampleApplicationId, setSampleApplicationId] = useState("");
   const [notice, setNotice] = useState("");
+  const displayedSettings = draftSettings ?? activeSettings;
 
   const sampleApplication = sampleApplications.find((application) => application.id === sampleApplicationId) ?? sampleApplications[0];
   const preview = useMemo(
-    () => (sampleApplication ? calculatePriorityPreview(sampleApplication.id, draftSettings) : null),
-    [draftSettings, sampleApplication],
+    () => (sampleApplication ? calculatePriorityPreview(sampleApplication, displayedSettings, employees) : null),
+    [displayedSettings, employees, sampleApplication],
   );
-  const hasChanges = JSON.stringify(draftSettings) !== JSON.stringify(savedSettings);
+  const hasChanges = Boolean(draftSettings) && JSON.stringify(draftSettings) !== JSON.stringify(activeSettings);
 
   const updateDepartmentSetting = (departmentId: string, key: "department" | "managerAuthor", value: number) => {
     const nextValue = Math.min(1, Math.max(0, value));
 
     setDraftSettings((current) => ({
-      ...current,
+      ...(current ?? activeSettings),
       [key]: {
-        ...current[key],
+        ...(current ?? activeSettings)[key],
         [departmentId]: nextValue,
       },
     }));
@@ -68,11 +57,15 @@ export function PrioritySettingsPage() {
   const updateDeadlineSetting = (value: number) => {
     const nextValue = Math.min(1, Math.max(0, value));
 
-    setDraftSettings((current) => ({ ...current, deadline: nextValue }));
+    setDraftSettings((current) => ({ ...(current ?? activeSettings), deadline: nextValue }));
     setNotice("");
   };
 
-  const saveSettings = () => {
+  const saveSettings = async () => {
+    if (!credentials || !draftSettings) {
+      return;
+    }
+
     const totalWeight = Object.values(draftSettings.department).reduce((sum, value) => sum + value, 0) +
       Object.values(draftSettings.managerAuthor).reduce((sum, value) => sum + value, 0) +
       draftSettings.deadline;
@@ -82,12 +75,18 @@ export function PrioritySettingsPage() {
       return;
     }
 
-    setSavedSettings(draftSettings);
-    setNotice("Коэффициенты сохранены в mock-режиме.");
+    try {
+      await apiClient.updatePrioritySettings(credentials, draftSettings);
+      await refresh();
+      setDraftSettings(null);
+      setNotice("Коэффициенты сохранены.");
+    } catch {
+      setNotice("Backend не сохранил коэффициенты.");
+    }
   };
 
   const resetSettings = () => {
-    setDraftSettings(savedSettings);
+    setDraftSettings(null);
     setNotice("Изменения отменены.");
   };
 
@@ -126,7 +125,7 @@ export function PrioritySettingsPage() {
                   min="0"
                   max="1"
                   step="0.05"
-                  value={draftSettings.department[department.id]}
+                  value={displayedSettings.department[department.id] ?? 0}
                   onChange={(event) => updateDepartmentSetting(department.id, "department", Number(event.target.value))}
                   aria-label={`Коэффициент отдела ${department.name}`}
                   disabled={!canEdit}
@@ -136,7 +135,7 @@ export function PrioritySettingsPage() {
                   min="0"
                   max="1"
                   step="0.05"
-                  value={draftSettings.managerAuthor[department.id]}
+                  value={displayedSettings.managerAuthor[department.id] ?? 0}
                   onChange={(event) => updateDepartmentSetting(department.id, "managerAuthor", Number(event.target.value))}
                   aria-label={`Коэффициент руководителя отдела ${department.name}`}
                   disabled={!canEdit}
@@ -153,7 +152,7 @@ export function PrioritySettingsPage() {
                 min="0"
                 max="1"
                 step="0.05"
-                value={draftSettings.deadline}
+                value={displayedSettings.deadline}
                 onChange={(event) => updateDeadlineSetting(Number(event.target.value))}
                 disabled={!canEdit}
               />
@@ -162,7 +161,7 @@ export function PrioritySettingsPage() {
                 min="0"
                 max="1"
                 step="0.05"
-                value={draftSettings.deadline}
+                value={displayedSettings.deadline}
                 onChange={(event) => updateDeadlineSetting(Number(event.target.value))}
                 aria-label="Коэффициент срока исполнения"
                 disabled={!canEdit}
@@ -173,7 +172,7 @@ export function PrioritySettingsPage() {
             <Button type="button" variant="secondary" onClick={resetSettings} disabled={!hasChanges}>
               Отмена
             </Button>
-            <Button type="button" onClick={saveSettings} disabled={!hasChanges || !canEdit}>
+            <Button type="button" onClick={() => void saveSettings()} disabled={!hasChanges || !canEdit}>
               Подтвердить
             </Button>
           </footer>
@@ -220,14 +219,8 @@ export function PrioritySettingsPage() {
   );
 }
 
-function calculatePriorityPreview(applicationId: string, settings: PrioritySettings) {
-  const application = applications.find((item) => item.id === applicationId);
-
-  if (!application) {
-    return null;
-  }
-
-  const author = mockUsers.find((user) => user.id === application.authorId);
+function calculatePriorityPreview(application: Application, settings: PrioritySettings, employees: Array<{ id: string; departmentId: string; role: string }>) {
+  const author = employees.find((user) => user.id === application.authorId);
   const departmentId = author?.departmentId ?? application.departmentId;
   const isManagerAuthor = author?.role === "manager" || author?.role === "top-manager";
   const deadlinePressure = getDeadlinePressure(application.deadlineAt);

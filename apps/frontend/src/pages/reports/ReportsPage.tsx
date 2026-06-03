@@ -1,10 +1,10 @@
 import { FormEvent, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { departments, mockUsers, applications, workTypes } from "@mocks/mockData";
+import { useReferenceData } from "@app/providers/ReferenceDataProvider";
+import { apiClient, type ApplicationReportResponseDto } from "@shared/api";
 import type { ApplicationStatus } from "@shared/model/domain";
 import { priorityLabels, statusLabels } from "@shared/model/labels";
-import { filterApplicationsByRole } from "@shared/model/applicationRules";
 import { Button } from "@shared/ui";
 
 import "./ReportsPage.css";
@@ -20,7 +20,7 @@ type ReportFilters = {
 
 const initialFilters: ReportFilters = {
   createdFrom: "2026-05-19",
-  createdTo: "2026-05-26",
+  createdTo: "2026-06-02",
   finishedFrom: "",
   finishedTo: "",
   status: "all",
@@ -28,49 +28,28 @@ const initialFilters: ReportFilters = {
 };
 
 export function ReportsPage() {
-  const { currentUser } = useAuth();
+  const { credentials, currentUser } = useAuth();
+  const { employees } = useReferenceData();
   const [filters, setFilters] = useState<ReportFilters>(initialFilters);
   const [errors, setErrors] = useState<Partial<Record<keyof ReportFilters, string>>>({});
-  const [isReportReady, setIsReportReady] = useState(true);
+  const [report, setReport] = useState<ApplicationReportResponseDto | null>(null);
   const [notice, setNotice] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  const visibleApplications = useMemo(
-    () => (currentUser ? filterApplicationsByRole(applications, currentUser) : []),
-    [currentUser],
-  );
   const executors = useMemo(
     () =>
-      mockUsers.filter(
+      employees.filter(
         (user) =>
           user.role === "executor" &&
           (currentUser?.role !== "manager" || user.departmentId === currentUser.departmentId),
       ),
-    [currentUser],
+    [currentUser, employees],
   );
-  const reportRows = useMemo(
-    () =>
-      visibleApplications.filter((application) => {
-        const createdAt = toDateOnly(application.createdAt);
-        const finishedAt = application.finishedAt ? toDateOnly(application.finishedAt) : "";
-        const matchesCreatedFrom = !filters.createdFrom || createdAt >= filters.createdFrom;
-        const matchesCreatedTo = !filters.createdTo || createdAt <= filters.createdTo;
-        const matchesFinishedFrom = !filters.finishedFrom || (finishedAt && finishedAt >= filters.finishedFrom);
-        const matchesFinishedTo = !filters.finishedTo || (finishedAt && finishedAt <= filters.finishedTo);
-        const matchesStatus = filters.status === "all" || application.status === filters.status;
-        const matchesExecutor = filters.executorId === "all" || application.executorId === filters.executorId;
-
-        return matchesCreatedFrom && matchesCreatedTo && matchesFinishedFrom && matchesFinishedTo && matchesStatus && matchesExecutor;
-      }),
-    [filters, visibleApplications],
-  );
-
-  const completedCount = reportRows.filter((application) => application.status === "completed").length;
-  const inProgressCount = reportRows.filter((application) => application.status === "inProgress" || application.status === "assigned").length;
 
   const updateFilter = <Key extends keyof ReportFilters>(key: Key, value: ReportFilters[Key]) => {
     setFilters((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: undefined }));
-    setIsReportReady(false);
+    setReport(null);
     setNotice("");
   };
 
@@ -89,10 +68,6 @@ export function ReportsPage() {
       nextErrors.createdTo = "Конец периода создания не может быть раньше начала.";
     }
 
-    if (filters.finishedFrom && filters.createdFrom && filters.finishedFrom < filters.createdFrom) {
-      nextErrors.finishedFrom = "Период завершения не должен начинаться раньше периода создания.";
-    }
-
     if (filters.finishedFrom && filters.finishedTo && filters.finishedFrom > filters.finishedTo) {
       nextErrors.finishedTo = "Конец периода завершения не может быть раньше начала.";
     }
@@ -102,36 +77,71 @@ export function ReportsPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const getQuery = () => ({
+    createdFrom: filters.createdFrom,
+    createdTo: filters.createdTo,
+    finishedFrom: filters.finishedFrom,
+    finishedTo: filters.finishedTo,
+    status: filters.status === "all" ? undefined : filters.status,
+    executorId: filters.executorId === "all" ? undefined : filters.executorId,
+  });
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!validate()) {
+    if (!validate() || !credentials) {
       return;
     }
 
-    setIsReportReady(true);
-    setNotice("Предварительный отчет сформирован на mock-данных.");
+    setIsLoading(true);
+
+    try {
+      setReport(await apiClient.getApplicationReport(credentials, getQuery()));
+      setNotice("Предварительный отчет сформирован.");
+    } catch {
+      setNotice("Backend не сформировал отчет.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleExport = () => {
-    if (!validate()) {
+  const handleExport = async () => {
+    if (!validate() || !credentials) {
       return;
     }
 
-    if (!isReportReady) {
-      setNotice("Сначала сформируйте отчет с текущими фильтрами.");
-      return;
-    }
+    try {
+      const response = await fetch(apiClient.getApplicationReportXlsUrl(getQuery()), {
+        headers: {
+          Authorization: `Basic ${window.btoa(`${credentials.login}:${credentials.password}`)}`,
+        },
+      });
 
-    setNotice("Выгрузка .xls показана как UI-действие. Реальный файл подключим после согласования с backend.");
+      if (!response.ok) {
+        throw new Error("export failed");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "applications-report.xls";
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice("XLS-отчет скачан.");
+    } catch {
+      setNotice("Backend не выгрузил XLS.");
+    }
   };
+
+  const rows = report?.items ?? [];
 
   return (
     <section className="reports-page">
       <header className="reports-page__header">
         <div>
           <h1>Отчетность</h1>
-          <p>Формирование отчета по выполнению заявок подчиненными на mock-данных.</p>
+          <p>Формирование отчета по выполнению заявок подчиненными.</p>
         </div>
       </header>
 
@@ -141,38 +151,22 @@ export function ReportsPage() {
         <div className="reports-filters__grid">
           <label>
             Созданы с
-            <input
-              type="date"
-              value={filters.createdFrom}
-              onChange={(event) => updateFilter("createdFrom", event.target.value)}
-            />
+            <input type="date" value={filters.createdFrom} onChange={(event) => updateFilter("createdFrom", event.target.value)} />
             {errors.createdFrom ? <small>{errors.createdFrom}</small> : null}
           </label>
           <label>
             Созданы по
-            <input
-              type="date"
-              value={filters.createdTo}
-              onChange={(event) => updateFilter("createdTo", event.target.value)}
-            />
+            <input type="date" value={filters.createdTo} onChange={(event) => updateFilter("createdTo", event.target.value)} />
             {errors.createdTo ? <small>{errors.createdTo}</small> : null}
           </label>
           <label>
             Завершены с
-            <input
-              type="date"
-              value={filters.finishedFrom}
-              onChange={(event) => updateFilter("finishedFrom", event.target.value)}
-            />
+            <input type="date" value={filters.finishedFrom} onChange={(event) => updateFilter("finishedFrom", event.target.value)} />
             {errors.finishedFrom ? <small>{errors.finishedFrom}</small> : null}
           </label>
           <label>
             Завершены по
-            <input
-              type="date"
-              value={filters.finishedTo}
-              onChange={(event) => updateFilter("finishedTo", event.target.value)}
-            />
+            <input type="date" value={filters.finishedTo} onChange={(event) => updateFilter("finishedTo", event.target.value)} />
             {errors.finishedTo ? <small>{errors.finishedTo}</small> : null}
           </label>
           <label>
@@ -180,9 +174,7 @@ export function ReportsPage() {
             <select value={filters.status} onChange={(event) => updateFilter("status", event.target.value as ReportFilters["status"])}>
               <option value="all">Все статусы</option>
               {Object.entries(statusLabels).map(([value, label]) => (
-                <option value={value} key={value}>
-                  {label}
-                </option>
+                <option value={value} key={value}>{label}</option>
               ))}
             </select>
           </label>
@@ -191,30 +183,28 @@ export function ReportsPage() {
             <select value={filters.executorId} onChange={(event) => updateFilter("executorId", event.target.value)}>
               <option value="all">Все исполнители</option>
               {executors.map((executor) => (
-                <option value={executor.id} key={executor.id}>
-                  {executor.fullName}
-                </option>
+                <option value={executor.id} key={executor.id}>{executor.fullName}</option>
               ))}
             </select>
           </label>
         </div>
         <footer>
-          <Button type="submit">Сформировать</Button>
+          <Button type="submit" disabled={isLoading}>{isLoading ? "Формируем" : "Сформировать"}</Button>
         </footer>
       </form>
 
       <section className="reports-summary" aria-label="Сводка отчета">
         <div>
           <span>Строк в отчете</span>
-          <strong>{reportRows.length}</strong>
+          <strong>{report?.summary.total ?? 0}</strong>
         </div>
         <div>
           <span>Завершены</span>
-          <strong>{completedCount}</strong>
+          <strong>{report?.summary.completed ?? 0}</strong>
         </div>
         <div>
           <span>В работе или назначены</span>
-          <strong>{inProgressCount}</strong>
+          <strong>{report?.summary.inProgressOrAssigned ?? 0}</strong>
         </div>
       </section>
 
@@ -222,9 +212,9 @@ export function ReportsPage() {
         <header>
           <div>
             <h2>Предварительный просмотр</h2>
-            <span>{isReportReady ? "Актуален" : "Измените фильтры и сформируйте отчет"}</span>
+            <span>{report ? "Актуален" : "Сформируйте отчет"}</span>
           </div>
-          <Button type="button" variant="secondary" onClick={handleExport} disabled={!isReportReady}>
+          <Button type="button" variant="secondary" onClick={() => void handleExport()} disabled={!report}>
             Выгрузить .xls
           </Button>
         </header>
@@ -241,28 +231,22 @@ export function ReportsPage() {
             <span role="columnheader">Закрыта</span>
           </div>
 
-          {reportRows.length > 0 ? (
-            reportRows.map((application) => {
-              const executor = mockUsers.find((user) => user.id === application.executorId);
-              const workType = workTypes.find((item) => item.id === application.workTypeId);
-              const department = departments.find((item) => item.id === application.departmentId);
-
-              return (
-                <div className="reports-table__row" role="row" key={application.id}>
-                  <span role="cell">
-                    <strong>ID {application.id}</strong>
-                    <small>{department?.name ?? "-"}</small>
-                  </span>
-                  <span role="cell">{statusLabels[application.status]}</span>
-                  <span role="cell">{priorityLabels[application.priority]}</span>
-                  <span role="cell">{executor?.fullName ?? "-"}</span>
-                  <span role="cell">{workType?.name ?? "-"}</span>
-                  <span role="cell">{formatDateTime(application.createdAt)}</span>
-                  <span role="cell">{formatDateTime(application.startedAt)}</span>
-                  <span role="cell">{formatDateTime(application.finishedAt)}</span>
-                </div>
-              );
-            })
+          {rows.length > 0 ? (
+            rows.map((row) => (
+              <div className="reports-table__row" role="row" key={row.applicationId}>
+                <span role="cell">
+                  <strong>ID {row.applicationId}</strong>
+                  <small>{row.departmentName ?? "-"}</small>
+                </span>
+                <span role="cell">{statusLabels[row.status]}</span>
+                <span role="cell">{priorityLabels[row.priority]}</span>
+                <span role="cell">{row.executorName ?? "-"}</span>
+                <span role="cell">{row.workTypeName ?? "-"}</span>
+                <span role="cell">{formatDateTime(row.createdAt)}</span>
+                <span role="cell">{formatDateTime(row.startedAt ?? undefined)}</span>
+                <span role="cell">{formatDateTime(row.finishedAt ?? undefined)}</span>
+              </div>
+            ))
           ) : (
             <div className="reports-table__empty">По выбранным фильтрам нет заявок.</div>
           )}
@@ -270,10 +254,6 @@ export function ReportsPage() {
       </article>
     </section>
   );
-}
-
-function toDateOnly(value: string) {
-  return value.slice(0, 10);
 }
 
 function formatDateTime(value?: string) {

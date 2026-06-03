@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { ApplicationsProvider } from "@app/providers/ApplicationsProvider";
+import { ReferenceDataProvider } from "@app/providers/ReferenceDataProvider";
+import type { UserPermissions } from "@shared/model/domain";
 import { AppShell } from "@widgets/app-shell";
 import {
   CreateApplicationPage,
@@ -28,27 +30,29 @@ export function App() {
   }
 
   return (
-    <AppShell>
+    <ReferenceDataProvider>
       <ApplicationsProvider>
+        <AppShell>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/applications" element={<ApplicationsPage />} />
           <Route path="/applications/new" element={<CreateApplicationPage />} />
-          <Route path="/reports" element={<RequireManagement><ReportsPage /></RequireManagement>} />
-          <Route path="/employees" element={<RequireManagement><EmployeesPage /></RequireManagement>} />
-          <Route path="/work-types" element={<RequireManagement><WorkTypesPage /></RequireManagement>} />
-          <Route path="/priority-settings" element={<RequireManagement><PrioritySettingsPage /></RequireManagement>} />
+          <Route path="/reports" element={<RequirePermission permission="canViewReports"><ReportsPage /></RequirePermission>} />
+          <Route path="/employees" element={<RequirePermission permission="canManageEmployees"><EmployeesPage /></RequirePermission>} />
+          <Route path="/work-types" element={<RequirePermission permission="canManageWorkTypes"><WorkTypesPage /></RequirePermission>} />
+          <Route path="/priority-settings" element={<RequirePermission permission="canManagePrioritySettings"><PrioritySettingsPage /></RequirePermission>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </AppShell>
       </ApplicationsProvider>
-    </AppShell>
+    </ReferenceDataProvider>
   );
 }
 
-function RequireManagement({ children }: { children: ReactNode }) {
-  const { currentUser } = useAuth();
+function RequirePermission({ children, permission }: { children: ReactNode; permission: keyof UserPermissions }) {
+  const { permissions } = useAuth();
 
-  if (currentUser?.role !== "manager" && currentUser?.role !== "top-manager") {
+  if (!permissions?.[permission]) {
     return <Navigate to="/" replace />;
   }
 

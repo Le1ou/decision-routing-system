@@ -121,7 +121,17 @@ with DBController.pool.connection() as _conn:
     _conn.execute("ALTER TABLE public.employee ADD COLUMN IF NOT EXISTS is_active boolean")
     _conn.execute("ALTER TABLE public.employee ADD COLUMN IF NOT EXISTS role_id integer")
     _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone")
+    _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS executor_comment text")
+    _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS manager_comment text")
+    _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS previous_executor_id integer")
+    _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS closed_by_id integer")
     _conn.execute("ALTER TABLE public.delegated ADD COLUMN IF NOT EXISTS delegated_by_employee integer")
+    _conn.execute("ALTER TABLE public.delegated ADD COLUMN IF NOT EXISTS decision text")
+    _conn.execute("ALTER TABLE public.delegated ADD COLUMN IF NOT EXISTS decided_at timestamp with time zone")
+    _conn.execute("ALTER TABLE public.delegated ADD COLUMN IF NOT EXISTS application_id integer")
+    _conn.execute("ALTER TABLE public.notification ADD COLUMN IF NOT EXISTS employee_id integer")
+    _conn.execute("ALTER TABLE public.notification ADD COLUMN IF NOT EXISTS is_read boolean")
+    _conn.execute("ALTER TABLE public.notification ADD COLUMN IF NOT EXISTS application_id integer")
     # Photo metadata for S3-backed attachments (older DBs only had value/application_id).
     _conn.execute("ALTER TABLE public.photo ADD COLUMN IF NOT EXISTS s3_key character varying(1000)")
     _conn.execute("ALTER TABLE public.photo ADD COLUMN IF NOT EXISTS name character varying(500)")
@@ -259,15 +269,15 @@ def _raise_for_db_error(e: Exception) -> None:
 
 def complexity_int_to_str(value) -> str:
     if isinstance(value, int):
-        if 0 <= value < len(ComplexityValues):
-            return ComplexityValues[value]
+        if 1 <= value <= len(ComplexityValues):
+            return ComplexityValues[value - 1]
         raise ValueError(f"Complexity index {value} out of range")
     return value
 
 
 def status_int_to_str(value) -> str:
     if isinstance(value, int):
-        if 0 <= value < len(StatusValues):
+        if 1 <= value <= len(StatusValues):
             return StatusValues[value - 1]  # status table starts at id=1
         raise ValueError(f"Status index {value} out of range")
     return value
@@ -275,7 +285,7 @@ def status_int_to_str(value) -> str:
 
 def priority_int_to_str(value) -> str:
     if isinstance(value, int):
-        if 0 <= value < len(PriorityValues):
+        if 1 <= value <= len(PriorityValues):
             return PriorityValues[value - 1]  # priority table starts at id=1
         raise ValueError(f"Priority index {value} out of range")
     return value
@@ -1580,9 +1590,9 @@ def application_action(
                     # first; otherwise it returns straight to `new` for redistribution.
                     if not payload.complexity:
                         raise HTTPException(status_code=400, detail="complexity required")
-                    new_idx = ComplexityValues.index(payload.complexity)
+                    new_value = ComplexityValues.index(payload.complexity) + 1
                     cur_idx = _effective_complexity_index(cur, app_row)
-                    if cur_idx is not None and new_idx < cur_idx:
+                    if cur_idx is not None and new_value < cur_idx:
                         raise HTTPException(
                             status_code=400,
                             detail="complexity cannot be lower than the current complexity")
@@ -1590,7 +1600,7 @@ def application_action(
                     # Complexity (and optional work type) are set on the application now.
                     cur.execute(
                         "UPDATE public.application SET empl_assigned_complexity = %s, updated_at = %s WHERE application_id = %s",
-                        (new_idx, now, int(applicationId))
+                        (new_value, now, int(applicationId))
                     )
                     if payload.workTypeId:
                         cur.execute(
@@ -2228,7 +2238,7 @@ def create_work_type(
                     VALUES (%s, %s, %s)
                     RETURNING type_of_works_id
                     """,
-                    (payload.name, ComplexityValues.index(payload.complexity), int(payload.departmentId))
+                    (payload.name, ComplexityValues.index(payload.complexity) + 1, int(payload.departmentId))
                 ).fetchone()["type_of_works_id"]
 
                 for grade_id in payload.allowedGradeIds:
@@ -2284,7 +2294,7 @@ def update_work_type(
                 if payload.complexity is not None:
                     cur.execute(
                         "UPDATE public.types_of_works SET complexity_value = %s WHERE type_of_works_id = %s",
-                        (ComplexityValues.index(payload.complexity), int(workTypeId))
+                        (ComplexityValues.index(payload.complexity) + 1, int(workTypeId))
                     )
                 if payload.allowedGradeIds is not None:
                     # Replace the allowed-grade matrix wholesale.
