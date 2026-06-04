@@ -44,6 +44,32 @@ VITE_API_URL=http://localhost:3000
 
 Для backend, запущенного локально вне Docker, используйте `DB_HOST=localhost`.
 
+### Запуск на удалённом сервере
+
+Для сервера укажите в `.env` адреса, доступные из браузера пользователя:
+
+```env
+VITE_API_URL=http://<SERVER_IP_OR_DOMAIN>:3000
+S3_PUBLIC_ENDPOINT_URL=http://<SERVER_IP_OR_DOMAIN>:9000
+```
+
+Например:
+
+```env
+VITE_API_URL=http://132.243.230.84:3000
+S3_PUBLIC_ENDPOINT_URL=http://132.243.230.84:9000
+```
+
+`localhost` в браузере означает компьютер пользователя, а не сервер. Frontend
+также автоматически заменяет `localhost` из `VITE_API_URL` на hostname страницы
+при удалённом открытии, но явная серверная конфигурация предпочтительнее.
+
+После изменения `.env` пересоздайте контейнеры:
+
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d --build
+```
+
 ## Запустить инфраструктуру (DB + Backend + Frontend)
 
 ```bash
