@@ -20,7 +20,7 @@ type ReferenceDataContextValue = {
 const ReferenceDataContext = createContext<ReferenceDataContextValue | null>(null);
 
 export function ReferenceDataProvider({ children }: { children: ReactNode }) {
-  const { credentials } = useAuth();
+  const { credentials, permissions } = useAuth();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
@@ -47,16 +47,18 @@ export function ReferenceDataProvider({ children }: { children: ReactNode }) {
     setError("");
 
     try {
-      const [departmentsResponse, positionsResponse, gradesResponse, workTypesResponse, employeesResponse, adUsersResponse, priorityResponse] =
-        await Promise.all([
-          apiClient.getDepartments(credentials),
-          apiClient.getPositions(credentials),
-          apiClient.getGrades(credentials),
-          apiClient.getWorkTypes(credentials),
-          apiClient.getEmployees(credentials),
-          apiClient.getAdUsers(credentials),
-          apiClient.getPrioritySettings(credentials),
-        ]);
+      const [departmentsResponse, positionsResponse, gradesResponse, workTypesResponse, employeesResponse] = await Promise.all([
+        apiClient.getDepartments(credentials),
+        apiClient.getPositions(credentials),
+        apiClient.getGrades(credentials),
+        apiClient.getWorkTypes(credentials),
+        apiClient.getEmployees(credentials),
+      ]);
+
+      const [adUsersResponse, priorityResponse] = await Promise.all([
+        permissions?.canManageEmployees ? apiClient.getAdUsers(credentials) : Promise.resolve({ items: [] }),
+        permissions?.canManagePrioritySettings ? apiClient.getPrioritySettings(credentials) : Promise.resolve(null),
+      ]);
 
       setDepartments(departmentsResponse.items);
       setPositions(positionsResponse.items);
@@ -70,7 +72,7 @@ export function ReferenceDataProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [credentials]);
+  }, [credentials, permissions]);
 
   useEffect(() => {
     void refresh();

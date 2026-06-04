@@ -43,6 +43,7 @@ MinIO **поднимается автоматически вместе со вс
 ```dotenv
 S3_BUCKET_NAME=decision-routing
 S3_ENDPOINT_URL=http://minio:9000
+S3_PUBLIC_ENDPOINT_URL=http://localhost:9000
 S3_ACCESS_KEY_ID=minioadmin
 S3_SECRET_ACCESS_KEY=minioadmin
 S3_REGION=us-east-1
@@ -66,36 +67,27 @@ make up
 
 ## Доступ к ссылкам из браузера (важный нюанс)
 
-`S3_ENDPOINT_URL` используется и backend'ом (для загрузки файлов), и подставляется
-в presigned-ссылку, которую открывает **браузер**. Хост в ссылке совпадает с
-хостом из `S3_ENDPOINT_URL`.
+Backend использует два адреса:
 
-В Docker (Windows/Mac) backend видит MinIO по имени `minio`, а браузер на хосте —
-нет. Поэтому:
+- `S3_ENDPOINT_URL=http://minio:9000` — внутренний Docker-адрес для загрузки;
+- `S3_PUBLIC_ENDPOINT_URL` — адрес, доступный браузеру, для подписи presigned URL.
 
-- **Для разработки**, чтобы ссылки открывались в браузере, оставьте
-  `S3_ENDPOINT_URL=http://minio:9000` и добавьте в hosts-файл хоста строку:
+Для локального запуска:
 
-  ```text
-  127.0.0.1 minio
-  ```
+```dotenv
+S3_PUBLIC_ENDPOINT_URL=http://localhost:9000
+```
 
-  - Windows: `C:\Windows\System32\drivers\etc\hosts` (редактировать от администратора);
-  - Linux/macOS: `/etc/hosts`.
+Для удалённого сервера:
 
-  Порт `9000` проброшен на хост, поэтому браузер откроет `http://minio:9000/...`,
-  а подпись ссылки (рассчитанная для хоста `minio:9000`) сойдётся.
+```dotenv
+S3_PUBLIC_ENDPOINT_URL=http://<SERVER_IP_OR_DOMAIN>:9000
+```
 
-- **Если ссылки в браузере пока не нужны** (проверяете только API) — ничего
-  добавлять не надо: загрузка и сам API работают и так.
+Например: `S3_PUBLIC_ENDPOINT_URL=http://132.243.230.84:9000`.
 
-- **Для production** вынесите хранилище на адрес, одинаково доступный и backend'у,
-  и пользователям (публичный домен, например `https://s3.company.com`), и укажите
-  его в `S3_ENDPOINT_URL`. Тогда никаких правок hosts не требуется.
-
-> Почему не `localhost`: внутри контейнера `localhost` указывает на сам контейнер,
-> поэтому backend не сможет залить файл в `http://localhost:9000`. Используйте имя
-> `minio` (см. выше) или публичный адрес.
+После изменения `.env` пересоздайте backend-контейнер. Править hosts-файл не
+требуется.
 
 ## Проверка работоспособности
 
