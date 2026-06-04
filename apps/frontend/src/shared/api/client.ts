@@ -126,6 +126,8 @@ export type ApplicationDetailDto = ApplicationListItemDto & {
   workType?: Record<string, unknown> | null;
   author?: Record<string, unknown> | null;
   executor?: Record<string, unknown> | null;
+  previousExecutor?: Record<string, unknown> | null;
+  delegatedByEmployee?: Record<string, unknown> | null;
   department?: Record<string, unknown> | null;
 };
 

@@ -81,8 +81,10 @@ export function ApplicationsPage() {
   const applicationDelegation = selectedApplication?.delegation;
   const author = selectedApplication?.author ?? employees.find((user) => user.id === selectedApplication?.authorId);
   const executor = selectedApplication?.executor ?? employees.find((user) => user.id === selectedApplication?.executorId);
-  const previousExecutor = employees.find((user) => user.id === selectedApplication?.previousExecutorId);
-  const delegatingExecutor = employees.find((user) => user.id === applicationDelegation?.delegatedByEmployeeId) ?? previousExecutor;
+  const previousExecutor = selectedApplication?.previousExecutor ?? employees.find((user) => user.id === selectedApplication?.previousExecutorId);
+  const delegatingExecutor = selectedApplication?.delegatedByEmployee
+    ?? employees.find((user) => user.id === applicationDelegation?.delegatedByEmployeeId)
+    ?? previousExecutor;
   const authorDepartment = departments.find((department) => department.id === author?.departmentId);
   const authorJobTitle = positions.find((position) => position.id === author?.positionId);
   const executorDepartment = departments.find((department) => department.id === executor?.departmentId);

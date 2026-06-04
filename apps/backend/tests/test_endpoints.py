@@ -596,9 +596,19 @@ class TestGetWorkTypes:
     def test_executor_200(self):
         assert get("/work-types", EXECUTOR).status_code == 200
 
-    def test_filter_by_department_200(self):
-        r = get("/work-types", MANAGER, params={"departmentId": str(DEP_IT)})
+    def test_author_can_filter_by_another_department(self):
+        r = get("/work-types", AUTHOR, params={"departmentId": str(DEP_OGE)})
         assert r.status_code == 200
+        items = r.json()["items"]
+        assert items
+        assert all(item["departmentId"] == str(DEP_OGE) for item in items)
+
+    def test_plain_manager_can_filter_by_another_department(self):
+        r = get("/work-types", DEPT_MANAGER, params={"departmentId": str(DEP_IT)})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert items
+        assert all(item["departmentId"] == str(DEP_IT) for item in items)
 
     def test_nonexistent_department_returns_empty_list(self):
         r = get("/work-types", MANAGER, params={"departmentId": "9999"})
@@ -1120,6 +1130,8 @@ class TestDelegateInternal:
         assert d["isUnfinished"] is True
         assert d["assignedComplexity"] == "hard"
         assert d["previousExecutorId"] == "2"
+        assert d["previousExecutor"]["id"] == "2"
+        assert d["previousExecutor"]["fullName"]
         assert d["executorComment"] == "Слишком сложно"   # executor action comment
 
     def test_complexity_cannot_be_lowered_400(self):
@@ -1152,6 +1164,8 @@ class TestDelegateInternal:
             deleg = d["delegation"]
             assert deleg is not None
             assert deleg["delegatedByEmployeeId"] == "2"
+            assert d["delegatedByEmployee"]["id"] == "2"
+            assert d["delegatedByEmployee"]["fullName"]
             # internal delegation: source and target department are the same
             assert deleg["delegatedFromDepartmentId"] == deleg["delegatedToDepartmentId"]
 
@@ -1241,6 +1255,7 @@ class TestReturnToNew:
         assert d["status"] == "new"
         assert d["isUnfinished"] is True
         assert d["previousExecutorId"] == "2"
+        assert d["previousExecutor"]["id"] == "2"
 
     def test_manager_returns_in_progress_to_new(self):
         app_id = _create_assigned("2")

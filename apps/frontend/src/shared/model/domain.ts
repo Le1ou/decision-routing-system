@@ -147,6 +147,8 @@ export type Application = {
   workType?: WorkType;
   author?: User;
   executor?: User;
+  previousExecutor?: User;
+  delegatedByEmployee?: User;
   department?: Department;
 };
 
