@@ -1,7 +1,8 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { departments, workTypes } from "@mocks/mockData";
+import { useReferenceData } from "@app/providers/ReferenceDataProvider";
+import { apiClient } from "@shared/api";
 import type { Complexity, WorkType } from "@shared/model/domain";
 import { Button } from "@shared/ui";
 
@@ -11,6 +12,7 @@ type WorkTypeForm = {
   name: string;
   departmentId: string;
   complexity: Complexity;
+  allowedGradeIds: string[];
 };
 
 type WorkTypeErrors = Partial<Record<keyof WorkTypeForm, string>>;
@@ -22,44 +24,57 @@ const complexityLabels: Record<Complexity, string> = {
   critical: "Критичная",
 };
 
-const allowedPositionsByComplexity: Record<Complexity, string[]> = {
-  easy: ["Младший", "Старший", "Ведущий", "Главный"],
-  medium: ["Младший", "Старший", "Ведущий", "Главный"],
-  hard: ["Старший", "Ведущий", "Главный"],
-  critical: ["Ведущий", "Главный"],
+const defaultAllowedGradeIdsByComplexity: Record<Complexity, string[]> = {
+  easy: [],
+  medium: [],
+  hard: [],
+  critical: [],
 };
 
 export function WorkTypesPage() {
-  const { currentUser } = useAuth();
-  const initialDepartmentId = currentUser?.role === "manager" ? currentUser.departmentId : departments[0]?.id ?? "";
-  const [items, setItems] = useState<WorkType[]>(workTypes);
+  const { currentUser, credentials } = useAuth();
+  const { departments, grades, workTypes, refresh } = useReferenceData();
+  const availableDepartments = currentUser?.role === "manager"
+    ? departments.filter((department) => department.id === currentUser.departmentId)
+    : departments;
+  const initialDepartmentId = availableDepartments[0]?.id ?? "";
   const [departmentId, setDepartmentId] = useState(initialDepartmentId);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState<WorkTypeForm>({
     name: "",
     departmentId: initialDepartmentId,
     complexity: "medium",
+    allowedGradeIds: grades.map((grade) => grade.id),
   });
   const [errors, setErrors] = useState<WorkTypeErrors>({});
   const [notice, setNotice] = useState("");
 
-  const selectedDepartment = departments.find((department) => department.id === departmentId);
+  const activeDepartmentId = departmentId || initialDepartmentId;
+  const selectedDepartment = departments.find((department) => department.id === activeDepartmentId);
+
+  useEffect(() => {
+    if (!departmentId && initialDepartmentId) {
+      setDepartmentId(initialDepartmentId);
+      setForm((current) => ({ ...current, departmentId: initialDepartmentId, allowedGradeIds: grades.map((grade) => grade.id) }));
+    }
+  }, [departmentId, grades, initialDepartmentId]);
+
   const visibleItems = useMemo(
-    () => items.filter((item) => item.departmentId === departmentId),
-    [departmentId, items],
+    () => workTypes.filter((item) => item.departmentId === activeDepartmentId),
+    [activeDepartmentId, workTypes],
   );
 
   const departmentStats = useMemo(
     () =>
       departments.map((department) => ({
         ...department,
-        workTypesCount: items.filter((item) => item.departmentId === department.id).length,
-      })),
-    [items],
+        workTypesCount: workTypes.filter((item) => item.departmentId === department.id).length,
+      })).filter((department) => availableDepartments.some((availableDepartment) => availableDepartment.id === department.id)),
+    [availableDepartments, workTypes],
   );
 
   const openCreateModal = () => {
-    setForm({ name: "", departmentId, complexity: "medium" });
+    setForm({ name: "", departmentId: activeDepartmentId, complexity: "medium", allowedGradeIds: grades.map((grade) => grade.id) });
     setErrors({});
     setIsModalOpen(true);
   };
@@ -75,8 +90,12 @@ export function WorkTypesPage() {
       nextErrors.departmentId = "Выберите отдел.";
     }
 
-    if (items.some((item) => item.departmentId === form.departmentId && item.name.trim().toLowerCase() === form.name.trim().toLowerCase())) {
+    if (workTypes.some((item) => item.departmentId === form.departmentId && item.name.trim().toLowerCase() === form.name.trim().toLowerCase())) {
       nextErrors.name = "Такой вид работ уже есть в выбранном отделе.";
+    }
+
+    if (form.allowedGradeIds.length === 0) {
+      nextErrors.complexity = "Выберите хотя бы одну допустимую позицию.";
     }
 
     setErrors(nextErrors);
@@ -84,29 +103,78 @@ export function WorkTypesPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleCreate = (event: FormEvent<HTMLFormElement>) => {
+  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!validate()) {
+    if (!validate() || !credentials) {
       return;
     }
 
-    const createdItem: WorkType = {
-      id: `work-type-${Date.now()}`,
-      name: form.name.trim(),
-      departmentId: form.departmentId,
-      complexity: form.complexity,
-    };
-
-    setItems((current) => [createdItem, ...current]);
-    setDepartmentId(form.departmentId);
-    setNotice(`Вид работ «${createdItem.name}» добавлен в mock-справочник.`);
-    setIsModalOpen(false);
+    try {
+      await apiClient.createWorkType(credentials, {
+        name: form.name.trim(),
+        departmentId: form.departmentId,
+        complexity: form.complexity,
+        allowedGradeIds: form.allowedGradeIds,
+      });
+      await refresh();
+      setDepartmentId(form.departmentId);
+      setNotice(`Вид работ «${form.name.trim()}» добавлен.`);
+      setIsModalOpen(false);
+    } catch {
+      setNotice("Backend не создал вид работ.");
+    }
   };
 
-  const handleDelete = (item: WorkType) => {
-    setItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
-    setNotice(`Вид работ «${item.name}» удален из mock-справочника.`);
+  const handleDelete = async (item: WorkType) => {
+    if (!credentials) {
+      return;
+    }
+
+    try {
+      await apiClient.deleteWorkType(credentials, item.id);
+      await refresh();
+      setNotice(`Вид работ «${item.name}» удален.`);
+    } catch {
+      setNotice("Backend не удалил вид работ.");
+    }
+  };
+
+  const updateWorkTypeComplexity = async (item: WorkType, complexity: Complexity) => {
+    if (!credentials) {
+      return;
+    }
+
+    try {
+      await apiClient.updateWorkType(credentials, item.id, { complexity });
+      await refresh();
+      setNotice(`Для вида работ «${item.name}» обновлена сложность.`);
+    } catch {
+      setNotice("Backend не обновил сложность вида работ.");
+    }
+  };
+
+  const toggleWorkTypeGrade = async (item: WorkType, gradeId: string) => {
+    const nextGradeIds = item.allowedGradeIds.includes(gradeId)
+      ? item.allowedGradeIds.filter((id) => id !== gradeId)
+      : [...item.allowedGradeIds, gradeId];
+
+    if (nextGradeIds.length === 0) {
+      setNotice("У вида работ должна остаться хотя бы одна допустимая позиция.");
+      return;
+    }
+
+    if (!credentials) {
+      return;
+    }
+
+    try {
+      await apiClient.updateWorkType(credentials, item.id, { allowedGradeIds: nextGradeIds });
+      await refresh();
+      setNotice(`Матрица позиций для вида работ «${item.name}» обновлена.`);
+    } catch {
+      setNotice("Backend не обновил матрицу позиций.");
+    }
   };
 
   return (
@@ -143,8 +211,8 @@ export function WorkTypesPage() {
             </div>
             <label>
               Отдел
-              <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
-                {departments.map((department) => (
+              <select value={activeDepartmentId} onChange={(event) => setDepartmentId(event.target.value)}>
+                {availableDepartments.map((department) => (
                   <option value={department.id} key={department.id}>
                     {department.name}
                   </option>
@@ -170,18 +238,36 @@ export function WorkTypesPage() {
                 <div className="work-types-table__row" role="row" key={item.id}>
                   <span role="cell">{item.name}</span>
                   <span role="cell">
-                    <span className={`work-types-complexity work-types-complexity--${item.complexity}`}>
-                      {complexityLabels[item.complexity]}
-                    </span>
+                    <select
+                      className={`work-types-complexity-select work-types-complexity-select--${item.complexity}`}
+                      value={item.complexity}
+                      onChange={(event) => updateWorkTypeComplexity(item, event.target.value as Complexity)}
+                      aria-label={`Сложность ${item.name}`}
+                    >
+                      {Object.entries(complexityLabels).map(([value, label]) => (
+                        <option value={value} key={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
                   </span>
                   <span role="cell">
-                    <span className="work-types-positions">
-                      {allowedPositionsByComplexity[item.complexity].join(", ")}
+                    <span className="work-types-grades">
+                      {grades.map((grade) => (
+                        <label key={grade.id}>
+                          <input
+                            type="checkbox"
+                            checked={item.allowedGradeIds.includes(grade.id)}
+                            onChange={() => void toggleWorkTypeGrade(item, grade.id)}
+                          />
+                          {grade.name}
+                        </label>
+                      ))}
                     </span>
                   </span>
                   <span role="cell">Доступен для новых заявок</span>
                   <span role="cell">
-                    <button type="button" onClick={() => handleDelete(item)}>
+                    <button type="button" onClick={() => void handleDelete(item)}>
                       Удалить
                     </button>
                   </span>
@@ -226,7 +312,7 @@ export function WorkTypesPage() {
                   setErrors((current) => ({ ...current, departmentId: undefined }));
                 }}
               >
-                {departments.map((department) => (
+                {availableDepartments.map((department) => (
                   <option value={department.id} key={department.id}>
                     {department.name}
                   </option>
@@ -239,7 +325,15 @@ export function WorkTypesPage() {
               Сложность
               <select
                 value={form.complexity}
-                onChange={(event) => setForm((current) => ({ ...current, complexity: event.target.value as Complexity }))}
+                onChange={(event) => {
+                  const complexity = event.target.value as Complexity;
+
+                  setForm((current) => ({
+                    ...current,
+                    complexity,
+                    allowedGradeIds: form.allowedGradeIds.length > 0 ? form.allowedGradeIds : grades.map((grade) => grade.id),
+                  }));
+                }}
               >
                 {Object.entries(complexityLabels).map(([value, label]) => (
                   <option value={value} key={value}>
@@ -251,7 +345,27 @@ export function WorkTypesPage() {
 
             <div className="work-types-matrix-preview" aria-label="Допустимые позиции">
               <span>Допустимые позиции</span>
-              <strong>{allowedPositionsByComplexity[form.complexity].join(", ")}</strong>
+              <div className="work-types-grade-checks">
+                {grades.map((grade) => (
+                  <label key={grade.id}>
+                    <input
+                      type="checkbox"
+                      checked={form.allowedGradeIds.includes(grade.id)}
+                      onChange={(event) => {
+                        setForm((current) => ({
+                          ...current,
+                          allowedGradeIds: event.target.checked
+                            ? [...current.allowedGradeIds, grade.id]
+                            : current.allowedGradeIds.filter((id) => id !== grade.id),
+                        }));
+                        setErrors((current) => ({ ...current, complexity: undefined }));
+                      }}
+                    />
+                    {grade.name}
+                  </label>
+                ))}
+              </div>
+              {errors.complexity ? <small>{errors.complexity}</small> : null}
             </div>
 
             <footer>

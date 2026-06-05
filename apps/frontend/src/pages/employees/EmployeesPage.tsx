@@ -1,82 +1,48 @@
 import { FormEvent, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { departments, mockUsers } from "@mocks/mockData";
-import type { Position, User } from "@shared/model/domain";
+import { useReferenceData } from "@app/providers/ReferenceDataProvider";
+import { apiClient } from "@shared/api";
+import type { User, UserRole } from "@shared/model/domain";
 import { roleLabels } from "@shared/model/labels";
 import { Button } from "@shared/ui";
 
 import "./EmployeesPage.css";
 
-type AdUser = Pick<User, "id" | "login" | "fullName" | "departmentId"> & {
-  adPostName: string;
-};
-
 type EmployeeForm = {
   adUserId: string;
-  positionId: string;
+  role: UserRole;
   isActive: boolean;
 };
 
 type EmployeeErrors = Partial<Record<keyof EmployeeForm, string>>;
 type ActivityFilter = "all" | "active" | "inactive";
 
-const initialPositions: Position[] = [
-  { id: "grade-junior", name: "Младший", isTop: false },
-  { id: "grade-senior", name: "Старший", isTop: false },
-  { id: "grade-lead", name: "Ведущий", isTop: true },
-  { id: "grade-chief", name: "Главный", isTop: true },
-];
-
-const initialEmployees: User[] = mockUsers.map((user) => ({
-  ...user,
-  positionId: getInitialPositionId(user.login),
-  isActive: user.role === "manager" ? false : user.isActive,
-}));
-
-const adUsers: AdUser[] = [
-  ...mockUsers.map((user) => ({
-    id: user.id,
-    login: user.login,
-    fullName: user.fullName,
-    departmentId: user.departmentId,
-    adPostName: getMockAdPostName(user.login),
-  })),
-  {
-    id: "ad-user-5",
-    login: "nikitin_av",
-    fullName: "Никитин Алексей Викторович",
-    departmentId: "it",
-    adPostName: "Инженер",
-  },
-  {
-    id: "ad-user-6",
-    login: "sokolova_ev",
-    fullName: "Соколова Елена Викторовна",
-    departmentId: "oge",
-    adPostName: "Специалист",
-  },
-];
+const assignableRoles: UserRole[] = ["author", "executor", "manager", "top-manager"];
 
 export function EmployeesPage() {
-  const { currentUser } = useAuth();
-  const initialDepartmentId = currentUser?.role === "manager" ? currentUser.departmentId : departments[0]?.id ?? "";
-  const [employees, setEmployees] = useState<User[]>(initialEmployees);
+  const { currentUser, credentials } = useAuth();
+  const { departments, employees, adUsers, refresh } = useReferenceData();
+  const availableDepartments = currentUser?.role === "manager"
+    ? departments.filter((department) => department.id === currentUser.departmentId)
+    : departments;
+  const initialDepartmentId = availableDepartments[0]?.id ?? "";
   const [departmentId, setDepartmentId] = useState(initialDepartmentId);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState<EmployeeForm>({
     adUserId: "",
-    positionId: initialPositions[0]?.id ?? "",
+    role: "executor",
     isActive: true,
   });
   const [errors, setErrors] = useState<EmployeeErrors>({});
 
+  const activeDepartmentId = departmentId || initialDepartmentId;
   const visibleEmployees = useMemo(
     () =>
       employees.filter((employee) => {
-        const matchesDepartment = employee.departmentId === departmentId;
+        const matchesDepartment = employee.departmentId === activeDepartmentId;
         const matchesActivity =
           activityFilter === "all" ||
           (activityFilter === "active" && employee.isActive) ||
@@ -84,22 +50,26 @@ export function EmployeesPage() {
 
         return matchesDepartment && matchesActivity;
       }),
-    [activityFilter, departmentId, employees],
+    [activityFilter, activeDepartmentId, employees],
   );
 
   const employeeLogins = new Set(employees.map((employee) => employee.login));
-  const availableAdUsers = adUsers.filter((user) => !employeeLogins.has(user.login));
+  const availableAdUsers = adUsers.filter(
+    (user) =>
+      !employeeLogins.has(user.login) &&
+      availableDepartments.some((departmentItem) => departmentItem.id === user.departmentId),
+  );
   const selectedAdUser = adUsers.find((user) => user.id === form.adUserId);
-  const department = departments.find((item) => item.id === departmentId);
-  const totalInDepartment = employees.filter((employee) => employee.departmentId === departmentId).length;
-  const activeInDepartment = employees.filter((employee) => employee.departmentId === departmentId && employee.isActive).length;
+  const department = departments.find((item) => item.id === activeDepartmentId);
+  const totalInDepartment = employees.filter((employee) => employee.departmentId === activeDepartmentId).length;
+  const activeInDepartment = employees.filter((employee) => employee.departmentId === activeDepartmentId && employee.isActive).length;
 
   const openCreateModal = () => {
     const firstAvailableAdUser = availableAdUsers[0];
 
     setForm({
       adUserId: firstAvailableAdUser?.id ?? "",
-      positionId: initialPositions[0]?.id ?? "",
+      role: "executor",
       isActive: true,
     });
     setErrors({});
@@ -117,8 +87,8 @@ export function EmployeesPage() {
       nextErrors.adUserId = "Этот пользователь уже добавлен в систему.";
     }
 
-    if (!form.positionId) {
-      nextErrors.positionId = "Выберите позицию.";
+    if (!form.role) {
+      nextErrors.role = "Выберите роль.";
     }
 
     setErrors(nextErrors);
@@ -126,52 +96,73 @@ export function EmployeesPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleCreate = (event: FormEvent<HTMLFormElement>) => {
+  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!validate() || !selectedAdUser) {
+    if (!validate() || !selectedAdUser || !credentials) {
       return;
     }
 
-    const createdEmployee: User = {
-      id: `user-${Date.now()}`,
-      login: selectedAdUser.login,
-      fullName: selectedAdUser.fullName,
-      role: "executor",
-      departmentId: selectedAdUser.departmentId,
-      positionId: form.positionId,
-      isActive: form.isActive,
-    };
-
-    setEmployees((current) => [createdEmployee, ...current]);
-    setDepartmentId(createdEmployee.departmentId);
-    setActivityFilter("all");
-    setNotice(`Пользователь AD «${createdEmployee.fullName}» добавлен в систему.`);
-    setIsModalOpen(false);
+    try {
+      await apiClient.createEmployee(credentials, form);
+      await refresh();
+      setDepartmentId(selectedAdUser.departmentId);
+      setActivityFilter("all");
+      setNotice(`Пользователь AD «${selectedAdUser.fullName}» добавлен в систему.`);
+      setIsModalOpen(false);
+    } catch {
+      setNotice("Backend не добавил сотрудника.");
+    }
   };
 
-  const toggleActivity = (employee: User) => {
-    setEmployees((current) =>
-      current.map((currentEmployee) =>
-        currentEmployee.id === employee.id
-          ? { ...currentEmployee, isActive: !currentEmployee.isActive }
-          : currentEmployee,
-      ),
-    );
-    setNotice(
-      `Сотрудник «${employee.fullName}» ${employee.isActive ? "исключен из распределения заявок" : "доступен для распределения заявок"}.`,
-    );
+  const toggleActivity = async (employee: User) => {
+    if (!credentials) {
+      return;
+    }
+
+    try {
+      await apiClient.updateEmployee(credentials, employee.id, { isActive: !employee.isActive });
+      await refresh();
+      setNotice(
+        `Сотрудник «${employee.fullName}» ${employee.isActive ? "исключен из распределения заявок" : "доступен для распределения заявок"}.`,
+      );
+    } catch {
+      setNotice("Backend не изменил активность сотрудника.");
+    }
   };
 
-  const updateEmployeePosition = (employee: User, positionId: string) => {
-    const nextPosition = initialPositions.find((position) => position.id === positionId);
+  const deleteEmployee = async (employee: User) => {
+    if (!credentials) {
+      return;
+    }
 
-    setEmployees((current) =>
-      current.map((currentEmployee) =>
-        currentEmployee.id === employee.id ? { ...currentEmployee, positionId } : currentEmployee,
-      ),
-    );
-    setNotice(`Сотруднику «${employee.fullName}» назначена позиция «${nextPosition?.name ?? "-"}».`);
+    try {
+      await apiClient.deleteEmployee(credentials, employee.id);
+      await refresh();
+      setNotice(`Сотрудник «${employee.fullName}» удален из системы.`);
+    } catch {
+      setNotice("Backend не удалил сотрудника.");
+    }
+  };
+
+  const toggleDelegationConfirmation = async () => {
+    if (!credentials || !department) {
+      return;
+    }
+
+    const nextValue = !department.delegatedToSameDepartment;
+
+    try {
+      await apiClient.updateDepartmentDelegationSettings(credentials, department.id, { delegatedToSameDepartment: nextValue });
+      await refresh();
+      setNotice(
+        nextValue
+          ? `Для отдела «${department.name}» включено подтверждение делегирования внутри отдела.`
+          : `Для отдела «${department.name}» подтверждение делегирования внутри отдела отключено.`,
+      );
+    } catch {
+      setNotice("Backend не обновил настройку делегирования.");
+    }
   };
 
   return (
@@ -179,7 +170,7 @@ export function EmployeesPage() {
       <header className="employees-page__header">
         <div>
           <h1>Управление сотрудниками</h1>
-          <p>Руководитель добавляет из AD сотрудников-исполнителей и настраивает их позицию и участие в распределении заявок.</p>
+          <p>Руководитель добавляет из AD сотрудников и настраивает их роль и участие в распределении заявок.</p>
         </div>
       </header>
 
@@ -204,8 +195,8 @@ export function EmployeesPage() {
         <header className="employees-table__toolbar">
           <label>
             Отдел AD
-            <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
-              {departments.map((departmentItem) => (
+            <select value={activeDepartmentId} onChange={(event) => setDepartmentId(event.target.value)}>
+              {availableDepartments.map((departmentItem) => (
                 <option value={departmentItem.id} key={departmentItem.id}>
                   {departmentItem.name}
                 </option>
@@ -225,52 +216,55 @@ export function EmployeesPage() {
           </Button>
         </header>
 
+        <section className="employees-delegation-setting" aria-label="Настройки делегирования отдела">
+          <div>
+            <strong>Делегирование внутри отдела</strong>
+            <span>{department?.name ?? "-"}</span>
+          </div>
+          <label>
+            <input
+              type="checkbox"
+              checked={Boolean(department?.delegatedToSameDepartment)}
+              onChange={() => void toggleDelegationConfirmation()}
+            />
+            Подтверждать руководителем
+          </label>
+        </section>
+
         <div className="employees-table__grid" role="table" aria-label="Сотрудники">
           <div className="employees-table__row employees-table__row--head" role="row">
             <span role="columnheader">ФИО из AD</span>
             <span role="columnheader">Логин AD</span>
             <span role="columnheader">Роль</span>
-            <span role="columnheader">Должность AD</span>
-            <span role="columnheader">Позиция</span>
+            <span role="columnheader">Должность</span>
             <span role="columnheader">Статус</span>
             <span role="columnheader">Действие</span>
           </div>
 
           {visibleEmployees.length > 0 ? (
-            visibleEmployees.map((employee) => {
-              return (
-                <div className="employees-table__row" role="row" key={employee.id}>
-                  <span role="cell">{employee.fullName}</span>
-                  <span role="cell">{employee.login}</span>
-                  <span role="cell">{roleLabels[employee.role]}</span>
-                  <span role="cell">{getMockAdPostName(employee.login)}</span>
-                  <span role="cell">
-                    <select
-                      className="employees-position-select"
-                      value={employee.positionId}
-                      onChange={(event) => updateEmployeePosition(employee, event.target.value)}
-                      aria-label={`Позиция ${employee.fullName}`}
-                    >
-                      {initialPositions.map((position) => (
-                        <option value={position.id} key={position.id}>
-                          {position.name}
-                        </option>
-                      ))}
-                    </select>
+            visibleEmployees.map((employee) => (
+              <div className="employees-table__row" role="row" key={employee.id}>
+                <span role="cell">{employee.fullName}</span>
+                <span role="cell">{employee.login}</span>
+                <span role="cell">{roleLabels[employee.role]}</span>
+                <span role="cell">{employee.postName}</span>
+                <span role="cell">
+                  <span className={employee.isActive ? "employees-status employees-status--active" : "employees-status"}>
+                    {employee.isActive ? "Принимает заявки" : "Не принимает"}
                   </span>
-                  <span role="cell">
-                    <span className={employee.isActive ? "employees-status employees-status--active" : "employees-status"}>
-                      {employee.isActive ? "Принимает заявки" : "Не принимает"}
-                    </span>
-                  </span>
-                  <span role="cell">
-                    <button type="button" onClick={() => toggleActivity(employee)}>
+                </span>
+                <span role="cell">
+                  <div className="employees-actions">
+                    <button type="button" onClick={() => void toggleActivity(employee)}>
                       {employee.isActive ? "Отключить" : "Включить"}
                     </button>
-                  </span>
-                </div>
-              );
-            })
+                    <button type="button" onClick={() => void deleteEmployee(employee)}>
+                      Удалить
+                    </button>
+                  </div>
+                </span>
+              </div>
+            ))
           ) : (
             <div className="employees-table__empty">Сотрудники по выбранным фильтрам не найдены.</div>
           )}
@@ -310,18 +304,36 @@ export function EmployeesPage() {
                 <div className="employees-ad-card" aria-label="Данные из AD">
                   <div>
                     <span>Отдел AD</span>
-                    <strong>{getDepartmentName(selectedAdUser?.departmentId)}</strong>
+                    <strong>{getDepartmentName(departments, selectedAdUser?.departmentId)}</strong>
                   </div>
                   <div>
-                    <span>Должность AD</span>
-                    <strong>{selectedAdUser?.adPostName ?? "-"}</strong>
+                    <span>Должность</span>
+                    <strong>{selectedAdUser?.postName ?? "-"}</strong>
                   </div>
                 </div>
+
+                <label>
+                  Роль в системе
+                  <select
+                    value={form.role}
+                    onChange={(event) => {
+                      setForm((current) => ({ ...current, role: event.target.value as UserRole }));
+                      setErrors((current) => ({ ...current, role: undefined }));
+                    }}
+                  >
+                    {assignableRoles.map((role) => (
+                      <option value={role} key={role}>
+                        {roleLabels[role]}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.role ? <small>{errors.role}</small> : null}
+                </label>
 
                 <div className="employees-ad-card" aria-label="Параметры системы">
                   <div>
                     <span>Роль в системе</span>
-                    <strong>Исполнитель</strong>
+                    <strong>{roleLabels[form.role]}</strong>
                   </div>
                   <div>
                     <span>Участие в распределении</span>
@@ -339,27 +351,9 @@ export function EmployeesPage() {
                     <option value="inactive">Не принимает заявки</option>
                   </select>
                 </label>
-
-                <label>
-                  Позиция
-                  <select
-                    value={form.positionId}
-                    onChange={(event) => {
-                      setForm((current) => ({ ...current, positionId: event.target.value }));
-                      setErrors((current) => ({ ...current, positionId: undefined }));
-                    }}
-                  >
-                    {initialPositions.map((position) => (
-                      <option value={position.id} key={position.id}>
-                        {position.name}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.positionId ? <small>{errors.positionId}</small> : null}
-                </label>
               </>
             ) : (
-              <div className="employees-table__empty">Все mock-пользователи AD уже добавлены в систему.</div>
+              <div className="employees-table__empty">Все доступные пользователи AD уже добавлены в систему.</div>
             )}
 
             <footer>
@@ -371,33 +365,10 @@ export function EmployeesPage() {
           </form>
         </div>
       ) : null}
-
     </section>
   );
 }
 
-function getDepartmentName(departmentId?: string) {
+function getDepartmentName(departments: Array<{ id: string; name: string }>, departmentId?: string) {
   return departments.find((department) => department.id === departmentId)?.name ?? "-";
-}
-
-function getMockAdPostName(login: string) {
-  const adPosts: Record<string, string> = {
-    author: "Инженер",
-    executor: "Инженер",
-    manager: "Руководитель",
-    executor2: "Инженер",
-  };
-
-  return adPosts[login] ?? "Специалист";
-}
-
-function getInitialPositionId(login: string) {
-  const positionByLogin: Record<string, string> = {
-    author: "grade-junior",
-    executor: "grade-lead",
-    manager: "grade-chief",
-    executor2: "grade-senior",
-  };
-
-  return positionByLogin[login] ?? "grade-junior";
 }

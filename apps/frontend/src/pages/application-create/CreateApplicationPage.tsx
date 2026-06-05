@@ -1,10 +1,9 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
-import { departments, positions, workTypes } from "@mocks/mockData";
-import type { Application } from "@shared/model/domain";
+import { useReferenceData } from "@app/providers/ReferenceDataProvider";
 import { Button } from "@shared/ui";
 
 import "./CreateApplicationPage.css";
@@ -24,7 +23,8 @@ type CreateApplicationErrors = Partial<Record<keyof CreateApplicationForm, strin
 export function CreateApplicationPage() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { applicationItems, addApplication } = useApplicationsStore();
+  const { addApplication } = useApplicationsStore();
+  const { departments, positions, workTypes } = useReferenceData();
   const [form, setForm] = useState<CreateApplicationForm>({
     title: "",
     departmentId: departments[0]?.id ?? "",
@@ -36,12 +36,24 @@ export function CreateApplicationPage() {
   });
   const [errors, setErrors] = useState<CreateApplicationErrors>({});
   const [createdApplicationId, setCreatedApplicationId] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (departments.length === 0 || form.departmentId) {
+      return;
+    }
+
+    const departmentId = departments[0].id;
+    const workTypeId = workTypes.find((workType) => workType.departmentId === departmentId)?.id ?? "";
+
+    setForm((current) => ({ ...current, departmentId, workTypeId }));
+  }, [departments, form.departmentId, workTypes]);
 
   const availableWorkTypes = useMemo(
     () => workTypes.filter((workType) => workType.departmentId === form.departmentId),
     [form.departmentId],
   );
-  const authorPosition = positions.find((position) => position.id === currentUser?.positionId);
+  const authorJobTitle = positions.find((position) => position.id === currentUser?.positionId);
   const authorDepartment = departments.find((department) => department.id === currentUser?.departmentId);
 
   const updateField = <Key extends keyof CreateApplicationForm>(field: Key, value: CreateApplicationForm[Key]) => {
@@ -82,7 +94,7 @@ export function CreateApplicationPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!validate()) {
@@ -93,26 +105,24 @@ export function CreateApplicationPage() {
       return;
     }
 
-    const applicationId = String(getNextApplicationId(applicationItems));
-    const now = new Date().toISOString();
-    const createdApplication: Application = {
-      id: applicationId,
-      title: form.title.trim(),
-      description: form.description.trim(),
-      status: "new",
-      priority: "medium",
-      departmentId: form.departmentId,
-      workTypeId: form.workTypeId,
-      authorId: currentUser.id,
-      attachmentNames: form.files.map((file) => file.name),
-      isUnfinished: false,
-      createdAt: now,
-      deadlineAt: new Date(form.deadlineAt).toISOString(),
-      updatedAt: now,
-    };
+    setIsSubmitting(true);
 
-    addApplication(createdApplication);
-    setCreatedApplicationId(createdApplication.id);
+    try {
+      const applicationId = await addApplication({
+        title: form.title.trim(),
+        description: form.description.trim(),
+        departmentId: form.departmentId,
+        workTypeId: form.workTypeId,
+        deadlineAt: new Date(form.deadlineAt).toISOString(),
+        files: form.files,
+      });
+
+      setCreatedApplicationId(applicationId);
+    } catch {
+      setErrors((current) => ({ ...current, title: "Не удалось создать заявку на backend." }));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -125,7 +135,7 @@ export function CreateApplicationPage() {
 
         {createdApplicationId ? (
           <div className="create-window__success">
-            Заявка ID {createdApplicationId} создана в mock-режиме и получит статус «Новый».
+            Заявка ID {createdApplicationId} создана и получит статус «Новый».
             <button type="button" onClick={() => navigate(`/applications?application=${createdApplicationId}`)}>
               Открыть просмотр заявок
             </button>
@@ -135,7 +145,7 @@ export function CreateApplicationPage() {
         <div className="create-window__author">
           <span>Автор: <b>{currentUser?.fullName}</b></span>
           <span>Отдел: <b>{authorDepartment?.name ?? "-"}</b></span>
-          <span>Должность: <b>{authorPosition?.name ?? "-"}</b></span>
+          <span>Должность: <b>{authorJobTitle?.name ?? "-"}</b></span>
         </div>
 
         <div className="create-window__row create-window__row--topic">
@@ -236,21 +246,11 @@ export function CreateApplicationPage() {
         </div>
 
         <footer className="create-window__footer">
-          <Button type="submit" variant="ghost" disabled={Boolean(createdApplicationId)}>
-            Отправить
+          <Button type="submit" variant="ghost" disabled={Boolean(createdApplicationId) || isSubmitting}>
+            {isSubmitting ? "Отправляем" : "Отправить"}
           </Button>
         </footer>
       </form>
     </section>
   );
-}
-
-function getNextApplicationId(applicationItems: Application[]) {
-  const maxId = applicationItems.reduce((max, application) => {
-    const numericPart = Number(application.id);
-
-    return Number.isFinite(numericPart) ? Math.max(max, numericPart) : max;
-  }, 1000);
-
-  return maxId + 1;
 }

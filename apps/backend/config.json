@@ -1,22 +1,142 @@
 {
-    "dep_configs":{
-        "empl_appl_delay": 360,
-        "delegated_to_same_dep": false,
-        "deadline_notification": 25      
+  "dep_configs": {
+    "empl_appl_delay": 360,
+    "delegated_to_same_dep": false,
+    "deadline_notification": 0.25
+  },
+  "AD_auth": {
+    "server_adress": "your_ad_server.yourdomain.local",
+    "Domain": "yourdomain",
+    "use_ssl": true,
+    "port": 636,
+    "role_source": "system",
+    "search_base": "",
+    "group_role_map": {}
+  },
+  "MOCK_AD": {
+    "orlova_m": {
+      "adUserId": "1",
+      "fullName": "Орлова Мария Викторовна",
+      "departmentId": 1,
+      "position": "Руководитель",
+      "inSystem": true,
+      "password": "Manager!1",
+      "employee_id": 1,
+      "role": "top-manager"
     },
-    "AD_auth":{
-        "server_adress":"your_ad_server.yourdomain.local",
-        "Domain":"yourdomain"
+    "ivanov_i": {
+      "adUserId": "2",
+      "fullName": "Иванов Иван Иванович",
+      "departmentId": 1,
+      "position": "Инженер",
+      "inSystem": true,
+      "password": "SecretPassword!1",
+      "employee_id": 2,
+      "role": "executor"
     },
-    "MOCK_USERS_DB": {
-        "ivanov_i": {
-            "password": "SecretPassword!1",
-            "roles": ["IT", "IT_lead"]
-        },
-        "petrov_p": {
-            "password": "Pa$$w0rd",
-            "roles": ["JANITOR"]
-        }
+    "petrov_p": {
+      "adUserId": "3",
+      "fullName": "Петров Пётр Петрович",
+      "departmentId": 1,
+      "position": "Старший инженер",
+      "inSystem": true,
+      "password": "Pa$$w0rd",
+      "employee_id": 3,
+      "role": "executor"
     },
-    "ROLES":["JANITOR", "IT", "IT_lead"]
+    "sidorova_a": {
+      "adUserId": "4",
+      "fullName": "Сидорова Анна Сергеевна",
+      "departmentId": 2,
+      "position": "Специалист",
+      "inSystem": true,
+      "password": "Sidorova!3",
+      "employee_id": 4,
+      "role": "executor"
+    },
+    "kozlov_d": {
+      "adUserId": "5",
+      "fullName": "Козлов Дмитрий Александрович",
+      "departmentId": 3,
+      "position": "Старший инженер",
+      "inSystem": true,
+      "password": "Kozlov!4",
+      "employee_id": 5,
+      "role": "executor"
+    },
+    "novikova_e": {
+      "adUserId": "6",
+      "fullName": "Новикова Елена Владимировна",
+      "departmentId": 4,
+      "position": "Специалист",
+      "inSystem": true,
+      "password": "Novikova!5",
+      "employee_id": 6,
+      "role": "author"
+    },
+    "fedorov_a": {
+      "adUserId": "7",
+      "fullName": "Фёдоров Алексей Николаевич",
+      "departmentId": 1,
+      "position": "Инженер",
+      "inSystem": true,
+      "password": "Fedorov!6",
+      "employee_id": 7,
+      "role": "author"
+    },
+    "kuznetsov_m": {
+      "adUserId": "8",
+      "fullName": "Кузнецов Михаил Сергеевич",
+      "departmentId": 2,
+      "position": "Руководитель",
+      "inSystem": true,
+      "password": "Kuznetsov!7",
+      "employee_id": 8,
+      "role": "manager"
+    },
+    "smirnova_t": {
+      "adUserId": "1001",
+      "fullName": "Смирнова Татьяна Владимировна",
+      "departmentId": 1,
+      "position": "Инженер",
+      "inSystem": false
+    },
+    "titov_k": {
+      "adUserId": "1002",
+      "fullName": "Титов Кирилл Романович",
+      "departmentId": 1,
+      "position": "Специалист",
+      "inSystem": false
+    },
+    "morozov_s": {
+      "adUserId": "1003",
+      "fullName": "Морозов Сергей Игоревич",
+      "departmentId": 3,
+      "position": "Старший инженер",
+      "inSystem": false
+    }
+  },
+  "ROLE_LADDER": ["author", "executor", "manager", "top-manager"],
+  "ROLE_PERMISSIONS": {
+    "author": [],
+    "executor": [],
+    "manager": [
+      "canManageEmployees",
+      "canManageWorkTypes",
+      "canManagePrioritySettings",
+      "canViewReports"
+    ],
+    "top-manager": [
+      "canManageEmployees",
+      "canManageWorkTypes",
+      "canManagePrioritySettings",
+      "canViewReports"
+    ]
+  },
+  "PERMISSIONS": [
+    "canManageEmployees",
+    "canManageWorkTypes",
+    "canManagePrioritySettings",
+    "canViewReports"
+  ]
 }

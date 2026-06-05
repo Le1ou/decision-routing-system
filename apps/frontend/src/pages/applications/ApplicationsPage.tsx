@@ -3,13 +3,11 @@ import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
-import { attachments, departments, positions, workTypes, mockUsers } from "@mocks/mockData";
-import type { Complexity, Application, ApplicationAction, ApplicationStatus } from "@shared/model/domain";
+import { useReferenceData } from "@app/providers/ReferenceDataProvider";
+import type { Complexity, Application, ApplicationAction } from "@shared/model/domain";
 import { actionLabels, priorityLabels, statusLabels } from "@shared/model/labels";
 import {
   applyApplicationFilters,
-  filterApplicationsByRole,
-  getAvailableApplicationActions,
   sortApplications,
   type ApplicationFilter,
   type ApplicationSortKey,
@@ -19,11 +17,9 @@ import "./ApplicationsPage.css";
 
 export function ApplicationsPage() {
   const { currentUser } = useAuth();
-  const { applicationItems, updateApplication } = useApplicationsStore();
+  const { applicationItems, isLoading, error, performAction } = useApplicationsStore();
+  const { departments, positions, workTypes, employees } = useReferenceData();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [departmentSettings, setDepartmentSettings] = useState(() =>
-    Object.fromEntries(departments.map((department) => [department.id, department.delegatedToSameDepartment])),
-  );
   const [sortKey, setSortKey] = useState<ApplicationSortKey>("priority");
   const [filters, setFilters] = useState<ApplicationFilter>({});
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
@@ -46,13 +42,13 @@ export function ApplicationsPage() {
       return [];
     }
 
-    const getExecutorName = (executorId?: string) => mockUsers.find((user) => user.id === executorId)?.fullName ?? "";
+    const getExecutorName = (executorId?: string) => employees.find((user) => user.id === executorId)?.fullName ?? "";
 
     return sortApplications(
-      applyApplicationFilters(filterApplicationsByRole(applicationItems, currentUser), filters, currentUser, { getExecutorName }),
+      applyApplicationFilters(applicationItems, filters, currentUser, { getExecutorName }),
       sortKey,
     );
-  }, [currentUser, filters, applicationItems, sortKey]);
+  }, [currentUser, employees, filters, applicationItems, sortKey]);
 
   useEffect(() => {
     const applicationIdFromUrl = searchParams.get("application");
@@ -72,26 +68,33 @@ export function ApplicationsPage() {
     }
   }, [searchParams, selectedApplicationId, visibleApplications]);
 
+  useEffect(() => {
+    setNotice("");
+    setActionError("");
+    setPendingAction(null);
+  }, [selectedApplicationId]);
+
   const selectedApplication = visibleApplications.find((application) => application.id === selectedApplicationId) ?? visibleApplications[0];
-  const applicationActions = currentUser && selectedApplication ? getAvailableApplicationActions(selectedApplication, currentUser) : [];
-  const managerDepartment = currentUser?.role === "manager"
-    ? departments.find((department) => department.id === currentUser.departmentId)
-    : undefined;
+  const applicationActions = selectedApplication?.availableActions ?? [];
   const applicationDepartment = departments.find((department) => department.id === selectedApplication?.departmentId);
   const applicationWorkType = workTypes.find((workType) => workType.id === selectedApplication?.workTypeId);
-  const author = mockUsers.find((user) => user.id === selectedApplication?.authorId);
-  const executor = mockUsers.find((user) => user.id === selectedApplication?.executorId);
-  const previousExecutor = mockUsers.find((user) => user.id === selectedApplication?.previousExecutorId);
+  const applicationDelegation = selectedApplication?.delegation;
+  const author = selectedApplication?.author ?? employees.find((user) => user.id === selectedApplication?.authorId);
+  const executor = selectedApplication?.executor ?? employees.find((user) => user.id === selectedApplication?.executorId);
+  const previousExecutor = selectedApplication?.previousExecutor ?? employees.find((user) => user.id === selectedApplication?.previousExecutorId);
+  const delegatingExecutor = selectedApplication?.delegatedByEmployee
+    ?? employees.find((user) => user.id === applicationDelegation?.delegatedByEmployeeId)
+    ?? previousExecutor;
   const authorDepartment = departments.find((department) => department.id === author?.departmentId);
-  const authorPosition = positions.find((position) => position.id === author?.positionId);
+  const authorJobTitle = positions.find((position) => position.id === author?.positionId);
   const executorDepartment = departments.find((department) => department.id === executor?.departmentId);
-  const executorPosition = positions.find((position) => position.id === executor?.positionId);
-  const applicationAttachmentNames = [
-    ...attachments.filter((attachment) => attachment.applicationId === selectedApplication?.id).map((attachment) => attachment.name),
-    ...(selectedApplication?.attachmentNames ?? []),
-  ];
+  const executorJobTitle = positions.find((position) => position.id === executor?.positionId);
+  const delegatingExecutorDepartment = departments.find((department) => department.id === delegatingExecutor?.departmentId);
+  const delegatingExecutorJobTitle = positions.find((position) => position.id === delegatingExecutor?.positionId);
+  const applicationAttachments = selectedApplication?.attachments ?? [];
+  const applicationExtraNames = selectedApplication?.attachmentNames ?? [];
 
-  const executorsForDepartment = mockUsers.filter(
+  const executorsForDepartment = employees.filter(
     (user) => user.role === "executor" && user.departmentId === selectedApplication?.departmentId && user.isActive,
   );
   const actionsWithForm: ApplicationAction[] = [
@@ -103,6 +106,7 @@ export function ApplicationsPage() {
     "complete",
     "changeWorkType",
     "reject",
+    "cancel",
   ];
 
   const handleApplicationAction = (action: ApplicationAction) => {
@@ -125,34 +129,18 @@ export function ApplicationsPage() {
       return;
     }
 
-    applyAction(action);
+    void applyAction(action);
   };
 
-  const toggleDelegationConfirmation = () => {
-    if (!managerDepartment) {
-      return;
-    }
-
-    const nextValue = !departmentSettings[managerDepartment.id];
-
-    setDepartmentSettings((current) => ({ ...current, [managerDepartment.id]: nextValue }));
-    setNotice(
-      nextValue
-        ? `Для отдела «${managerDepartment.name}» включено подтверждение делегирования внутри отдела.`
-        : `Для отдела «${managerDepartment.name}» подтверждение делегирования внутри отдела отключено.`,
-    );
-  };
-
-  const applyAction = (action: ApplicationAction, payload: MockActionPayload = {}) => {
+  const applyAction = async (action: ApplicationAction, payload: ActionPayload = {}) => {
     if (!selectedApplication || !currentUser) {
       return;
     }
 
-    const updatedAt = new Date().toISOString();
     const currentComplexity = selectedApplication.assignedComplexity ?? applicationWorkType?.complexity ?? "medium";
 
     if (
-      (action === "delegateInternal" || action === "returnToNew") &&
+      action === "delegateInternal" &&
       payload.complexity &&
       complexityOrder[payload.complexity as Complexity] < complexityOrder[currentComplexity]
     ) {
@@ -167,17 +155,38 @@ export function ApplicationsPage() {
       return;
     }
 
-    updateApplication(selectedApplication.id, (application) => applyMockAction(application, action, currentUser.id, updatedAt, payload));
+    try {
+      await performAction(selectedApplication.id, {
+        action,
+        executorId: payload.executorId,
+        departmentId: payload.departmentId,
+        workTypeId: payload.workTypeId,
+        comment: payload.comment,
+        complexity: payload.complexity as Complexity | undefined,
+        resultText: payload.resultText,
+        description: payload.description,
+      });
 
-    setNotice(getMockActionNotice(action));
-    setActionError("");
-    setPendingAction(null);
+      setNotice(getActionNotice(action));
+      setActionError("");
+      setPendingAction(null);
+    } catch {
+      setActionError("Backend не применил действие. Проверьте обязательные поля и права пользователя.");
+    }
   };
 
   if (!currentUser) {
     return (
       <section className="applications-page applications-page--empty">
         <div className="applications-empty">Для текущей роли нет доступных заявок.</div>
+      </section>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <section className="applications-page applications-page--empty">
+        <div className="applications-empty">Загружаем заявки...</div>
       </section>
     );
   }
@@ -228,7 +237,7 @@ export function ApplicationsPage() {
               Назначенные на меня
             </label>
           ) : null}
-          {currentUser.role === "manager" ? (
+          {currentUser.role === "manager" || currentUser.role === "top-manager" ? (
             <label>
               <input
                 type="checkbox"
@@ -242,20 +251,6 @@ export function ApplicationsPage() {
           ) : null}
         </div>
 
-        {managerDepartment ? (
-          <section className="applications-manager-settings" aria-label="Настройки отдела">
-            <strong>Делегирование внутри отдела</strong>
-            <label>
-              <input
-                type="checkbox"
-                checked={Boolean(departmentSettings[managerDepartment.id])}
-                onChange={toggleDelegationConfirmation}
-              />
-              Подтверждать руководителем
-            </label>
-          </section>
-        ) : null}
-
         <div className="applications-list">
           {visibleApplications.length > 0 ? (
             visibleApplications.map((application) => (
@@ -266,10 +261,16 @@ export function ApplicationsPage() {
                 onClick={() => {
                   setSelectedApplicationId(application.id);
                   setSearchParams({ application: application.id });
+                  setNotice("");
+                  setPendingAction(null);
+                  setActionError("");
                 }}
               >
                 <strong>Заявка ID {application.id}</strong>
                 <span>{application.title}</span>
+                <small>
+                  {statusLabels[application.status]} · {priorityLabels[application.priority]}
+                </small>
               </button>
             ))
           ) : (
@@ -280,7 +281,7 @@ export function ApplicationsPage() {
 
       {selectedApplication ? (
       <article className="application-card">
-        {notice ? <div className="application-card__notice">{notice}</div> : null}
+        {notice || error ? <div className="application-card__notice">{notice || error}</div> : null}
         <button
           className="application-card__toggle-list"
           type="button"
@@ -303,6 +304,14 @@ export function ApplicationsPage() {
           <input value={selectedApplication.title} readOnly aria-label="Тема заявки" />
         </header>
 
+        <div className="application-card__actions application-card__actions--top">
+          {applicationActions.map((action) => (
+            <button type="button" key={action} onClick={() => handleApplicationAction(action)}>
+              {actionLabels[action]}
+            </button>
+          ))}
+        </div>
+
         <div className="application-card__main">
           <section className="application-card__workarea">
             <div className="application-card__section-header">
@@ -317,25 +326,53 @@ export function ApplicationsPage() {
             <label className="application-card__comment">
               <span>Комментарий исполнителя:</span>
               <textarea
-                value={selectedApplication.executorComment ?? selectedApplication.resultText ?? ""}
+                value={selectedApplication.executorComment ?? ""}
                 placeholder="Комментарий появится после назначения или выполнения работ"
                 readOnly
                 aria-label="Комментарий исполнителя"
               />
             </label>
-            <div className="application-card__actions">
-              {applicationActions.map((action) => (
-                <button type="button" key={action} onClick={() => handleApplicationAction(action)}>
-                  {actionLabels[action]}
-                </button>
-              ))}
-            </div>
+            {selectedApplication.managerComment ? (
+              <label className="application-card__comment">
+                <span>Комментарий руководителя:</span>
+                <textarea
+                  value={selectedApplication.managerComment}
+                  readOnly
+                  aria-label="Комментарий руководителя"
+                />
+              </label>
+            ) : null}
+            {selectedApplication.status === "completed" ? (
+              <label className="application-card__comment">
+                <span>Результат работы:</span>
+                <textarea
+                  value={selectedApplication.resultText ?? ""}
+                  placeholder="Результат появится после завершения заявки"
+                  readOnly
+                  aria-label="Результат работы"
+                />
+              </label>
+            ) : null}
             <section className="application-card__attachments">
               <h2>Вложения</h2>
-              {applicationAttachmentNames.length > 0 ? (
+              {applicationAttachments.length > 0 ? (
                 <ul>
-                  {applicationAttachmentNames.map((name) => (
-                    <li key={name}>{name}</li>
+                  {applicationAttachments.map((attachment) => (
+                    <li key={attachment.id}>
+                      {attachment.url ? (
+                        <a href={attachment.url} target="_blank" rel="noopener noreferrer">
+                          {attachment.name}
+                        </a>
+                      ) : (
+                        attachment.name
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : applicationExtraNames.length > 0 ? (
+                <ul>
+                  {applicationExtraNames.map((name, index) => (
+                    <li key={`${selectedApplication.id}-${name}-${index}`}>{name}</li>
                   ))}
                 </ul>
               ) : (
@@ -360,21 +397,37 @@ export function ApplicationsPage() {
                 Вид работ:
                 <input value={applicationWorkType?.name ?? "-"} readOnly />
               </label>
+              <label>
+                Сложность:
+                <input value={complexityLabels[selectedApplication.assignedComplexity ?? applicationWorkType?.complexity ?? "medium"]} readOnly />
+              </label>
             </div>
 
             <section className="application-info-box">
               <h2>Автор заявки</h2>
               <p><b>ФИО:</b> {author?.fullName ?? "-"}</p>
               <p><b>Отдел:</b> {authorDepartment?.name ?? "-"}</p>
-              <p><b>Должность:</b> {authorPosition?.name ?? "-"}</p>
+              <p><b>Должность:</b> {authorJobTitle?.name ?? "-"}</p>
             </section>
 
             <section className="application-info-box">
               <h2>Исполнитель</h2>
               <p><b>ФИО:</b> {executor?.fullName ?? "-"}</p>
               <p><b>Отдел:</b> {executorDepartment?.name ?? "-"}</p>
-              <p><b>Должность:</b> {executorPosition?.name ?? "-"}</p>
+              <p><b>Должность:</b> {executorJobTitle?.name ?? "-"}</p>
             </section>
+
+            {selectedApplication.delegatedFromDepartmentId || applicationDelegation ? (
+              <section className="application-info-box">
+                <h2>Делегирование</h2>
+                <p><b>Из отдела:</b> {departments.find((department) => department.id === selectedApplication.delegatedFromDepartmentId)?.name ?? "-"}</p>
+                <p><b>В отдел:</b> {departments.find((department) => department.id === selectedApplication.delegatedToDepartmentId)?.name ?? "-"}</p>
+                <p><b>Комментарий:</b> {applicationDelegation?.comment ?? selectedApplication.executorComment ?? "-"}</p>
+                <p><b>Кто делегировал:</b> {delegatingExecutor?.fullName ?? "-"}</p>
+                <p><b>Отдел:</b> {delegatingExecutorDepartment?.name ?? "-"}</p>
+                <p><b>Должность:</b> {delegatingExecutorJobTitle?.name ?? "-"}</p>
+              </section>
+            ) : null}
 
             <section className="application-info-box application-info-box--dates">
               <h2>Информация о заявке</h2>
@@ -398,7 +451,7 @@ export function ApplicationsPage() {
             className="application-modal__panel"
             onSubmit={(event) => {
               event.preventDefault();
-              applyAction(pendingAction, actionForm);
+              void applyAction(pendingAction, actionForm);
             }}
           >
             <header>
@@ -442,7 +495,7 @@ export function ApplicationsPage() {
               </label>
             ) : null}
 
-            {pendingAction === "delegateInternal" || pendingAction === "returnToNew" ? (
+            {pendingAction === "delegateInternal" ? (
               <section className="application-modal__complexity">
                 <div>
                   <span>Текущая сложность</span>
@@ -464,6 +517,25 @@ export function ApplicationsPage() {
                   </select>
                 </label>
               </section>
+            ) : null}
+
+            {pendingAction === "delegateInternal" ? (
+              <label>
+                Новый вид работ, если требуется
+                <select
+                  value={actionForm.workTypeId}
+                  onChange={(event) => {
+                    setActionForm((current) => ({ ...current, workTypeId: event.target.value }));
+                    setActionError("");
+                  }}
+                >
+                  {workTypes
+                    .filter((workType) => workType.departmentId === selectedApplication.departmentId)
+                    .map((workType) => (
+                      <option value={workType.id} key={workType.id}>{workType.name}</option>
+                    ))}
+                </select>
+              </label>
             ) : null}
 
             {pendingAction === "editDescription" ? (
@@ -523,7 +595,7 @@ export function ApplicationsPage() {
                   setActionForm((current) => ({ ...current, comment: event.target.value }));
                   setActionError("");
                 }}
-                placeholder="Добавьте пояснение для истории заявки"
+                placeholder="Необязательное пояснение для истории заявки"
               />
             </label>
             ) : null}
@@ -541,7 +613,7 @@ export function ApplicationsPage() {
   );
 }
 
-type MockActionPayload = {
+type ActionPayload = {
   comment?: string;
   complexity?: string;
   description?: string;
@@ -567,7 +639,7 @@ const complexityLabels: Record<Complexity, string> = {
 
 function getActionValidationError(
   action: ApplicationAction,
-  payload: MockActionPayload,
+  payload: ActionPayload,
   application: Application,
 ) {
   if (action === "assignExecutor" && !payload.executorId) {
@@ -583,17 +655,10 @@ function getActionValidationError(
       return "Выберите другой отдел.";
     }
 
-    if (!payload.comment?.trim()) {
-      return "Добавьте комментарий к делегированию.";
-    }
   }
 
-  if ((action === "delegateInternal" || action === "returnToNew") && !payload.comment?.trim()) {
-    return "Добавьте комментарий для перераспределения заявки.";
-  }
-
-  if (action === "reject" && !payload.comment?.trim()) {
-    return "Укажите причину отклонения заявки.";
+  if (action === "delegateInternal" && !payload.complexity) {
+    return "Выберите новую сложность.";
   }
 
   if (action === "complete" && !payload.resultText?.trim()) {
@@ -625,150 +690,7 @@ function getActionValidationError(
   return "";
 }
 
-function applyMockAction(
-  application: Application,
-  action: ApplicationAction,
-  userId: string,
-  updatedAt: string,
-  payload: MockActionPayload = {},
-): Application {
-  const statusByAction: Partial<Record<ApplicationAction, ApplicationStatus>> = {
-    startWork: "inProgress",
-    reject: "rejected",
-    complete: "completed",
-    delegateInternal: "new",
-    delegateExternal: "delegated",
-    returnToNew: "new",
-  };
-
-  if (action === "assignExecutor") {
-    const executor =
-      mockUsers.find((user) => user.id === payload.executorId) ??
-      mockUsers.find((user) => user.role === "executor" && user.departmentId === application.departmentId && user.isActive);
-
-    return {
-      ...application,
-      status: "assigned",
-      executorId: executor?.id ?? application.executorId,
-      assignedAt: updatedAt,
-      isUnfinished: false,
-      updatedAt,
-      managerComment: payload.comment || "Исполнитель назначен вручную в mock-режиме.",
-    };
-  }
-
-  if (action === "editDescription") {
-    return {
-      ...application,
-      updatedAt,
-      description: payload.description?.trim() || application.description,
-    };
-  }
-
-  if (action === "complete") {
-    return {
-      ...application,
-      status: "completed",
-      updatedAt,
-      finishedAt: updatedAt,
-      closedById: userId,
-      resultText: payload.resultText?.trim() ?? application.resultText,
-    };
-  }
-
-  if (action === "startWork") {
-    return {
-      ...application,
-      status: "inProgress",
-      startedAt: updatedAt,
-      updatedAt,
-    };
-  }
-
-  if (action === "reject") {
-    return {
-      ...application,
-      status: "rejected",
-      updatedAt,
-      managerComment: payload.comment?.trim() ?? application.managerComment,
-    };
-  }
-
-  if (action === "delegateInternal" || action === "returnToNew") {
-    return {
-      ...application,
-      status: "new",
-      previousExecutorId: application.executorId ?? application.previousExecutorId,
-      executorId: undefined,
-      assignedAt: undefined,
-      startedAt: undefined,
-      isUnfinished: true,
-      updatedAt,
-      assignedComplexity: payload.complexity as Complexity | undefined,
-      executorComment: payload.comment || "Заявка возвращена для переназначения в mock-режиме.",
-    };
-  }
-
-  if (action === "delegateExternal") {
-    return {
-      ...application,
-      status: "delegated",
-      delegationId: application.delegationId ?? `delegation-${application.id}`,
-      previousExecutorId: application.executorId ?? application.previousExecutorId,
-      executorId: undefined,
-      assignedAt: undefined,
-      startedAt: undefined,
-      departmentId: payload.departmentId ?? application.departmentId,
-      delegatedFromDepartmentId: application.departmentId,
-      delegatedToDepartmentId: payload.departmentId ?? application.departmentId,
-      updatedAt,
-      executorComment: payload.comment || "Запрошено делегирование в другой отдел.",
-    };
-  }
-
-  if (action === "confirmExternalDelegation") {
-    return {
-      ...application,
-      status: "new",
-      departmentId: application.delegatedToDepartmentId ?? application.departmentId,
-      executorId: undefined,
-      assignedAt: undefined,
-      startedAt: undefined,
-      updatedAt,
-    };
-  }
-
-  if (action === "declineExternalDelegation") {
-    return {
-      ...application,
-      status: "new",
-      departmentId: application.delegatedFromDepartmentId ?? application.departmentId,
-      executorId: undefined,
-      assignedAt: undefined,
-      startedAt: undefined,
-      updatedAt,
-    };
-  }
-
-  if (action === "changeWorkType") {
-    const nextWorkType = workTypes.find((workType) => workType.id === payload.workTypeId);
-
-    return {
-      ...application,
-      workTypeId: nextWorkType?.id ?? application.workTypeId,
-      assignedComplexity: nextWorkType?.complexity ?? application.assignedComplexity,
-      updatedAt,
-    };
-  }
-
-  return {
-    ...application,
-    status: statusByAction[action] ?? application.status,
-    updatedAt,
-  };
-}
-
-function getMockActionNotice(action: ApplicationAction) {
+function getActionNotice(action: ApplicationAction) {
   if (action === "assignExecutor") {
     return "Исполнитель назначен. Заявка перешла в статус «Назначен исполнитель».";
   }
@@ -785,6 +707,14 @@ function getMockActionNotice(action: ApplicationAction) {
     return "Заявка отклонена.";
   }
 
+  if (action === "cancel") {
+    return "Заявка отменена.";
+  }
+
+  if (action === "archive") {
+    return "Заявка перемещена в архив и скрыта из списка.";
+  }
+
   if (action === "delegateExternal") {
     return "Заявка отправлена на межотдельное делегирование.";
   }
@@ -797,7 +727,7 @@ function getMockActionNotice(action: ApplicationAction) {
     return "Решение по делегированию зафиксировано.";
   }
 
-  return "Действие применено в mock-режиме.";
+  return "Действие применено.";
 }
 
 function formatDateTime(value?: string) {

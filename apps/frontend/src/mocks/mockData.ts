@@ -1,4 +1,4 @@
-import type { Attachment, Delegation, Department, Notification, Position, Application, User, WorkType } from "@shared/model/domain";
+import type { Attachment, Delegation, Department, Notification, Grade, JobTitle, Application, User, WorkType } from "@shared/model/domain";
 
 export const departments: Department[] = [
   { id: "it", name: "IT-отдел", value: 0.75, delegatedToSameDepartment: true, employeeApplicationDelayMinutes: 10, deadlineNotificationRatio: 0.25 },
@@ -10,10 +10,17 @@ export const departments: Department[] = [
   { id: "supply", name: "Отдел снабжения", value: 0.64, delegatedToSameDepartment: false, employeeApplicationDelayMinutes: 10, deadlineNotificationRatio: 0.25 },
 ];
 
-export const positions: Position[] = [
+export const jobTitles: JobTitle[] = [
   { id: "engineer", name: "Инженер", isTop: false },
   { id: "lead-engineer", name: "Ведущий инженер", isTop: false },
   { id: "department-head", name: "Руководитель отдела", isTop: true },
+];
+
+export const grades: Grade[] = [
+  { id: "junior", name: "Junior" },
+  { id: "middle", name: "Middle" },
+  { id: "senior", name: "Senior" },
+  { id: "lead", name: "Lead" },
 ];
 
 export const mockUsers: User[] = [
@@ -21,53 +28,89 @@ export const mockUsers: User[] = [
     id: "user-author",
     login: "author",
     fullName: "Кузнецова Анна Сергеевна",
+    roles: ["author"],
     role: "author",
     departmentId: "production",
+    postName: "Инженер",
     positionId: "engineer",
+    jobTitleId: "engineer",
     isActive: true,
   },
   {
     id: "user-executor",
     login: "executor",
     fullName: "Смирнов Павел Олегович",
+    roles: ["executor"],
     role: "executor",
     departmentId: "it",
+    postName: "Ведущий инженер",
     positionId: "lead-engineer",
+    jobTitleId: "lead-engineer",
     isActive: true,
   },
   {
     id: "user-manager",
     login: "manager",
     fullName: "Орлова Мария Викторовна",
+    roles: ["author", "executor", "manager"],
     role: "manager",
     departmentId: "it",
+    postName: "Руководитель отдела",
     positionId: "department-head",
+    jobTitleId: "department-head",
+    isActive: true,
+  },
+  {
+    id: "user-top-manager",
+    login: "top",
+    fullName: "Васильев Сергей Петрович",
+    roles: ["author", "executor", "manager", "top-manager"],
+    role: "top-manager",
+    departmentId: "production",
+    postName: "Руководитель отдела",
+    positionId: "department-head",
+    jobTitleId: "department-head",
     isActive: true,
   },
   {
     id: "user-executor-2",
     login: "executor2",
     fullName: "Морозов Дмитрий Андреевич",
+    roles: ["executor"],
     role: "executor",
     departmentId: "it",
+    postName: "Инженер",
     positionId: "engineer",
+    jobTitleId: "engineer",
     isActive: false,
+  },
+  {
+    id: "user-supply-executor",
+    login: "supply_executor",
+    fullName: "Андреев Игорь Николаевич",
+    roles: ["executor"],
+    role: "executor",
+    departmentId: "supply",
+    postName: "Ведущий инженер",
+    positionId: "lead-engineer",
+    jobTitleId: "lead-engineer",
+    isActive: true,
   },
 ];
 
 export const workTypes: WorkType[] = [
-  { id: "it-hardware-replace", name: "Замена оборудования", departmentId: "it", complexity: "medium" },
-  { id: "it-server-setup", name: "Настройка сервера", departmentId: "it", complexity: "hard" },
-  { id: "it-other", name: "Прочее", departmentId: "it", complexity: "medium" },
-  { id: "oge-wiring", name: "Ремонт проводки", departmentId: "oge", complexity: "hard" },
-  { id: "oge-other", name: "Прочее", departmentId: "oge", complexity: "medium" },
-  { id: "production-repair", name: "Заявка на ремонт оборудования", departmentId: "production", complexity: "medium" },
-  { id: "production-other", name: "Прочее", departmentId: "production", complexity: "medium" },
-  { id: "okk-other", name: "Прочее", departmentId: "okk", complexity: "medium" },
-  { id: "ogm-other", name: "Прочее", departmentId: "ogm", complexity: "medium" },
-  { id: "warehouse-inventory", name: "Инвентаризация", departmentId: "warehouse", complexity: "easy" },
-  { id: "warehouse-other", name: "Прочее", departmentId: "warehouse", complexity: "medium" },
-  { id: "supply-other", name: "Прочее", departmentId: "supply", complexity: "medium" },
+  { id: "it-hardware-replace", name: "Замена оборудования", departmentId: "it", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "it-server-setup", name: "Настройка сервера", departmentId: "it", complexity: "hard", allowedGradeIds: ["senior", "lead"] },
+  { id: "it-other", name: "Прочее", departmentId: "it", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "oge-wiring", name: "Ремонт проводки", departmentId: "oge", complexity: "hard", allowedGradeIds: ["senior", "lead"] },
+  { id: "oge-other", name: "Прочее", departmentId: "oge", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "production-repair", name: "Заявка на ремонт оборудования", departmentId: "production", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "production-other", name: "Прочее", departmentId: "production", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "okk-other", name: "Прочее", departmentId: "okk", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "ogm-other", name: "Прочее", departmentId: "ogm", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "warehouse-inventory", name: "Инвентаризация", departmentId: "warehouse", complexity: "easy", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "warehouse-other", name: "Прочее", departmentId: "warehouse", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "supply-other", name: "Прочее", departmentId: "supply", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
 ];
 
 export const applications: Application[] = [
@@ -130,6 +173,7 @@ export const applications: Application[] = [
     workTypeId: "it-server-setup",
     authorId: "user-author",
     delegationId: "delegation-1",
+    previousExecutorId: "user-supply-executor",
     delegatedFromDepartmentId: "supply",
     delegatedToDepartmentId: "it",
     isUnfinished: false,
@@ -148,6 +192,7 @@ export const applications: Application[] = [
     authorId: "user-manager",
     executorId: "user-executor",
     closedById: "user-executor",
+    managerComment: "Проверить, что учетная запись отключена во всех внутренних системах.",
     resultText: "Доступы отключены, учетная запись заблокирована.",
     isUnfinished: false,
     createdAt: "2026-05-19T10:00:00.000Z",
@@ -157,6 +202,21 @@ export const applications: Application[] = [
     startedAt: "2026-05-19T10:25:00.000Z",
     finishedAt: "2026-05-19T13:30:00.000Z",
   },
+  {
+    id: "1029",
+    title: "Повторная заявка на доступ",
+    description: "Заявка продублировала уже созданный запрос.",
+    status: "rejected",
+    priority: "low",
+    departmentId: "it",
+    workTypeId: "it-other",
+    authorId: "user-author",
+    managerComment: "Отклонено как дубликат заявки 1025.",
+    isUnfinished: false,
+    createdAt: "2026-05-26T08:10:00.000Z",
+    deadlineAt: "2026-05-29T18:00:00.000Z",
+    updatedAt: "2026-05-26T08:20:00.000Z",
+  },
 ];
 
 export const delegations: Delegation[] = [
@@ -164,6 +224,7 @@ export const delegations: Delegation[] = [
     id: "delegation-1",
     applicationId: "1027",
     delegatedByDepartmentId: "supply",
+    delegatedByEmployeeId: "user-supply-executor",
     delegatedFromDepartmentId: "supply",
     delegatedToDepartmentId: "it",
     comment: "Нужно проверить техническую совместимость позиции.",

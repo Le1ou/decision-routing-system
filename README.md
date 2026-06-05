@@ -11,7 +11,7 @@
 
 ## Статус
 
-Инициализация проекта
+Frontend интегрирован с локальным backend API. Docker Compose поднимает PostgreSQL, MinIO, backend и frontend для локальной разработки и проверки сценариев.
 
 ## Требования
 
@@ -19,61 +19,122 @@
 - Docker Compose
 
 Проверка установки:
+```bash
 docker --version
 docker compose version
+```
 
 ## Переменные среды
 
 Создайте файл `.env` на основе шаблона:
-cp.env.example.env
+```bash
+cp .env.example .env
+```
 
 Основные переменные:
-DB_HOST=localhost
+```env
+DB_HOST=db
 DB_PORT=5432
 DB_USER=postgres
 DB_PASSWORD=postgres
 DB_NAME=app_db
 BACKEND_PORT=3000
 VITE_API_URL=http://localhost:3000
+```
 
-## Запустить инфраструктуру (DB + Backend)
+Для backend, запущенного локально вне Docker, используйте `DB_HOST=localhost`.
 
-docker compose -f infra/compose/docker-compose.local.yml up --build
-или
-docker compose -f infra/compose/docker-compose.local.yml up -d
+### Запуск на удалённом сервере
+
+Для сервера укажите в `.env` адреса, доступные из браузера пользователя:
+
+```env
+VITE_API_URL=http://<SERVER_IP_OR_DOMAIN>:3000
+S3_PUBLIC_ENDPOINT_URL=http://<SERVER_IP_OR_DOMAIN>:9000
+```
+
+Например:
+
+```env
+VITE_API_URL=http://132.243.230.84:3000
+S3_PUBLIC_ENDPOINT_URL=http://132.243.230.84:9000
+```
+
+`localhost` в браузере означает компьютер пользователя, а не сервер. Frontend
+также автоматически заменяет `localhost` из `VITE_API_URL` на hostname страницы
+при удалённом открытии, но явная серверная конфигурация предпочтительнее.
+
+После изменения `.env` пересоздайте контейнеры:
+
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d --build
+```
+
+## Запустить инфраструктуру (DB + Backend + Frontend)
+
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d --build
+```
+
+Для запуска в foreground:
+
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml up --build
+```
 
 ## После запуска:
 
-Frontend: http://localhost:5173
-Backend: http://localhost:3000
-PostgreSQL: localhost:5432
+- Frontend: http://localhost:5173
+- Backend: http://localhost:3000
+- Swagger: http://localhost:3000/docs#/
+- PostgreSQL: localhost:5432
+- MinIO console: http://localhost:9001
+
+## Тестовый вход
+
+```text
+Логин: orlova_m
+Пароль: Manager!1
+```
 
 ## Проверить backend
 
-http://localhost:3000/health
+```bash
+curl http://localhost:3000/health
+```
 
 Ожидаемый ответ: 
+```json
 {"status": "ok"}
+```
 
 ## Остановка контейнеров:
 
-docker compose -f infra/compose/docker-compose.local.yml down
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml down
+```
 
 ## Удаление вместе с данными:
 
-docker compose -f infra/compose/docker-compose.local.yml down -v
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml down -v
+```
 
-## Frontend (локальный запуск)
+## Frontend (локальный запуск вне Docker)
 
-Frontend запускается отдельно:
+Если frontend нужно запустить без Docker:
 
+```bash
 cd apps/frontend
 npm install
 npm run dev
+```
 
 URL backend для frontend:
 
+```env
 VITE_API_URL=http://localhost:3000
+```
 
 ## Подключение к базе данных
 
@@ -140,9 +201,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 Пример содержимого requirements.txt:
-fastapi==0.110.0
-uvicorn==0.29.0
-psycopg2-binary==2.9.9
+fastapi
+uvicorn[standard]
+psycopg[binary]
+psycopg-pool
+ldap3
+pydantic
 
 ## CI/CD
 
