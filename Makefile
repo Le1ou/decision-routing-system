@@ -1,7 +1,3 @@
-<<<<<<< Updated upstream
-up:
-	docker compose -f infra/compose/docker-compose.local.yml up -d
-=======
 .PHONY: up up-fast build down restart reseed logs logs-backend \
 backend-logs frontend-logs ps bash-back bash-front \
 seed test clean rebuild pull
@@ -16,7 +12,6 @@ up:
 # Start without rebuild
 up-fast:
 	$(COMPOSE) up -d
->>>>>>> Stashed changes
 
 # Explicit rebuild command
 build:
@@ -24,9 +19,6 @@ build:
 
 # Stop containers
 down:
-<<<<<<< Updated upstream
-	docker compose -f infra/compose/docker-compose.local.yml down
-=======
 	$(COMPOSE) down
 
 # Restart stack
@@ -37,13 +29,9 @@ restart:
 # Recreate backend (reseeds DB)
 reseed:
 	$(COMPOSE) restart backend
->>>>>>> Stashed changes
 
 # All logs
 logs:
-<<<<<<< Updated upstream
-	docker compose -f infra/compose/docker-compose.local.yml logs -f
-=======
 	$(COMPOSE) logs -f
 
 # Backend logs
@@ -86,4 +74,3 @@ rebuild:
 # Pull latest changes
 pull:
 	git pull origin develop
->>>>>>> Stashed changes
