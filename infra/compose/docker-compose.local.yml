@@ -125,6 +125,12 @@ services:
       - ../../apps/frontend:/app
       - /app/node_modules
 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   minio_data:

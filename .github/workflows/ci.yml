@@ -28,6 +28,10 @@ jobs:
         run: |
           PYTHONPYCACHEPREFIX=/tmp/pycache python -m compileall apps/backend/src
 
+      - name: Run backend tests
+        run: |
+          pytest apps/backend/tests
+
       # Node / Frontend
       - name: Setup Node
         uses: actions/setup-node@v4
