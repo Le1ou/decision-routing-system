@@ -23,7 +23,6 @@ jobs:
       - name: Install backend dependencies
         run: |
           pip install -r apps/backend/requirements.txt
-          pip install pytest
 
       - name: Check backend syntax
         run: |
