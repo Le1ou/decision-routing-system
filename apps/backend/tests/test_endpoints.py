@@ -28,7 +28,7 @@ import requests
 # Use 127.0.0.1 rather than "localhost": on Windows, resolving "localhost"
 # makes the client try IPv6 (::1) first and stall ~2s per request before
 # falling back to the IPv4-bound server. Override with the BASE_URL env var.
-BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000")
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:3000")
 
 # ── Auth credentials (username, password) ────────────────────────────────────
 
