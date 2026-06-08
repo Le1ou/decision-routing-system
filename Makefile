@@ -1,26 +1,76 @@
-# --env-file .env: the repo-root .env (Compose otherwise looks next to the
-# compose file, in infra/compose/). Run `make` from the repo root.
-COMPOSE = docker compose --env-file .env -f infra/compose/docker-compose.local.yml
+.PHONY: up up-fast build down restart reseed logs logs-backend \
+backend-logs frontend-logs ps bash-back bash-front \
+seed test clean rebuild pull
 
-# Build images (picks up backend/seed code changes) and start the whole stack,
-# including MinIO. Reads .env from the repo root.
+# Repo root .env
+COMPOSE = docker compose -f infra/compose/docker-compose.local.yml
+
+# Build and start all containers
 up:
 	$(COMPOSE) up -d --build
 
-# Start without rebuilding (faster; use when no code changed).
+# Start without rebuild
 up-fast:
 	$(COMPOSE) up -d
 
+# Explicit rebuild command
+build:
+	$(COMPOSE) up -d --build
+
+# Stop containers
 down:
 	$(COMPOSE) down
 
-# Re-seed the database (backend wipes + reseeds on every start).
+# Restart stack
+restart:
+	$(COMPOSE) down
+	$(COMPOSE) up -d
+
+# Recreate backend (reseeds DB)
 reseed:
 	$(COMPOSE) restart backend
 
+# All logs
 logs:
 	$(COMPOSE) logs -f
 
-# Just the backend log (handy to see the [seed] summary).
+# Backend logs
 logs-backend:
 	$(COMPOSE) logs -f backend
+
+# Frontend logs
+frontend-logs:
+	$(COMPOSE) logs -f frontend
+
+# Containers status
+ps:
+	$(COMPOSE) ps
+
+# Open shell in backend
+bash-back:
+	$(COMPOSE) exec backend bash
+
+# Open shell in frontend
+bash-front:
+	$(COMPOSE) exec frontend sh
+
+# Run backend seed manually
+seed:
+	$(COMPOSE) exec backend python -m src.seed
+
+# Run tests
+test:
+	$(COMPOSE) exec backend pytest
+
+# Full cleanup
+clean:
+	$(COMPOSE) down -v --remove-orphans
+
+# Full rebuild
+rebuild:
+	$(COMPOSE) down
+	$(COMPOSE) up -d --build
+
+# Pull latest changes
+pull:
+	git pull origin develop

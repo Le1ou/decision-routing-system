@@ -545,6 +545,8 @@ class ApplicationDetailOut(ApplicationListItemOut):
     workType: Optional[dict]      = Field(default=None)
     author: Optional[dict]        = Field(default=None)
     executor: Optional[dict]      = Field(default=None)
+    previousExecutor: Optional[dict] = Field(default=None)
+    delegatedByEmployee: Optional[dict] = Field(default=None)
     department: Optional[dict]    = Field(default=None)
 
     @field_validator("archivedAt", mode="before")
@@ -1348,14 +1350,20 @@ def get_application(
                     if wt:
                         work_type = WorkTypeOut.model_validate(wt).model_dump()
 
-                # Nested author / executor (contract `User`) and department.
+                # Nested employees (contract `User`) and department.
                 login_by_emp = {
                     int(c["employee_id"]): uname
                     for uname, c in _ad_directory().items()
                     if c.get("employee_id") is not None
                 }
-                author_user   = _user_dict(cur, row.get("author_id"), login_by_emp)
+                author_user = _user_dict(cur, row.get("author_id"), login_by_emp)
                 executor_user = _user_dict(cur, row.get("executor_id"), login_by_emp)
+                previous_executor_user = _user_dict(cur, row.get("previous_executor_id"), login_by_emp)
+                delegated_by_employee_user = _user_dict(
+                    cur,
+                    d.get("delegated_by_employee") if row.get("delegated_id") and d else None,
+                    login_by_emp,
+                )
 
                 department = None
                 if row.get("department_id") is not None:
@@ -1402,6 +1410,8 @@ def get_application(
         row["workType"]   = work_type
         row["author"]     = author_user
         row["executor"]   = executor_user
+        row["previousExecutor"] = previous_executor_user
+        row["delegatedByEmployee"] = delegated_by_employee_user
         row["department"] = department
 
         detail = ApplicationDetailOut.model_validate(row)
@@ -2184,7 +2194,7 @@ def get_ad_users(
 
 
 @app.get("/work-types", tags=["Directories"], summary="Получить виды работ",
-         description="Обычный руководитель видит виды работ только своего отдела. top-manager видит все отделы и может фильтровать по departmentId.",
+         description="Все авторизованные пользователи видят виды работ всех отделов и могут фильтровать их по departmentId.",
          response_model=WorkTypeListResponse)
 def get_work_types_all(
     userData=Depends(authObj.authenticate),
@@ -2192,15 +2202,6 @@ def get_work_types_all(
 ):
     try:
         db = get_db_user(userData)
-        login = userData[0]
-
-        # Department scope: non-top-managers are limited to their own department.
-        effective_department_id = departmentId
-        if not _is_top_manager(login):
-            own = _user_department_id(db, login)
-            if own is not None:
-                effective_department_id = str(own)
-
         query = """
             SELECT
                 t.type_of_works_id,
@@ -2213,9 +2214,9 @@ def get_work_types_all(
                    ON tg.type_of_works_id = t.type_of_works_id
         """
         params = []
-        if effective_department_id:
+        if departmentId:
             query += " WHERE t.department_id = %s"
-            params.append(int(effective_department_id))
+            params.append(int(departmentId))
         query += " GROUP BY t.type_of_works_id, t.name, t.department_id, t.complexity_value ORDER BY t.type_of_works_id"
 
         with db.pool.connection() as conn:

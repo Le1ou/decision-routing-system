@@ -81,8 +81,10 @@ export function ApplicationsPage() {
   const applicationDelegation = selectedApplication?.delegation;
   const author = selectedApplication?.author ?? employees.find((user) => user.id === selectedApplication?.authorId);
   const executor = selectedApplication?.executor ?? employees.find((user) => user.id === selectedApplication?.executorId);
-  const previousExecutor = employees.find((user) => user.id === selectedApplication?.previousExecutorId);
-  const delegatingExecutor = employees.find((user) => user.id === applicationDelegation?.delegatedByEmployeeId) ?? previousExecutor;
+  const previousExecutor = selectedApplication?.previousExecutor ?? employees.find((user) => user.id === selectedApplication?.previousExecutorId);
+  const delegatingExecutor = selectedApplication?.delegatedByEmployee
+    ?? employees.find((user) => user.id === applicationDelegation?.delegatedByEmployeeId)
+    ?? previousExecutor;
   const authorDepartment = departments.find((department) => department.id === author?.departmentId);
   const authorJobTitle = positions.find((position) => position.id === author?.positionId);
   const executorDepartment = departments.find((department) => department.id === executor?.departmentId);
@@ -135,11 +137,10 @@ export function ApplicationsPage() {
       return;
     }
 
-    const updatedAt = new Date().toISOString();
     const currentComplexity = selectedApplication.assignedComplexity ?? applicationWorkType?.complexity ?? "medium";
 
     if (
-      (action === "delegateInternal" || action === "returnToNew") &&
+      action === "delegateInternal" &&
       payload.complexity &&
       complexityOrder[payload.complexity as Complexity] < complexityOrder[currentComplexity]
     ) {
@@ -494,7 +495,7 @@ export function ApplicationsPage() {
               </label>
             ) : null}
 
-            {pendingAction === "delegateInternal" || pendingAction === "returnToNew" ? (
+            {pendingAction === "delegateInternal" ? (
               <section className="application-modal__complexity">
                 <div>
                   <span>Текущая сложность</span>
@@ -516,6 +517,25 @@ export function ApplicationsPage() {
                   </select>
                 </label>
               </section>
+            ) : null}
+
+            {pendingAction === "delegateInternal" ? (
+              <label>
+                Новый вид работ, если требуется
+                <select
+                  value={actionForm.workTypeId}
+                  onChange={(event) => {
+                    setActionForm((current) => ({ ...current, workTypeId: event.target.value }));
+                    setActionError("");
+                  }}
+                >
+                  {workTypes
+                    .filter((workType) => workType.departmentId === selectedApplication.departmentId)
+                    .map((workType) => (
+                      <option value={workType.id} key={workType.id}>{workType.name}</option>
+                    ))}
+                </select>
+              </label>
             ) : null}
 
             {pendingAction === "editDescription" ? (
@@ -575,7 +595,7 @@ export function ApplicationsPage() {
                   setActionForm((current) => ({ ...current, comment: event.target.value }));
                   setActionError("");
                 }}
-                placeholder="Добавьте пояснение для истории заявки"
+                placeholder="Необязательное пояснение для истории заявки"
               />
             </label>
             ) : null}
@@ -635,21 +655,10 @@ function getActionValidationError(
       return "Выберите другой отдел.";
     }
 
-    if (!payload.comment?.trim()) {
-      return "Добавьте комментарий к делегированию.";
-    }
   }
 
-  if ((action === "delegateInternal" || action === "returnToNew") && !payload.comment?.trim()) {
-    return "Добавьте комментарий для перераспределения заявки.";
-  }
-
-  if (action === "reject" && !payload.comment?.trim()) {
-    return "Укажите причину отклонения заявки.";
-  }
-
-  if (action === "cancel" && !payload.comment?.trim()) {
-    return "Укажите причину отмены заявки.";
+  if (action === "delegateInternal" && !payload.complexity) {
+    return "Выберите новую сложность.";
   }
 
   if (action === "complete" && !payload.resultText?.trim()) {

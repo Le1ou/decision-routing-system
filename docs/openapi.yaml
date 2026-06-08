@@ -561,8 +561,8 @@ paths:
       tags:
       - Directories
       summary: Получить виды работ
-      description: Обычный руководитель видит виды работ только своего отдела. top-manager
-        видит все отделы и может фильтровать по departmentId.
+      description: Все авторизованные пользователи видят виды работ всех отделов и
+        могут фильтровать их по departmentId.
       operationId: get_work_types_all_work_types_get
       security:
       - HTTPBasic: []
@@ -1158,6 +1158,18 @@ components:
             type: object
           - type: 'null'
           title: Executor
+        previousExecutor:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Previousexecutor
+        delegatedByEmployee:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Delegatedbyemployee
         department:
           anyOf:
           - additionalProperties: true

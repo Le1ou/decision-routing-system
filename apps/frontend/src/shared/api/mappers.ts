@@ -93,6 +93,8 @@ export function mapApplication(dto: ApplicationDetailDto): Application {
     workType: dto.workType ? mapWorkTypeRecord(dto.workType) : undefined,
     author: dto.author ? mapUser(dto.author) : undefined,
     executor: dto.executor ? mapUser(dto.executor) : undefined,
+    previousExecutor: dto.previousExecutor ? mapUser(dto.previousExecutor) : undefined,
+    delegatedByEmployee: dto.delegatedByEmployee ? mapUser(dto.delegatedByEmployee) : undefined,
     department: dto.department ? mapDepartmentRecord(dto.department) : undefined,
   };
 }

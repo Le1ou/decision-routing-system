@@ -19,7 +19,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
+        
       - name: Install backend dependencies
         run: |
           pip install -r apps/backend/requirements.txt
@@ -66,6 +66,10 @@ jobs:
         run: |
           sleep 15
           curl --fail http://localhost:3000/health
+      
+      - name: Run backend tests
+        run: |
+          pytest apps/backend/tests
 
       - name: Stop compose
         if: always()
