@@ -1,23 +1,15 @@
-
 services:
   db:
     image: postgres:15
     container_name: project_db
-
     restart: always
-
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
-      
-    ports:
-      - "${DB_PORT}:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../../apps/backend/sql_decision-routing.sql:/docker-entrypoint-initdb.d/001_init.sql
-
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
@@ -25,20 +17,16 @@ services:
       retries: 10
 
   backend:
-    build: 
+    build:
       context: ../../apps/backend
-    ports:
-      - "${BACKEND_PORT:-3000}:3000"
     container_name: project_backend
+    restart: always
     environment:
       AUTH_MODE: ${AUTH_MODE:-mock}
-      # Active Directory connection (only used when AUTH_MODE=ad). Empty values
-      # fall back to the AD_auth block in apps/backend/config.json.
       AD_SERVER: ${AD_SERVER:-}
       AD_DOMAIN: ${AD_DOMAIN:-}
       AD_USE_SSL: ${AD_USE_SSL:-}
       AD_PORT: ${AD_PORT:-}
-      # Optional AD group → role mapping (group_role_map lives in config.json).
       AD_ROLE_SOURCE: ${AD_ROLE_SOURCE:-}
       AD_SEARCH_BASE: ${AD_SEARCH_BASE:-}
       DB_HOST: ${DB_HOST}
@@ -52,8 +40,9 @@ services:
       S3_REGION: ${S3_REGION:-auto}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
-      # Set to "true" for self-hosted S3 (MinIO). See docs/s3-integration.md.
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
@@ -65,10 +54,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Self-hosted S3-compatible storage (no account / card required) ──────────
-  # Starts together with the rest of the stack (`make up`). The backend uses it
-  # when the S3_* variables in .env point here (the .env.example defaults do).
-  # See docs/s3-integration.md.
   minio:
     image: minio/minio:latest
     container_name: project_minio
@@ -78,8 +63,8 @@ services:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # web console
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -88,7 +73,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-shot helper that creates the bucket, then exits.
   createbuckets:
     image: minio/mc:latest
     container_name: project_minio_createbuckets
@@ -105,31 +89,16 @@ services:
   frontend:
     build:
       context: ../../apps/frontend
-
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ${VITE_API_URL}
     container_name: project_frontend
-
-    #env_file:
-      #- ../../.env
-
-    environment:
-      VITE_API_URL: ${VITE_API_URL}
-
+    restart: always
     ports:
-      - "5173:5173"
-
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       backend:
         condition: service_healthy
-
-    volumes:
-      - ../../apps/frontend:/app
-      - /app/node_modules
-
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5173').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
 volumes:
   postgres_data:

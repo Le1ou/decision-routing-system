@@ -50,6 +50,13 @@ jobs:
             -f infra/compose/docker-compose.local.yml \
             config
 
+      - name: Validate production Docker Compose config
+        run: |
+          docker compose \
+            --env-file .env.example \
+            -f infra/compose/docker-compose.prod.yml \
+            config
+
       # Docker build checks
       - name: Build backend image
         run: |
@@ -58,6 +65,10 @@ jobs:
       - name: Build frontend image
         run: |
           docker build -t decision-routing-frontend ./apps/frontend
+
+      - name: Build production frontend image
+        run: |
+          docker build -f apps/frontend/Dockerfile.prod -t decision-routing-frontend-prod ./apps/frontend
 
       - name: Start compose
         run: docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml up -d --build

@@ -67,8 +67,13 @@ S3_PUBLIC_ENDPOINT_URL=http://132.243.230.84:9000
 После изменения `.env` пересоздайте контейнеры:
 
 ```bash
-docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d --build
+docker compose --env-file .env -f infra/compose/docker-compose.prod.yml up -d --build
 ```
+
+Production-стек использует `infra/compose/docker-compose.prod.yml`: frontend
+собирается в статические файлы и отдаётся через nginx на `FRONTEND_PORT` (по
+умолчанию `80`). Локальный стек `docker-compose.local.yml` оставляет Vite dev
+server на порту `5173`.
 
 ## Запустить инфраструктуру (DB + Backend + Frontend)
 
@@ -220,7 +225,11 @@ CI запускается:
 установку backend dependencies
 компиляцию backend кода
 сборку frontend
-валидность docker-compose конфигурации
+валидность local и production docker-compose конфигураций
+сборку backend, frontend dev image и frontend production image
+
+Deploy запускается только после успешного CI для ветки `develop` и применяет
+`infra/compose/docker-compose.prod.yml` на сервере.
 
 ## Healthchecks
 
