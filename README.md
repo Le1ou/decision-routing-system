@@ -5,9 +5,10 @@
 ## Структура проекта
 
 - apps/frontend — frontend (React)
-- apps/backend — backend (Python)
+- apps/backend — backend (Python); техническая документация backend — в `apps/backend/docs`
+  (контракт аналитики, интеграции AD и S3, спецификация подсистем)
 - infra — инфраструктура
-- docs — документация
+- docs — документация (бизнес-требования, статусная модель, макеты, openapi)
 
 ## Статус
 
@@ -33,6 +34,7 @@ cp .env.example .env
 
 Основные переменные:
 ```env
+COMPOSE_FILE=infra/compose/docker-compose.local.yml
 DB_HOST=db
 DB_PORT=5432
 DB_USER=postgres
@@ -41,6 +43,11 @@ DB_NAME=app_db
 BACKEND_PORT=3000
 VITE_API_URL=http://localhost:3000
 ```
+
+`COMPOSE_FILE` указывает Docker Compose на compose-файл, поэтому команды
+`docker compose ...`, запущенные **из корня репозитория**, сами находят и compose-файл,
+и этот `.env` — без флагов `-f`/`--env-file`. (По умолчанию Compose ищет `.env` рядом с
+compose-файлом, т.е. в `infra/compose/`; эта переменная переносит точку входа в корень.)
 
 Для backend, запущенного локально вне Docker, используйте `DB_HOST=localhost`.
 
@@ -77,14 +84,22 @@ server на порту `5173`.
 
 ## Запустить инфраструктуру (DB + Backend + Frontend)
 
+Из корня репозитория (благодаря `COMPOSE_FILE` в `.env`):
+
 ```bash
-docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d --build
+docker compose up -d --build
 ```
 
 Для запуска в foreground:
 
 ```bash
-docker compose --env-file .env -f infra/compose/docker-compose.local.yml up --build
+docker compose up --build
+```
+
+Эквивалентно с явными флагами (работает из любой папки):
+
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.local.yml up -d --build
 ```
 
 ## После запуска:
