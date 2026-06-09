@@ -10,6 +10,8 @@ Usage (same as test_endpoints.py — server must be running with seeded data):
 """
 
 import os
+
+import pytest
 import requests
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:3000")
@@ -43,16 +45,24 @@ def test_put_then_get_reflects_saved_values():
     assert data["department"]["2"] == 0.45
     assert data["managerAuthor"]["1"] == 0.35
     assert data["deadline"] == 0.65
-    # …and unset departments are filled with the 0.2 default on read.
-    assert data["department"]["3"] == 0.2
+    # …и для незаданного отдела k_отдела по умолчанию = важность отдела (department.value),
+    # а managerAuthor по умолчанию = 0.2.
+    deps = _session.get(f"{BASE_URL}/departments", auth=TOP_MANAGER).json()["items"]
+    dep3_value = next(d["value"] for d in deps if str(d["id"]) == "3")
+    assert data["department"]["3"] == pytest.approx(dep3_value)
+    assert data["managerAuthor"]["3"] == pytest.approx(0.2)
 
 
 def test_get_shape_is_stable():
     data = _get(TOP_MANAGER).json()
-    assert set(data.keys()) == {"department", "managerAuthor", "deadline"}
+    assert set(data.keys()) == {"department", "managerAuthor", "deadline", "urgent"}
     assert isinstance(data["department"], dict)
     assert isinstance(data["managerAuthor"], dict)
     assert isinstance(data["deadline"], (int, float))
+    # read-only параметры срочности для предпросмотра на фронте
+    assert set(data["urgent"].keys()) == {"thresholdHours", "bonus"}
+    assert isinstance(data["urgent"]["thresholdHours"], (int, float))
+    assert isinstance(data["urgent"]["bonus"], (int, float))
 
 
 def test_regular_manager_sees_only_own_department():

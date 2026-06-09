@@ -709,7 +709,9 @@ class TestPrioritySettings:
     def test_get_manager_200(self):
         r = get("/priority-settings", MANAGER)
         assert r.status_code == 200
-        assert set(r.json().keys()) == {"department", "managerAuthor", "deadline"}
+        body = r.json()
+        assert set(body.keys()) == {"department", "managerAuthor", "deadline", "urgent"}
+        assert {"thresholdHours", "bonus"} <= body["urgent"].keys()
 
     def test_get_executor_403(self):
         assert get("/priority-settings", EXECUTOR).status_code == 403
@@ -1037,7 +1039,8 @@ class TestDepartmentsContent:
         items = get("/departments", MANAGER).json()["items"]
         assert items
         for d in items:
-            assert 0 <= d["value"] <= 1, d
+            # value = коэффициент важности отдела (k_отдела), диапазон [0, 1.25].
+            assert 0 <= d["value"] <= 1.25, d
             assert 0 <= d["deadlineNotificationRatio"] <= 1, d
             assert d["employeeApplicationDelayMinutes"] >= 0, d
             assert isinstance(d["delegatedToSameDepartment"], bool), d

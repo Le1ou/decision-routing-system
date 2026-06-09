@@ -73,6 +73,10 @@ def run_tick(db, now=None) -> dict:
     expired_count = 0
     deadline_notified_count = 0
 
+    # 0. Пересчёт приоритета открытых заявок (k_времени растёт со временем).
+    from src import priority_module
+    priority_recomputed = priority_module.recompute_open(db, now)
+
     with db.pool.connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             # ── 1. Просроченные заявки ───────────────────────────────────────
@@ -135,4 +139,5 @@ def run_tick(db, now=None) -> dict:
                     )
                     deadline_notified_count += 1
 
-    return {"expired": expired_count, "deadlineNotifications": deadline_notified_count}
+    return {"expired": expired_count, "deadlineNotifications": deadline_notified_count,
+            "priorityRecomputed": priority_recomputed}

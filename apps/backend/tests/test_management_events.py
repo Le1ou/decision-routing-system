@@ -104,6 +104,29 @@ def test_reassign_releases_previous_application():
     assert str(after1["previousExecutorId"]) == EXECUTOR_IT_ID
 
 
+EXECUTOR_OGE = ("sidorova_a", "Sidorova!3")   # executor, OGE (dept 2), employee_id 4
+MGR_OGE = DEPT_MANAGER                          # kuznetsov_m — manager of OGE
+
+
+def test_internal_delegation_with_confirmation_notifies_manager():
+    # Ensure OGE requires confirmation for internal delegation (другие тесты могли
+    # переключить флаг — задаём явно, чтобы тест был самодостаточным).
+    assert _session.patch(f"{BASE_URL}/departments/{DEP_OGE}/delegation-settings",
+                          auth=TOP_MANAGER, json={"delegatedToSameDepartment": True}).status_code == 204
+    # При включённом подтверждении внутреннее делегирование уходит в статус `delegated`,
+    # и руководитель отдела должен получить уведомление о необходимости подтвердить.
+    wts = _session.get(f"{BASE_URL}/work-types", auth=TOP_MANAGER,
+                       params={"departmentId": str(DEP_OGE)}).json()["items"]
+    assert wts, "OGE must have work types"
+    app_id = _create_app(TOP_MANAGER, DEP_OGE, wts[0]["id"])
+    assert _act(app_id, TOP_MANAGER, action="assignExecutor", executorId="4").status_code == 204
+    # Assigned OGE executor re-addresses internally (complexity not below current).
+    assert _act(app_id, EXECUTOR_OGE, action="delegateInternal", complexity="critical").status_code == 204
+
+    assert _app(app_id, TOP_MANAGER)["status"] == "delegated"      # ушло на подтверждение
+    assert _has_notification_for_app(MGR_OGE, app_id), "OGE manager should be notified to confirm"
+
+
 def _patch_department(dep_id, auth, body):
     return _session.patch(f"{BASE_URL}/departments/{dep_id}", auth=auth, json=body)
 
