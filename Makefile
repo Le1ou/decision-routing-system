@@ -1,9 +1,12 @@
 .PHONY: up up-fast build down restart reseed logs logs-backend \
 backend-logs frontend-logs ps bash-back bash-front \
-seed test clean rebuild pull
+seed test clean rebuild pull \
+prod-up prod-up-fast prod-build prod-down prod-restart prod-logs \
+prod-logs-backend prod-frontend-logs prod-ps prod-clean prod-rebuild
 
 # Repo root .env
 COMPOSE = docker compose -f infra/compose/docker-compose.local.yml
+PROD_COMPOSE = docker compose --env-file .env -f infra/compose/docker-compose.prod.yml
 
 # Build and start all containers
 up:
@@ -74,3 +77,49 @@ rebuild:
 # Pull latest changes
 pull:
 	git pull origin develop
+
+# Build and start production stack
+prod-up:
+	$(PROD_COMPOSE) up -d --build
+
+# Start production stack without rebuild
+prod-up-fast:
+	$(PROD_COMPOSE) up -d
+
+# Explicit production rebuild command
+prod-build:
+	$(PROD_COMPOSE) up -d --build
+
+# Stop production stack
+prod-down:
+	$(PROD_COMPOSE) down
+
+# Restart production stack
+prod-restart:
+	$(PROD_COMPOSE) down
+	$(PROD_COMPOSE) up -d
+
+# Production logs
+prod-logs:
+	$(PROD_COMPOSE) logs -f
+
+# Production backend logs
+prod-logs-backend:
+	$(PROD_COMPOSE) logs -f backend
+
+# Production frontend logs
+prod-frontend-logs:
+	$(PROD_COMPOSE) logs -f frontend
+
+# Production containers status
+prod-ps:
+	$(PROD_COMPOSE) ps
+
+# Full production cleanup
+prod-clean:
+	$(PROD_COMPOSE) down -v --remove-orphans
+
+# Full production rebuild
+prod-rebuild:
+	$(PROD_COMPOSE) down
+	$(PROD_COMPOSE) up -d --build
