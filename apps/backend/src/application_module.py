@@ -332,12 +332,17 @@ class PgDbOperator:
             "GRANT INSERT, UPDATE ON public.delegated TO app_table_base",
             "GRANT UPDATE ON public.notification TO app_table_base",
             "GRANT INSERT, UPDATE ON public.photo TO app_table_base",
+            # Status-transition journal: every user records transitions for their
+            # own application actions (written in the same tx as the state change).
+            "GRANT INSERT ON public.application_status_history TO app_table_base",
         ]
         manage_grants = [
             "GRANT USAGE ON SCHEMA public TO app_table_manage",
             "GRANT INSERT, UPDATE, DELETE ON "
             "public.department, public.employee, public.types_of_works, "
             "public.type_of_work_to_grade TO app_table_manage",
+            # Priority settings are persisted by a top-manager via PUT /priority-settings.
+            "GRANT INSERT, UPDATE, DELETE ON public.priority_settings TO app_table_manage",
         ]
         # Create the group roles (idempotent).
         for role_name in ("app_table_base", "app_table_manage"):

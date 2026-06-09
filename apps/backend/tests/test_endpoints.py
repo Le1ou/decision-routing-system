@@ -367,6 +367,10 @@ class TestApplicationActions:
         assert detail.get("delegationId") is None
 
     def test_executor_start_work_on_assigned_204(self):
+        # Ensure the app is currently assigned to this executor: earlier reassignments
+        # may have released it under the one-app-per-executor rule, so (re)assign first.
+        assert post(f"/applications/{APP_ASSIGNED}/actions", MANAGER,
+                    json={"action": "assignExecutor", "executorId": "2"}).status_code == 204
         r = post(f"/applications/{APP_ASSIGNED}/actions", EXECUTOR,
                  json={"action": "startWork"})
         assert r.status_code == 204

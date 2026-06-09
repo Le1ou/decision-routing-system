@@ -2,8 +2,10 @@
 backend-logs frontend-logs ps bash-back bash-front \
 seed test clean rebuild pull
 
-# Repo root .env
-COMPOSE = docker compose -f infra/compose/docker-compose.local.yml
+# Run from the repo root: the root .env sets COMPOSE_FILE, so bare `docker compose`
+# finds both the compose file and the root .env without -f / --env-file flags.
+# (Same command works manually from the repo root.)
+COMPOSE = docker compose
 
 # Build and start all containers
 up:

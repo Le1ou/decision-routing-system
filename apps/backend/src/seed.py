@@ -64,10 +64,14 @@ def seed_database(db_operator) -> None:
 
         # ── 0. Wipe everything ────────────────────────────────────────────────
         print("[seed] Wiping all tables …")
+        # priority_settings is configuration (set by a top-manager via the API),
+        # not demo data — keep it across reseeds so it survives a backend restart.
         conn.execute("""
             DO $$ DECLARE r RECORD;
             BEGIN
-                FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public')
+                FOR r IN (SELECT tablename FROM pg_tables
+                          WHERE schemaname = 'public'
+                            AND tablename <> 'priority_settings')
                 LOOP
                     EXECUTE 'TRUNCATE TABLE public.'
                         || quote_ident(r.tablename)
@@ -684,6 +688,64 @@ def seed_database(db_operator) -> None:
     # psycopg auto-commits on clean context-manager exit
     print("[seed] ✅ Database seeded successfully.")
     _print_summary(app_ids, emp_ids, dep_ids, tow_ids, pg_ids)
+
+
+def seed_demo_notifications(db_operator) -> None:
+    """Создать несколько ИТ-заявок, чьи дедлайны заставят подсистему событий прислать
+    уведомления (просрочка / приближение срока) руководителю ИТ-отдела (orlova_m) в
+    первые ~30–120 секунд после старта. Вызывается из main.py только в mock-режиме,
+    ПОСЛЕ seed_database (иначе будут стёрты). Заявки исчезнут при следующем пересеве.
+
+    Заявки создаются прямым INSERT (как остальной seed), без обращения к API.
+    """
+    now = datetime.now(PROJECT_TZ)
+    with db_operator.pool.connection() as conn:
+        status = conn.execute("SELECT status_id FROM public.status WHERE name = 'new' LIMIT 1").fetchone()
+        prio = conn.execute("SELECT priority_id FROM public.priority WHERE name = 'low' LIMIT 1").fetchone()
+        # Получатель уведомлений — руководитель ИТ-отдела (orlova_m, employee_id=1).
+        author = conn.execute("SELECT employee_id, department_id FROM public.employee WHERE employee_id = 1").fetchone()
+        author_role = conn.execute("SELECT role_id FROM public.role WHERE name = 'author' LIMIT 1").fetchone()
+        if not (status and prio and author and author_role):
+            print("[demo] notification demo skipped (missing seed references)")
+            return
+        status_id, prio_id = status[0], prio[0]
+        author_id, dep_id = author[0], author[1]
+        wt = conn.execute(
+            "SELECT type_of_works_id FROM public.types_of_works WHERE department_id = %s LIMIT 1",
+            (dep_id,),
+        ).fetchone()
+        if not wt:
+            print("[demo] notification demo skipped (no work type in IT department)")
+            return
+        wt_id = wt[0]
+
+        demos = (
+            ("ДЕМО: заявка уже просрочена",
+             "Дедлайн в прошлом — уведомление о просрочке придёт на ближайшем тике (~до 30с).",
+             now - timedelta(minutes=10)),
+            ("ДЕМО: приближается срок исполнения",
+             "Уведомление о близости дедлайна придёт, когда останется мало времени (~60с).",
+             now + timedelta(seconds=300)),
+            ("ДЕМО: просрочится через ~2 минуты",
+             "Дедлайн через ~115с — уведомление о просрочке придёт около отметки ~120с.",
+             now + timedelta(seconds=115)),
+        )
+        for name, desc, deadline in demos:
+            app_id = conn.execute(
+                """
+                INSERT INTO public.application
+                    (name, priority_id, status_id, description, department_id, types_of_works,
+                     is_unfinished, is_expired, deadline, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, false, false, %s, %s, %s)
+                RETURNING application_id
+                """,
+                (name, prio_id, status_id, desc, dep_id, wt_id, deadline, now, now),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO public.employee_to_application (role_id, application_id, employee_id) VALUES (%s, %s, %s)",
+                (author_role[0], app_id, author_id),
+            )
+    print("[demo] notification demo applications created (mock mode)")
 
 
 def _print_summary(app_ids, emp_ids, dep_ids, tow_ids, pg_ids):

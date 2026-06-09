@@ -4,6 +4,14 @@
     "delegated_to_same_dep": false,
     "deadline_notification": 0.25
   },
+  "events": {
+    "enabled": true,
+    "tick_seconds": 30
+  },
+  "priority": {
+    "urgent_deadline_threshold_hours": 24,
+    "urgent_deadline_bonus": 0.5
+  },
   "AD_auth": {
     "server_adress": "your_ad_server.yourdomain.local",
     "Domain": "yourdomain",

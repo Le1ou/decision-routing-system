@@ -14,7 +14,12 @@ import threading
 import boto3
 from botocore.config import Config
 import psycopg
-from src.seed import seed_database
+from src.seed import seed_database, seed_demo_notifications
+from src import priority_settings_store as ps_store
+from src import analytics_module as analytics
+from src import events_module as events
+import asyncio
+from contextlib import asynccontextmanager
 
 S3_BUCKET       = os.environ.get("S3_BUCKET_NAME", "")
 S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL")
@@ -168,21 +173,101 @@ with DBController.pool.connection() as _conn:
             PRIMARY KEY (id)
         )
     """)
+    # Continuous priority score (П from the formula). priority_id stays as the
+    # derived display bucket; routing/recompute will populate this column.
+    _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS priority_score real")
+    # Dedup flag for the events subsystem: set once a deadline-approaching
+    # notification has been sent for a `new` application (so it isn't re-sent each tick).
+    _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS deadline_notified boolean")
+    # Status-transition journal — written by the management subsystem on every
+    # status change; the analytics subsystem reads it.
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS public.application_status_history (
+            id              integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
+            application_id  integer,
+            from_status_id  integer,
+            to_status_id    integer,
+            changed_at      timestamp with time zone NOT NULL,
+            by_employee_id  integer,
+            reason          text,
+            PRIMARY KEY (id)
+        )
+    """)
+    # Persistent priority-calculation settings (was an in-memory dict). Single row id=1.
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS public.priority_settings (
+            id             integer NOT NULL,
+            department     jsonb NOT NULL DEFAULT '{}'::jsonb,
+            manager_author jsonb NOT NULL DEFAULT '{}'::jsonb,
+            deadline       real  NOT NULL DEFAULT 0.2,
+            PRIMARY KEY (id)
+        )
+    """)
 # Create the Postgres group roles that back the application's role model and the
 # technical permission marker roles. Both are derived from the AD role, not stored.
 DBController.setupRoleTableGrants()
 DBController.fillPermissionRoles(configData["PERMISSIONS"])
 authObj = ActiveDirectoryAuth()
 seed_database(DBController)
+# In mock mode, drop in a few demo applications whose deadlines trigger the events
+# subsystem (overdue / deadline-approaching notifications) for the IT manager so the
+# behaviour is visible right after the project starts. Not seeded in AD mode.
+if authObj.mode == "mock":
+    seed_demo_notifications(DBController)
 # Pre-create a Postgres login role for every onboarded user that has a known
 # password. In mock mode that's everyone; in AD mode (where AD owns the password)
 # entries may have none — those roles are created lazily on first login instead.
 for _username, _ucfg in _system_users().items():
     if _ucfg.get("password"):
         DBController.createUserRole(_username, _ucfg["password"], _pg_roles_for(_username))
+# ─────────────────────────── Events subsystem loop ───────────────────────────
+# Background loop that drives the events subsystem (deadline notifications +
+# overdue marking). Runs in-process via asyncio; the synchronous DB tick is
+# offloaded to a thread so it never blocks the event loop. Configured via the
+# "events" block in apps/backend/config.json:
+#   "enabled"      — true/false (default true)
+#   "tick_seconds" — interval between ticks (default 60)
+# The first tick happens AFTER one interval, so the fast test suite never triggers it.
+_events_cfg = configData.get("events", {}) or {}
+_events_enabled = _events_cfg.get("enabled", True)
+EVENTS_ENABLED = (_events_enabled if isinstance(_events_enabled, bool)
+                  else str(_events_enabled).strip().lower() in ("1", "true", "yes", "on"))
+try:
+    EVENTS_TICK_SECONDS = max(1, int(_events_cfg.get("tick_seconds", 60)))
+except (TypeError, ValueError):
+    EVENTS_TICK_SECONDS = 60
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    task = None
+    if EVENTS_ENABLED:
+        async def _loop():
+            while True:
+                await asyncio.sleep(EVENTS_TICK_SECONDS)
+                try:
+                    result = await asyncio.to_thread(events.run_tick, DBController)
+                    if result.get("expired") or result.get("deadlineNotifications"):
+                        print(f"[events] tick: {result}")
+                except Exception as e:
+                    print(f"[events] tick error: {e}")
+        task = asyncio.create_task(_loop())
+        print(f"[events] background loop enabled (tick={EVENTS_TICK_SECONDS}s).")
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+
 app = FastAPI(
     title="Decision Routing System API",
     version="0.1.0",
+    lifespan=lifespan,
     openapi_tags=[
         {"name": "Auth",          "description": "Текущий пользователь"},
         {"name": "Applications",  "description": "Производственные заявки"},
@@ -190,6 +275,7 @@ app = FastAPI(
         {"name": "Priority",      "description": "Настройки расчета приоритета"},
         {"name": "Notifications", "description": "Уведомления текущего пользователя"},
         {"name": "Reports",       "description": "Отчеты и XLS-выгрузка"},
+        {"name": "Analytics",     "description": "Статистика по заявкам, исполнителям, видам работ и отделам"},
     ],
 )
 app.add_middleware(
@@ -455,6 +541,18 @@ class UpdateEmployeePayload(BaseModel):
 class UpdateDepartmentDelegationSettingsPayload(BaseModel):
     delegatedToSameDepartment: bool
 
+class UpdateDepartmentPayload(BaseModel):
+    # Department settings editable by its manager: assignment cooldown (minutes) and
+    # the deadline-notification ratio (share of remaining time that triggers the alert).
+    employeeApplicationDelayMinutes: Optional[int] = Field(default=None, ge=0)
+    deadlineNotificationRatio: Optional[float] = Field(default=None, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def at_least_one(self):
+        if self.employeeApplicationDelayMinutes is None and self.deadlineNotificationRatio is None:
+            raise ValueError("At least one field must be provided")
+        return self
+
 # ── AD users ──
 
 class AdUserOut(BaseModel):
@@ -492,6 +590,15 @@ class DelegationOut(BaseModel):
     @field_validator("createdAt", mode="before")
     @classmethod
     def fmt_dt(cls, v):
+        return v.isoformat() if isinstance(v, datetime) else str(v)
+
+    @field_validator("decidedAt", mode="before")
+    @classmethod
+    def fmt_decided(cls, v):
+        # decided_at is set once a delegation is confirmed/declined; format the
+        # datetime to ISO (it was previously left as a datetime → 422 on GET).
+        if v is None:
+            return None
         return v.isoformat() if isinstance(v, datetime) else str(v)
 
     model_config = {"populate_by_name": True}
@@ -1030,6 +1137,90 @@ def _build_application_list_query(filters: dict) -> tuple[str, list]:
     return base, params
 
 
+def _record_status_change(cur, application_id, from_status_id, to_status_id,
+                          by_employee_id, reason, at):
+    """Append a row to public.application_status_history.
+
+    Called inside the same transaction/cursor as the status change so the journal
+    stays consistent with application state. `from_status_id` is None on creation.
+    The analytics subsystem reads this journal for lifecycle-time metrics.
+    """
+    cur.execute(
+        """
+        INSERT INTO public.application_status_history
+            (application_id, from_status_id, to_status_id, changed_at, by_employee_id, reason)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (int(application_id), from_status_id, to_status_id, at, by_employee_id, reason),
+    )
+
+
+def _create_notification(text: str, employee_id, application_id) -> None:
+    """Insert one notification via the system connection (DBController).
+
+    Uses the superuser pool, not the caller's per-user connection, so notification
+    creation never depends on the user's table privileges. Best-effort: called only
+    from _dispatch_action_notifications, which swallows errors.
+    """
+    if employee_id is None:
+        return
+    with DBController.pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO public.notification (text, created_at, employee_id, is_read, application_id) "
+            "VALUES (%s, %s, %s, false, %s)",
+            (text, datetime.now(project_timezone), int(employee_id), int(application_id)),
+        )
+
+
+def _department_manager_ids(dept_id) -> list:
+    """Active managers/top-managers of a department (recipients for delegation)."""
+    from psycopg.rows import dict_row
+    with DBController.pool.connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                "SELECT e.employee_id FROM public.employee e "
+                "JOIN public.role r ON r.role_id = e.role_id "
+                "WHERE e.department_id = %s AND r.name IN ('manager', 'top-manager') "
+                "AND e.is_active = true",
+                (int(dept_id),),
+            ).fetchall()
+    return [r["employee_id"] for r in rows]
+
+
+def _dispatch_action_notifications(action, application_id, app_row, payload,
+                                   user_role, actor_emp) -> None:
+    """Create notifications for management events (see docs/backend-functions.md §5).
+
+    Called AFTER the action transaction commits, best-effort: any failure is logged
+    and never affects the already-committed action. Only events owned by the
+    management subsystem are handled here; time-based/routing notifications belong
+    to the events/routing subsystems.
+    """
+    try:
+        name = app_row.get("name") or f"#{application_id}"
+        author_id = app_row.get("author_id")
+        if action == "assignExecutor" and payload.executorId:
+            _create_notification(f"Вам назначена заявка: «{name}».",
+                                 int(payload.executorId), application_id)
+        elif action == "delegateExternal" and payload.departmentId:
+            for mid in _department_manager_ids(int(payload.departmentId)):
+                _create_notification(f"Заявка «{name}» делегирована в ваш отдел.",
+                                     mid, application_id)
+        elif action == "confirmExternalDelegation" and author_id:
+            _create_notification(f"Делегирование заявки «{name}» подтверждено.",
+                                 author_id, application_id)
+        elif action == "declineExternalDelegation" and author_id:
+            _create_notification(f"Делегирование заявки «{name}» отклонено.",
+                                 author_id, application_id)
+        elif action == "complete" and author_id:
+            _create_notification(f"Заявка «{name}» выполнена.", author_id, application_id)
+        elif action == "reject" and user_role in ("manager", "top-manager") and author_id:
+            _create_notification(f"Заявка «{name}» отклонена руководителем.",
+                                 author_id, application_id)
+    except Exception as e:
+        print(f"[notify] failed for action={action} app={application_id}: {e}")
+
+
 # ═══════════════════════════════════════════════════════════════
 #  ROUTES
 # ═══════════════════════════════════════════════════════════════
@@ -1260,6 +1451,11 @@ def create_application(
                         (author_role["role_id"], app_id, emp_id)
                     )
 
+                # Journal the initial transition (— → new) for analytics.
+                _record_status_change(
+                    cur, app_id, None, status_row["status_id"], emp_id, "create", now
+                )
+
         return {"id": str(app_id)}
 
     except HTTPException:
@@ -1458,6 +1654,10 @@ def application_action(
         if payload.action not in ActionValues:
             raise HTTPException(status_code=400, detail=f"Unknown action: {payload.action}")
 
+        # Applications bumped off a now-reassigned executor (one-app-per-executor rule),
+        # collected for a best-effort notification after the transaction commits.
+        bumped_for_notify: list = []
+
         with db.pool.connection() as conn:
             from psycopg.rows import dict_row
             with conn.cursor(row_factory=dict_row) as cur:
@@ -1493,6 +1693,10 @@ def application_action(
                 if payload.action not in available:
                     raise HTTPException(status_code=403, detail="Action not permitted in current state")
 
+                # Status at the start of the action — the "from" of any transition
+                # journalled below. Each action calls set_status at most once.
+                _prev_status_id = app_row.get("status_id")
+
                 def set_status(name: str):
                     st = cur.execute(
                         "SELECT status_id FROM public.status WHERE name = %s LIMIT 1", (name,)
@@ -1502,6 +1706,11 @@ def application_action(
                     cur.execute(
                         "UPDATE public.application SET status_id = %s, updated_at = %s WHERE application_id = %s",
                         (st["status_id"], now, int(applicationId))
+                    )
+                    # Journal the transition for analytics (reason = the action name).
+                    _record_status_change(
+                        cur, int(applicationId), _prev_status_id, st["status_id"],
+                        emp_id, payload.action, now,
                     )
 
                 action = payload.action
@@ -1537,6 +1746,40 @@ def application_action(
                             "INSERT INTO public.employee_to_application (role_id, application_id, employee_id) VALUES (%s, %s, %s)",
                             (exec_role["role_id"], int(applicationId), int(payload.executorId))
                         )
+
+                        # One application per executor: any OTHER active application of
+                        # this executor (assigned / inProgress) is released — returned to
+                        # `new` with the Unfinished flag and previous_executor_id set, so
+                        # it goes back into distribution. The executor link is kept (like
+                        # returnToNew) so the previous executor still sees it.
+                        busy = cur.execute(
+                            """
+                            SELECT a.application_id, a.name, a.status_id
+                            FROM public.application a
+                            JOIN public.employee_to_application eta
+                              ON eta.application_id = a.application_id AND eta.role_id = %s
+                            JOIN public.status s ON s.status_id = a.status_id
+                            WHERE eta.employee_id = %s
+                              AND s.name IN ('assigned', 'inProgress')
+                              AND a.application_id <> %s
+                            """,
+                            (exec_role["role_id"], int(payload.executorId), int(applicationId))
+                        ).fetchall()
+                        if busy:
+                            new_st = cur.execute(
+                                "SELECT status_id FROM public.status WHERE name = 'new' LIMIT 1"
+                            ).fetchone()
+                            for b in busy:
+                                cur.execute(
+                                    "UPDATE public.application SET status_id = %s, is_unfinished = true, "
+                                    "previous_executor_id = %s, updated_at = %s WHERE application_id = %s",
+                                    (new_st["status_id"], int(payload.executorId), now, b["application_id"])
+                                )
+                                _record_status_change(
+                                    cur, b["application_id"], b["status_id"], new_st["status_id"],
+                                    emp_id, "reassigned_busy", now,
+                                )
+                                bumped_for_notify.append((b["application_id"], b["name"], int(payload.executorId)))
 
                 elif action == "startWork":
                     set_status("inProgress")
@@ -1691,10 +1934,21 @@ def application_action(
                             (deleg.get("delegated_by_employee"), now, int(applicationId))
                         )
                     else:
-                        cur.execute(
-                            "UPDATE public.application SET updated_at = %s WHERE application_id = %s",
-                            (now, int(applicationId))
-                        )
+                        # External delegation confirmed → the application now BELONGS
+                        # to the target department, so it joins that department's
+                        # queue/visibility. (Previously department_id was left
+                        # pointing at the original department — a routing/visibility bug.)
+                        new_dep = deleg.get("delegated_to") if deleg else None
+                        if new_dep is not None:
+                            cur.execute(
+                                "UPDATE public.application SET department_id = %s, updated_at = %s WHERE application_id = %s",
+                                (int(new_dep), now, int(applicationId))
+                            )
+                        else:
+                            cur.execute(
+                                "UPDATE public.application SET updated_at = %s WHERE application_id = %s",
+                                (now, int(applicationId))
+                            )
 
                 elif action == "declineExternalDelegation":
                     deleg = None
@@ -1766,6 +2020,21 @@ def application_action(
                             "UPDATE public.application SET executor_comment = %s, updated_at = %s WHERE application_id = %s",
                             (payload.comment, now, int(applicationId))
                         )
+
+        # Transaction committed — fire management-event notifications (best-effort,
+        # via the system connection; never breaks the already-applied action).
+        _dispatch_action_notifications(action, int(applicationId), app_row, payload, user_role, emp_id)
+
+        # Notify executors whose application was released by the one-app-per-executor rule.
+        for _b_id, _b_name, _b_emp in bumped_for_notify:
+            try:
+                _create_notification(
+                    f"Заявка «{_b_name}» снята с вас и возвращена в статус «Новый» "
+                    f"(вы назначены на другую заявку).",
+                    _b_emp, _b_id,
+                )
+            except Exception as e:
+                print(f"[notify] bump notify failed for app={_b_id}: {e}")
 
         return Response(status_code=204)
 
@@ -2117,6 +2386,46 @@ def update_department_delegation_settings(
         _raise_for_db_error(e)
 
 
+@app.patch("/departments/{departmentId}", status_code=204, tags=["Directories"],
+           summary="Изменить настройки отдела (кулдаун назначения, порог уведомления о дедлайне)",
+           description="Меняет empl_appl_delay (минуты) и/или deadline_notification (0..1). "
+                       "Обычный руководитель — только свой отдел, top-manager — любой.")
+def update_department(
+    payload: UpdateDepartmentPayload,
+    departmentId: int = Path(...),
+    userData=Depends(authObj.authenticate),
+):
+    try:
+        db = get_db_user(userData)
+        login = userData[0]
+        require_manager_role(login)
+
+        rows = db.getRowFromTable("department", "department_id", int(departmentId))
+        row_or_404(rows, "Department not found")
+
+        _require_department_scope(db, login, int(departmentId))
+
+        sets, params = [], []
+        if payload.employeeApplicationDelayMinutes is not None:
+            sets.append("empl_appl_delay = %s"); params.append(int(payload.employeeApplicationDelayMinutes))
+        if payload.deadlineNotificationRatio is not None:
+            sets.append("deadline_notification = %s"); params.append(float(payload.deadlineNotificationRatio))
+
+        with db.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE public.department SET " + ", ".join(sets) + " WHERE department_id = %s",
+                    params + [int(departmentId)],
+                )
+
+        return Response(status_code=204)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_for_db_error(e)
+
+
 @app.get("/positions", tags=["Directories"], summary="Получить должности",
          description="Должность сотрудника приходит из AD и не редактируется руководителем вручную. Соответствует таблице post.",
          response_model=PositionListResponse)
@@ -2386,20 +2695,8 @@ def delete_work_type(
 #   managerAuthor: { departmentId: coeff }   — "manager as author" factor
 #   deadline:      single global coeff
 # The "author position" factor was removed from the priority calculation.
-_priority_settings: dict = {
-    "department":    {},
-    "managerAuthor": {},
-    "deadline":      0.2,
-}
-
-
-def _ensure_priority_defaults(db: PgDbOperator) -> None:
-    """Lazily seed a default coefficient (0.2) for every known department."""
-    deps = db.getAllRowsFromTable("department") or []
-    for d in deps:
-        dep_id = str(d["department_id"])
-        _priority_settings["department"].setdefault(dep_id, 0.2)
-        _priority_settings["managerAuthor"].setdefault(dep_id, 0.2)
+# Settings are persisted in public.priority_settings via priority_settings_store
+# (was an in-memory dict that reset on restart). The API contract is unchanged.
 
 
 @app.get("/priority-settings", tags=["Priority"], summary="Получить коэффициенты расчета приоритета",
@@ -2410,18 +2707,18 @@ def get_priority_settings(userData=Depends(authObj.authenticate)):
         require_permission(userData, "canManagePrioritySettings")
         db = get_db_user(userData)
         login = userData[0]
-        _ensure_priority_defaults(db)
+        settings = ps_store.load_effective(db)
 
         if _is_top_manager(login):
-            return _priority_settings
+            return settings
 
         # A regular manager only sees their own department's coefficients.
         own = _user_department_id(db, login)
         own_key = str(own) if own is not None else None
         return {
-            "department":    {own_key: _priority_settings["department"].get(own_key, 0.2)} if own_key else {},
-            "managerAuthor": {own_key: _priority_settings["managerAuthor"].get(own_key, 0.2)} if own_key else {},
-            "deadline":      _priority_settings["deadline"],
+            "department":    {own_key: settings["department"].get(own_key, ps_store.DEFAULT_COEFF)} if own_key else {},
+            "managerAuthor": {own_key: settings["managerAuthor"].get(own_key, ps_store.DEFAULT_COEFF)} if own_key else {},
+            "deadline":      settings["deadline"],
         }
     except HTTPException:
         raise
@@ -2438,12 +2735,17 @@ def update_priority_settings(
 ):
     try:
         require_permission(userData, "canManagePrioritySettings")
+        db = get_db_user(userData)
         login = userData[0]
         require_top_manager(login)   # only a top-manager may persist settings
-        _priority_settings["department"]    = dict(payload.department)
-        _priority_settings["managerAuthor"] = dict(payload.managerAuthor)
-        _priority_settings["deadline"]      = payload.deadline
-        return _priority_settings
+        ps_store.save(db, dict(payload.department), dict(payload.managerAuthor), payload.deadline)
+        # Echo back exactly what was saved (unchanged API contract); the merged
+        # per-department defaults are applied on read (GET /priority-settings).
+        return {
+            "department":    dict(payload.department),
+            "managerAuthor": dict(payload.managerAuthor),
+            "deadline":      payload.deadline,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -2543,6 +2845,7 @@ def _build_report_query(
     createdFrom=None, createdTo=None,
     finishedFrom=None, finishedTo=None,
     status_filter=None, executorId=None,
+    department_id=None,
 ):
     base = """
         SELECT
@@ -2581,6 +2884,10 @@ def _build_report_query(
         base += " AND s.name = %s"; params.append(status_filter)
     if executorId:
         base += " AND exec_link.employee_id = %s"; params.append(int(executorId))
+    # Department scope: a regular manager only sees their own department's
+    # applications (top-manager passes None → no restriction).
+    if department_id is not None:
+        base += " AND a.department_id = %s"; params.append(int(department_id))
     base += " ORDER BY a.created_at DESC"
     return base, params
 
@@ -2600,9 +2907,13 @@ def report_applications(
     try:
         require_permission(userData, "canViewReports")
         db = get_db_user(userData)
+        login = userData[0]
+        # A regular manager only reports on their own department; top-manager on all.
+        report_dept = None if _is_top_manager(login) else _user_department_id(db, login)
 
         query, params = _build_report_query(
-            createdFrom, createdTo, finishedFrom, finishedTo, status_filter, executorId
+            createdFrom, createdTo, finishedFrom, finishedTo, status_filter, executorId,
+            department_id=report_dept,
         )
 
         with db.pool.connection() as conn:
@@ -2644,9 +2955,13 @@ def report_applications_xls(
     try:
         require_permission(userData, "canViewReports")
         db = get_db_user(userData)
+        login = userData[0]
+        # A regular manager only reports on their own department; top-manager on all.
+        report_dept = None if _is_top_manager(login) else _user_department_id(db, login)
 
         query, params = _build_report_query(
-            createdFrom, createdTo, finishedFrom, finishedTo, status_filter, executorId
+            createdFrom, createdTo, finishedFrom, finishedTo, status_filter, executorId,
+            department_id=report_dept,
         )
 
         with db.pool.connection() as conn:
@@ -2711,6 +3026,81 @@ def report_applications_xls(
             headers={"Content-Disposition": "attachment; filename=applications.xls"},
         )
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_for_db_error(e)
+
+
+# ─── Analytics ──────────────────────────────────────────────────
+# Предварительная версия (см. docs/backend-functions.md §4). У фронтенда пока нет
+# потребителя — формат JSON может измениться после согласования. Доступ: право
+# canViewReports; обычный руководитель — только свой отдел, top-manager — все.
+# from/to фильтруют по дате создания заявки; их отсутствие = «за всё время».
+
+def _analytics_scope(userData):
+    """(db, department_id) — None для top-manager (все отделы), иначе свой отдел."""
+    require_permission(userData, "canViewReports")
+    db = get_db_user(userData)
+    login = userData[0]
+    dept = None if _is_top_manager(login) else _user_department_id(db, login)
+    return db, dept
+
+
+@app.get("/analytics/applications", tags=["Analytics"], summary="Аналитика по заявкам")
+def analytics_applications(
+    userData=Depends(authObj.authenticate),
+    createdFrom: Optional[str] = Query(default=None),
+    createdTo:   Optional[str] = Query(default=None),
+):
+    try:
+        db, dept = _analytics_scope(userData)
+        return analytics.applications_stats(db, dept, createdFrom, createdTo)
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_for_db_error(e)
+
+
+@app.get("/analytics/executors", tags=["Analytics"], summary="Аналитика по исполнителям")
+def analytics_executors(
+    userData=Depends(authObj.authenticate),
+    createdFrom: Optional[str] = Query(default=None),
+    createdTo:   Optional[str] = Query(default=None),
+):
+    try:
+        db, dept = _analytics_scope(userData)
+        return analytics.executors_stats(db, dept, createdFrom, createdTo)
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_for_db_error(e)
+
+
+@app.get("/analytics/work-types", tags=["Analytics"], summary="Аналитика по видам работ")
+def analytics_work_types(
+    userData=Depends(authObj.authenticate),
+    createdFrom: Optional[str] = Query(default=None),
+    createdTo:   Optional[str] = Query(default=None),
+):
+    try:
+        db, dept = _analytics_scope(userData)
+        return analytics.work_types_stats(db, dept, createdFrom, createdTo)
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_for_db_error(e)
+
+
+@app.get("/analytics/departments", tags=["Analytics"], summary="Аналитика по отделам")
+def analytics_departments(
+    userData=Depends(authObj.authenticate),
+    createdFrom: Optional[str] = Query(default=None),
+    createdTo:   Optional[str] = Query(default=None),
+):
+    try:
+        db, dept = _analytics_scope(userData)
+        return analytics.departments_stats(db, dept, createdFrom, createdTo)
     except HTTPException:
         raise
     except Exception as e:

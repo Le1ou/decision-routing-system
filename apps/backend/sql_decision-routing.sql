@@ -28,7 +28,33 @@ CREATE TABLE IF NOT EXISTS public.application
     manager_comment text,
     previous_executor_id integer,
     closed_by_id integer,
+    priority_score real,
+    deadline_notified boolean,
     PRIMARY KEY (application_id)
+);
+
+-- Журнал переходов статусов заявки. Пишется подсистемой управления при каждой
+-- смене статуса; основа для аналитики и метрик времени (см. docs/backend-functions.md).
+CREATE TABLE IF NOT EXISTS public.application_status_history
+(
+    id              integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
+    application_id  integer,
+    from_status_id  integer,
+    to_status_id    integer,
+    changed_at      timestamp with time zone NOT NULL,
+    by_employee_id  integer,
+    reason          text,
+    PRIMARY KEY (id)
+);
+
+-- Настройки расчёта приоритета (одна строка, id=1). Заменяет прежний in-memory dict.
+CREATE TABLE IF NOT EXISTS public.priority_settings
+(
+    id             integer NOT NULL,
+    department     jsonb NOT NULL DEFAULT '{}'::jsonb,
+    manager_author jsonb NOT NULL DEFAULT '{}'::jsonb,
+    deadline       real  NOT NULL DEFAULT 0.2,
+    PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS public.priority
