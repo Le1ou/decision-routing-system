@@ -82,6 +82,14 @@ Production-стек использует `infra/compose/docker-compose.prod.yml`
 умолчанию `80`). Локальный стек `docker-compose.local.yml` оставляет Vite dev
 server на порту `5173`.
 
+На сервере удобнее использовать production-команды:
+
+```bash
+make prod-ps
+make prod-frontend-logs
+make prod-rebuild
+```
+
 ## Запустить инфраструктуру (DB + Backend + Frontend)
 
 Из корня репозитория (благодаря `COMPOSE_FILE` в `.env`):
