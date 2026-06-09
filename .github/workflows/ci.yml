@@ -50,6 +50,13 @@ jobs:
             -f infra/compose/docker-compose.local.yml \
             config
 
+      - name: Validate production Docker Compose config
+        run: |
+          docker compose \
+            --env-file .env.example \
+            -f infra/compose/docker-compose.prod.yml \
+            config
+
       # Docker build checks
       - name: Build backend image
         run: |
@@ -58,6 +65,10 @@ jobs:
       - name: Build frontend image
         run: |
           docker build -t decision-routing-frontend ./apps/frontend
+
+      - name: Build production frontend image
+        run: |
+          docker build -f apps/frontend/Dockerfile.prod -t decision-routing-frontend-prod ./apps/frontend
 
       - name: Start compose
         run: docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml up -d --build
@@ -74,3 +85,44 @@ jobs:
       - name: Stop compose
         if: always()
         run: docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml down -v
+
+  deploy:
+    needs: test
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+
+          script: |
+            cd ~/decision-routing-system
+
+            # Удаляем локальные изменения
+            git reset --hard
+
+            # Удаляем неотслеживаемые файлы
+            git clean -fd
+
+            # Получаем последнюю версию
+            git fetch origin
+
+            # Переключаемся на develop
+            git checkout develop
+
+            # Полностью обновляем ветку
+            git reset --hard origin/develop
+
+            # Пересобираем и запускаем production stack
+            docker compose \
+              --env-file .env \
+              -f infra/compose/docker-compose.prod.yml \
+              up -d --build
+
+            # Проверяем backend
+            sleep 15
+            curl --fail http://localhost:3000/health
