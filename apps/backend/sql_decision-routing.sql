@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.application
     closed_by_id integer,
     priority_score real,
     deadline_notified boolean,
+    escalation_notified boolean,
     PRIMARY KEY (application_id)
 );
 

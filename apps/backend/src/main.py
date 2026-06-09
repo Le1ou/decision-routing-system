@@ -17,6 +17,7 @@ import psycopg
 from src.seed import seed_database, seed_demo_notifications
 from src import priority_settings_store as ps_store
 from src import analytics_module as analytics
+from src import priority_module
 from src import events_module as events
 import asyncio
 from contextlib import asynccontextmanager
@@ -179,6 +180,9 @@ with DBController.pool.connection() as _conn:
     # Dedup flag for the events subsystem: set once a deadline-approaching
     # notification has been sent for a `new` application (so it isn't re-sent each tick).
     _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS deadline_notified boolean")
+    # Dedup flag for the routing subsystem: set once a critical application was escalated
+    # to the manager (нет свободных и некого вытеснять); сбрасывается при назначении.
+    _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS escalation_notified boolean")
     # Status-transition journal — written by the management subsystem on every
     # status change; the analytics subsystem reads it.
     _conn.execute("""
@@ -243,6 +247,7 @@ async def lifespan(_app):
     task = None
     if EVENTS_ENABLED:
         async def _loop():
+            from src import routing_module
             while True:
                 await asyncio.sleep(EVENTS_TICK_SECONDS)
                 try:
@@ -251,6 +256,13 @@ async def lifespan(_app):
                         print(f"[events] tick: {result}")
                 except Exception as e:
                     print(f"[events] tick error: {e}")
+                # Маршрутизация — отдельным шагом после событий (использует свежий приоритет).
+                try:
+                    routed = await asyncio.to_thread(routing_module.run_routing, DBController)
+                    if routed.get("assigned") or routed.get("evicted") or routed.get("escalated"):
+                        print(f"[routing] tick: {routed}")
+                except Exception as e:
+                    print(f"[routing] tick error: {e}")
         task = asyncio.create_task(_loop())
         print(f"[events] background loop enabled (tick={EVENTS_TICK_SECONDS}s).")
     try:
@@ -728,11 +740,23 @@ class PrioritySettingsModel(BaseModel):
 
     @field_validator("department", "managerAuthor")
     @classmethod
-    def validate_coeffs(cls, v):
+    def validate_coeffs(cls, v, info):
+        # Коэффициент отдела (важность) — до 1.25; надбавка руководителя — до 1.0.
+        max_val = 1.25 if info.field_name == "department" else 1.0
         for k, val in v.items():
-            if val < 0 or val > 1:
-                raise ValueError(f"Coefficient for '{k}' must be between 0 and 1")
+            if val < 0 or val > max_val:
+                raise ValueError(f"Coefficient for '{k}' must be between 0 and {max_val}")
         return v
+
+class UrgentSettingsOut(BaseModel):
+    """Параметры бонуса срочности (read-only, из config.json → priority)."""
+    thresholdHours: float
+    bonus: float
+
+class PrioritySettingsResponse(PrioritySettingsModel):
+    # GET дополнительно отдаёт read-only параметры срочности, чтобы предпросмотр на
+    # фронте мог точно повторить формулу бэкенда. Через PUT не редактируются.
+    urgent: UrgentSettingsOut
 
 # ── Notifications ──
 
@@ -1206,6 +1230,21 @@ def _dispatch_action_notifications(action, application_id, app_row, payload,
             for mid in _department_manager_ids(int(payload.departmentId)):
                 _create_notification(f"Заявка «{name}» делегирована в ваш отдел.",
                                      mid, application_id)
+        elif action == "delegateInternal":
+            # Если у отдела включено подтверждение, внутреннее делегирование уходит в
+            # статус `delegated` и ждёт решения руководителя — уведомляем его.
+            dep_id = app_row.get("department_id")
+            if dep_id is not None:
+                with DBController.pool.connection() as conn:
+                    drow = conn.execute(
+                        "SELECT delegated_to_same_dep FROM public.department WHERE department_id = %s",
+                        (dep_id,),
+                    ).fetchone()
+                if drow and drow[0]:
+                    for mid in _department_manager_ids(dep_id):
+                        _create_notification(
+                            f"Заявка «{name}» направлена на подтверждение делегирования внутри отдела.",
+                            mid, application_id)
         elif action == "confirmExternalDelegation" and author_id:
             _create_notification(f"Делегирование заявки «{name}» подтверждено.",
                                  author_id, application_id)
@@ -1418,7 +1457,9 @@ def create_application(
                 if not status_row:
                     raise HTTPException(status_code=500, detail="Status 'new' not seeded")
 
-                # Calculate initial priority (placeholder: lowest priority_id)
+                # Temporary priority_id for the insert; the real priority_score and
+                # derived priority_id are computed right after the author is linked
+                # (priority depends on the author's department/role — see below).
                 priority_row = cur.execute(
                     "SELECT priority_id FROM public.priority ORDER BY priority_id ASC LIMIT 1"
                 ).fetchone()
@@ -1455,6 +1496,11 @@ def create_application(
                 _record_status_change(
                     cur, app_id, None, status_row["status_id"], emp_id, "create", now
                 )
+
+                # Compute the real priority (score + derived level) now that the author
+                # link exists; overwrites the temporary priority_id above. Same cursor →
+                # reads the just-inserted rows within this transaction.
+                priority_module.recompute_and_store(db, cur, app_id, now)
 
         return {"id": str(app_id)}
 
@@ -2700,8 +2746,8 @@ def delete_work_type(
 
 
 @app.get("/priority-settings", tags=["Priority"], summary="Получить коэффициенты расчета приоритета",
-         description="Обычный руководитель получает настройки только своего отдела в режиме чтения. top-manager получает все отделы и может редактировать.",
-         response_model=PrioritySettingsModel)
+         description="Обычный руководитель получает настройки только своего отдела в режиме чтения. top-manager получает все отделы и может редактировать. Дополнительно отдаёт read-only параметры срочности (urgent) для предпросмотра на фронте.",
+         response_model=PrioritySettingsResponse)
 def get_priority_settings(userData=Depends(authObj.authenticate)):
     try:
         require_permission(userData, "canManagePrioritySettings")
@@ -2709,8 +2755,12 @@ def get_priority_settings(userData=Depends(authObj.authenticate)):
         login = userData[0]
         settings = ps_store.load_effective(db)
 
+        # Read-only параметры бонуса срочности (config.json → priority).
+        _urgent = priority_module._load_urgent_cfg()
+        urgent = {"thresholdHours": _urgent["threshold_hours"], "bonus": _urgent["bonus"]}
+
         if _is_top_manager(login):
-            return settings
+            return {**settings, "urgent": urgent}
 
         # A regular manager only sees their own department's coefficients.
         own = _user_department_id(db, login)
@@ -2719,6 +2769,7 @@ def get_priority_settings(userData=Depends(authObj.authenticate)):
             "department":    {own_key: settings["department"].get(own_key, ps_store.DEFAULT_COEFF)} if own_key else {},
             "managerAuthor": {own_key: settings["managerAuthor"].get(own_key, ps_store.DEFAULT_COEFF)} if own_key else {},
             "deadline":      settings["deadline"],
+            "urgent":        urgent,
         }
     except HTTPException:
         raise

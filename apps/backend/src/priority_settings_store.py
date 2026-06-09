@@ -13,7 +13,9 @@ API не меняется: {"department": {dep_id: коэф}, "managerAuthor": {
 from psycopg.types.json import Json
 
 DEFAULT_COEFF = 0.2
-DEFAULT_DEADLINE = 0.2
+# Вес фактора срока по умолчанию = 1.0: время до дедлайна считается «в полную силу»
+# (k_времени = deadlinePressure · deadline, deadlinePressure ∈ [0,1]).
+DEFAULT_DEADLINE = 1.0
 
 
 def _load_row(db):
@@ -33,7 +35,9 @@ def load_effective(db) -> dict:
     deps = db.getAllRowsFromTable("department") or []
     for d in deps:
         dep_id = str(d["department_id"])
-        department.setdefault(dep_id, DEFAULT_COEFF)
+        # k_отдела по умолчанию = важность отдела (department.value); managerAuthor — 0.2.
+        dep_default = float(d["value"]) if d.get("value") is not None else DEFAULT_COEFF
+        department.setdefault(dep_id, dep_default)
         manager_author.setdefault(dep_id, DEFAULT_COEFF)
 
     return {"department": department, "managerAuthor": manager_author, "deadline": deadline}
