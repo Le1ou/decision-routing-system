@@ -166,6 +166,110 @@ def test_critical_evicts_lowest_priority(sysdb):
     assert str(low.get("previousExecutorId")) == "3"
 
 
+def test_critical_on_create_is_routed_immediately(sysdb):
+    """Критичная при создании заявка распределяется СРАЗУ (без вызова run_routing и без
+    ожидания фонового тика) — через немедленный триггер в create_application."""
+    _free_executor(sysdb, EXEC1)
+    _free_executor(sysdb, EXEC2)
+    # Дедлайн в прошлом → k_времени=1; для ИТ (k_отдела высокий) score≥0.82 → critical уже
+    # при создании. Тик маршрутизации НЕ вызываем — проверяем именно немедленный триггер.
+    body = {"name": "Critical on create", "departmentId": str(DEP_IT), "workTypeId": str(WT_IT_EASY),
+            "deadlineAt": "2000-01-01T00:00:00Z", "description": "overdue on create"}
+    r = _session.post(f"{BASE_URL}/applications", auth=MANAGER, json=body)
+    assert r.status_code == 201, r.text
+    app_id = r.json()["id"]
+
+    a = _app(app_id)
+    assert a["priority"] == "critical", a
+    assert a["status"] == "assigned"             # распределена немедленно
+    assert a["executor"] and a["executor"]["departmentId"] == str(DEP_IT)
+
+
+def test_non_critical_on_create_waits_for_tick(sysdb):
+    """Обычная (не критичная) заявка при создании НЕ распределяется немедленно —
+    остаётся в `new` до фонового тика (немедленный триггер только для критичных)."""
+    _free_executor(sysdb, EXEC1)
+    _free_executor(sysdb, EXEC2)
+    # Далёкий дедлайн → k_времени≈0, не срочно → low, не critical.
+    body = {"name": "Low on create", "departmentId": str(DEP_IT), "workTypeId": str(WT_IT_EASY),
+            "deadlineAt": "2030-01-01T00:00:00Z", "description": "far deadline"}
+    r = _session.post(f"{BASE_URL}/applications", auth=MANAGER, json=body)
+    assert r.status_code == 201, r.text
+    a = _app(r.json()["id"])
+    assert a["priority"] != "critical"
+    assert a["status"] == "new"                  # ждёт тик, немедленного назначения нет
+
+
+def _deactivate_other_it_executors(sysdb):
+    """Временно выключить «лишних» активных исполнителей ИТ (кроме EXEC1/EXEC2):
+    ранние тесты (test_endpoints) добавляют в ИТ новых исполнителей из AD, и без
+    этого критичной заявке нашёлся бы свободный кандидат. Возвращает их ids."""
+    er = _exec_role_id(sysdb)
+    with sysdb.pool.connection() as c:
+        rows = c.execute(
+            "SELECT employee_id FROM public.employee "
+            "WHERE department_id=%s AND role_id=%s AND is_active=true "
+            "AND employee_id NOT IN (%s, %s)",
+            (DEP_IT, er, EXEC1, EXEC2),
+        ).fetchall()
+        ids = [r[0] for r in rows]
+        if ids:
+            c.execute("UPDATE public.employee SET is_active=false WHERE employee_id = ANY(%s)", (ids,))
+    return ids
+
+
+def _reactivate_executors(sysdb, ids):
+    if ids:
+        with sysdb.pool.connection() as c:
+            c.execute("UPDATE public.employee SET is_active=true WHERE employee_id = ANY(%s)", (ids,))
+
+
+def test_critical_escalates_when_no_one_evictable(sysdb):
+    """Все подходящие исполнители заняты КРИТИЧНЫМИ заявками → вытеснять некого:
+    критичная заявка остаётся в `new`, руководителю уходит эскалация (однократно)."""
+    _free_executor(sysdb, EXEC1)
+    _free_executor(sysdb, EXEC2)
+    others = _deactivate_other_it_executors(sysdb)   # только EXEC1/EXEC2 в пуле ИТ
+    busy1 = _busy_executor(EXEC1)
+    busy2 = _busy_executor(EXEC2)
+    _set_critical(sysdb, busy1)            # критичные текущие заявки не вытесняются
+    _set_critical(sysdb, busy2)
+
+    crit = _create_app(DEP_IT, WT_IT_EASY)
+    _demote_other_new_apps(sysdb, crit)    # чужие new-заявки не должны вмешиваться
+    _set_critical(sysdb, crit)
+
+    def _notif_count():
+        with sysdb.pool.connection() as c:
+            return c.execute("SELECT COUNT(*) FROM public.notification WHERE application_id=%s",
+                             (int(crit),)).fetchone()[0]
+
+    try:
+        routing_module.run_routing(sysdb)
+
+        assert _app(crit)["status"] == "new"           # не распределена и никого не вытеснила
+        assert _app(busy1)["status"] == "assigned"
+        assert _app(busy2)["status"] == "assigned"
+        with sysdb.pool.connection() as c:
+            flag = c.execute("SELECT escalation_notified FROM public.application "
+                             "WHERE application_id=%s", (int(crit),)).fetchone()[0]
+        assert flag is True
+        first = _notif_count()
+        assert first >= 1                              # руководитель уведомлён
+
+        routing_module.run_routing(sysdb)              # повторный проход — без дублей
+        assert _notif_count() == first
+    finally:
+        _reactivate_executors(sysdb, others)
+        # Не оставляем критичную new-заявку в очереди — она вытеснила бы чужие
+        # назначения в последующих тестах/тиках.
+        with sysdb.pool.connection() as c:
+            low = c.execute("SELECT priority_id FROM public.priority WHERE name='low'").fetchone()[0]
+            for app_id in (crit, busy1, busy2):
+                c.execute("UPDATE public.application SET priority_id=%s, priority_score=0.0 "
+                          "WHERE application_id=%s", (low, int(app_id)))
+
+
 def test_cooldown_blocks_recently_finished(sysdb):
     _free_executor(sysdb, EXEC1)
     _busy_executor(EXEC2)                    # emp3 занят

@@ -129,6 +129,25 @@ def test_deadline_approaching_notifies_executor_too(sysdb):
     assert got >= 1
 
 
+def test_deadline_notification_is_idempotent(sysdb):
+    # Повторный тик не шлёт дубль уведомления о дедлайне (дедуп через deadline_notified).
+    deadline = datetime.now(timezone.utc) + timedelta(hours=1)
+    app_id = _create_app(deadline.isoformat())
+    with sysdb.pool.connection() as conn:
+        conn.execute(
+            "UPDATE public.application SET created_at = %s WHERE application_id = %s",
+            (datetime.now(timezone.utc) - timedelta(hours=9), app_id),
+        )
+
+    events_module.run_tick(sysdb)
+    count_after_first = _notif_count(sysdb, app_id)
+    events_module.run_tick(sysdb)
+
+    assert _deadline_notified(sysdb, app_id) is True
+    assert count_after_first >= 1
+    assert _notif_count(sysdb, app_id) == count_after_first
+
+
 def test_far_deadline_not_notified(sysdb):
     # Plenty of time left (~100% remaining) → no deadline notification yet.
     deadline = datetime.now(timezone.utc) + timedelta(days=365)

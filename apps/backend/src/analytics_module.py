@@ -14,9 +14,10 @@ analytics_module.py — подсистема аналитики (docs/backend-fu
 
 Полный контракт полей — docs/analytics-contract.md.
 
-ПОКА НЕ РЕАЛИЗОВАНО (требует помодельного таймлайна занятости сотрудника с обрезкой по
-окну периода): время простоя сотрудника и доля занятости (idle/occupancy). Поля
-зарезервированы как null и помечены в контракт-доке.
+Время простоя (idleTimeSeconds) и доля занятости (occupancyRatio) считаются по таймлайну
+удержания заявок исполнителем с обрезкой по общему окну анализа scope (см. _occupancy);
+для отдела — агрегат по его активным исполнителям. Возвращают null, если окно анализа
+пустое (нет данных).
 """
 
 from psycopg.rows import dict_row
@@ -55,6 +56,86 @@ def _meta(department_id, dt_from, dt_to):
         "departmentId": None if department_id is None else str(department_id),
         "period": None if not (dt_from or dt_to) else {"from": dt_from, "to": dt_to},
     }
+
+
+def _idle_occ(busy, window):
+    """(idleSeconds, occupancyRatio) из занятого и оконного времени.
+
+    window<=0 (нет окна анализа) → (None, None). busy зажимается в [0, window]."""
+    if not window or window <= 0:
+        return None, None
+    busy = max(0.0, min(float(busy or 0.0), window))
+    return round(window - busy, 2), round(busy / window, 4)
+
+
+def _occupancy(cur, department_id, dt_from, dt_to):
+    """Занятость исполнителей для idle/occupancy.
+
+    Занятость = время удержания заявки текущим исполнителем: интервал
+    [executor_at, конец], конец = finished_at (завершено) | now() (активно) |
+    COALESCE(finished_at, updated_at) (отклонено/иное терминальное).
+
+    Окно анализа — общее для scope: [dt_from | самое раннее executor_at в scope,
+    dt_to | now()]. На employee.created_at не опираемся (при сидинге он = «сейчас»).
+    Интервалы занятости обрезаются по окну; при модели «одна заявка на исполнителя»
+    они не пересекаются, поэтому busy = сумма обрезанных длительностей.
+
+    Возвращает (dict[employee_id] -> {department_id, busy, window}, window_seconds).
+    В выборку входят все активные исполнители scope (в т.ч. простаивавшие → busy=0).
+    """
+    exec_role_sub = "(SELECT role_id FROM public.role WHERE name = 'executor' LIMIT 1)"
+    dep_sql = " AND e.department_id = %(dep)s" if department_id is not None else ""
+    dep = int(department_id) if department_id is not None else None
+
+    b = cur.execute(
+        f"""
+        SELECT COALESCE(%(from)s::timestamptz, MIN(a.executor_at)) AS ws,
+               COALESCE(%(to)s::timestamptz, now())                AS we
+        FROM public.application a
+        JOIN public.employee_to_application eta
+             ON eta.application_id = a.application_id AND eta.role_id = {exec_role_sub}
+        JOIN public.employee e ON e.employee_id = eta.employee_id
+        WHERE a.executor_at IS NOT NULL{dep_sql}
+        """,
+        {"from": dt_from, "to": dt_to, "dep": dep},
+    ).fetchone()
+    ws, we = b["ws"], b["we"]
+    window = max(0.0, (we - ws).total_seconds()) if ws is not None and we is not None else 0.0
+
+    rows = cur.execute(
+        f"""
+        WITH ex AS (
+            SELECT e.employee_id, e.department_id
+            FROM public.employee e
+            JOIN public.role r ON r.role_id = e.role_id AND r.name = 'executor'
+            WHERE e.is_active = true{dep_sql}
+        ),
+        seg AS (
+            SELECT ex.employee_id,
+                   GREATEST(0, EXTRACT(EPOCH FROM (
+                       LEAST(CASE WHEN st.name IN ('assigned', 'inProgress') THEN now()
+                                  ELSE COALESCE(a.finished_at, a.updated_at) END,
+                             %(we)s::timestamptz)
+                       - GREATEST(a.executor_at, %(ws)s::timestamptz)))) AS secs
+            FROM ex
+            JOIN public.employee_to_application eta
+                 ON eta.employee_id = ex.employee_id AND eta.role_id = {exec_role_sub}
+            JOIN public.application a ON a.application_id = eta.application_id
+            JOIN public.status st ON st.status_id = a.status_id
+            WHERE a.executor_at IS NOT NULL
+        )
+        SELECT ex.employee_id, ex.department_id, COALESCE(SUM(seg.secs), 0) AS busy
+        FROM ex LEFT JOIN seg ON seg.employee_id = ex.employee_id
+        GROUP BY ex.employee_id, ex.department_id
+        """,
+        {"ws": ws, "we": we, "dep": dep},
+    ).fetchall()
+    occ = {
+        r["employee_id"]: {"department_id": r["department_id"],
+                           "busy": float(r["busy"] or 0.0), "window": window}
+        for r in rows
+    }
+    return occ, window
 
 
 def _time_per_status(cur, app_where, app_params):
@@ -255,9 +336,14 @@ def executors_stats(db, department_id=None, dt_from=None, dt_to=None) -> dict:
             for r in action_rows:
                 actions.setdefault(r["emp"], {})[r["reason"]] = r["c"]
 
+            # Время простоя / доля занятости (общее окно анализа для scope).
+            occ, _ = _occupancy(cur, department_id, dt_from, dt_to)
+
     executors = []
     for r in base_rows:
         a = actions.get(r["employee_id"], {})
+        o = occ.get(r["employee_id"])
+        idle_secs, occ_ratio = _idle_occ(o["busy"], o["window"]) if o else (None, None)
         executors.append({
             "employeeId": str(r["employee_id"]),
             "fullName": r["fio"] or "",
@@ -273,8 +359,8 @@ def executors_stats(db, department_id=None, dt_from=None, dt_to=None) -> dict:
             "avgReactionTimeSeconds": _n(r["reaction_avg"]),
             "avgHandlingTimeSeconds": _n(r["handling_avg"]),
             "totalWorkSeconds": _n(r["work_total"]),
-            "idleTimeSeconds": None,      # см. docs/analytics-contract.md (планируется)
-            "occupancyRatio": None,       # см. docs/analytics-contract.md (планируется)
+            "idleTimeSeconds": idle_secs,
+            "occupancyRatio": occ_ratio,
         })
     out["executors"] = executors
     return out
@@ -401,18 +487,31 @@ def departments_stats(db, department_id=None, dt_from=None, dt_to=None) -> dict:
                 app_params + app_params + app_params + dep_param,
             ).fetchall()
 
-    out["departments"] = [
-        {
+            # Простой/занятость отдела = агрегат по его активным исполнителям
+            # (одно общее окно анализа для scope).
+            occ, _ = _occupancy(cur, department_id, dt_from, dt_to)
+
+    agg = {}  # department_id -> [busy, window]
+    for v in occ.values():
+        d = v["department_id"]
+        cell = agg.setdefault(d, [0.0, 0.0])
+        cell[0] += v["busy"]
+        cell[1] += v["window"]
+
+    departments = []
+    for r in rows:
+        cell = agg.get(r["department_id"])
+        idle_secs, occ_ratio = _idle_occ(cell[0], cell[1]) if cell else (None, None)
+        departments.append({
             "departmentId": str(r["department_id"]),
             "name": r["name"] or "",
             "employeeCount": r["employee_count"],
             "applicationCount": r["application_count"],
             "completedCount": r["completed_count"],
             "avgReactionTimeSeconds": _n(r["reaction_avg"]),
-            "idleTimeSeconds": None,    # см. docs/analytics-contract.md (планируется)
-            "occupancyRatio": None,     # см. docs/analytics-contract.md (планируется)
+            "idleTimeSeconds": idle_secs,
+            "occupancyRatio": occ_ratio,
             "delegations": {"sent": r["delegations_sent"], "received": r["delegations_received"]},
-        }
-        for r in rows
-    ]
+        })
+    out["departments"] = departments
     return out

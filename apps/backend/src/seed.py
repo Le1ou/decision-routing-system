@@ -14,8 +14,8 @@ This version matches the CURRENT schema, which means:
     directory and is joined in at the API layer.
   • photo stores S3 metadata (s3_key, name, content_type, size_bytes,
     application_id); seed uploads real images from tests/images_for_tests.
-  • there is no priority_settings table — GET/PUT /priority-settings is
-    still backed by the in-memory dict in main.py.
+  • priority_settings persists configuration (PUT /priority-settings) and is
+    EXCLUDED from the wipe below — it survives reseeds and restarts.
   • previous_executor_id / closed_by_id have only FK constraints (no UNIQUE),
     so employees may be reused freely across applications.
   • application.delegated_id ↔ delegated.application_id is a circular FK, so

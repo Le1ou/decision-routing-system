@@ -336,8 +336,17 @@ class TestGetApplication:
         assert r.status_code == 200
         assert "application" in r.json()
 
-    def test_executor_200(self):
-        assert get(f"/applications/{APP_NEW_2}", EXECUTOR).status_code == 200
+    def test_executor_sees_own_assigned_200(self):
+        # Назначенный исполнитель видит свою заявку.
+        assert get(f"/applications/{APP_ASSIGNED}", EXECUTOR).status_code == 200
+
+    def test_executor_cannot_view_unrelated_404(self):
+        # Не свою заявку (не автор/не исполнитель, не руководитель) исполнитель не видит:
+        # видимость карточки теперь как у списка (закрыта межотдельная утечка).
+        new_id = post("/applications", MANAGER, json={
+            "name": "vis-check", "departmentId": "1", "workTypeId": "1",
+            "deadlineAt": "2030-01-01T00:00:00Z", "description": "vis-check"}).json()["id"]
+        assert get(f"/applications/{new_id}", EXECUTOR).status_code == 404
 
     def test_not_found_404(self):
         assert get("/applications/99999", MANAGER).status_code == 404
@@ -347,6 +356,31 @@ class TestGetApplication:
 
     def test_no_auth_401(self):
         assert get(f"/applications/{APP_NEW_2}").status_code == 401
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /applications/{id}/attachments — права на загрузку
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAttachmentsPermissions:
+    def _new_app(self):
+        return post("/applications", MANAGER, json={
+            "name": "att-perm", "departmentId": "1", "workTypeId": "1",
+            "deadlineAt": "2030-01-01T00:00:00Z", "description": "att-perm"}).json()["id"]
+
+    def test_unrelated_user_cannot_upload_403(self):
+        # Исполнитель, не причастный к заявке, не может грузить вложения.
+        app_id = self._new_app()
+        r = post(f"/applications/{app_id}/attachments", EXECUTOR,
+                 files={"files": ("a.txt", b"hi", "text/plain")})
+        assert r.status_code == 403
+
+    def test_manager_in_scope_can_upload_201(self):
+        # Руководитель-в-scope может.
+        app_id = self._new_app()
+        r = post(f"/applications/{app_id}/attachments", MANAGER,
+                 files={"files": ("a.txt", b"hi", "text/plain")})
+        assert r.status_code == 201
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -787,6 +821,14 @@ class TestNotifications:
             assert post(f"/notifications/{notif_id}/read", EXECUTOR).status_code == 204
         else:
             pytest.skip("No notifications available for executor")
+
+    def test_cannot_mark_others_notification_404(self):
+        # Чужое уведомление нельзя отметить прочитанным (проверка владельца → 404).
+        items = get("/notifications", EXECUTOR).json().get("items", [])
+        if not items:
+            pytest.skip("No executor notifications to test ownership")
+        notif_id = items[0]["id"]
+        assert post(f"/notifications/{notif_id}/read", MANAGER).status_code == 404
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1302,10 +1344,10 @@ class TestExecutorExternalDelegation:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestInvolvementGating:
-    def test_unassigned_executor_has_no_actions_and_is_forbidden(self):
+    def test_unassigned_executor_cannot_view_or_act(self):
         app_id = _create_assigned("2")           # assigned to ivanov (emp 2)
-        d = _detail(app_id, EXECUTOR2)           # petrov is not involved
-        assert d["availableActions"] == []
+        # petrov не причастен → карточка не видна (404, как у списка) и действовать нельзя (403)
+        assert get(f"/applications/{app_id}", EXECUTOR2).status_code == 404
         assert _act(app_id, EXECUTOR2, action="startWork").status_code == 403
 
     def test_manager_assigned_as_executor_gets_executor_actions(self):
@@ -1318,3 +1360,119 @@ class TestInvolvementGating:
         assert "assignExecutor" not in d["availableActions"]
         assert _act(app_id, DEPT_MANAGER, action="startWork").status_code == 204
         assert _detail(app_id, MANAGER)["status"] == "inProgress"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# editDescription / changeWorkType — card-editing actions on `new` applications
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestEditDescriptionAndWorkType:
+    def test_author_edits_own_description(self):
+        app_id = int(_make_app(AUTHOR))
+        assert "editDescription" in _detail(app_id, AUTHOR)["availableActions"]
+        assert _act(app_id, AUTHOR, action="editDescription",
+                    description="Обновлённое описание").status_code == 204
+        assert _detail(app_id, AUTHOR)["description"] == "Обновлённое описание"
+
+    def test_edit_description_requires_description_400(self):
+        app_id = int(_make_app(AUTHOR))
+        assert _act(app_id, AUTHOR, action="editDescription").status_code == 400
+
+    def test_uninvolved_executor_cannot_edit_description_403(self):
+        app_id = int(_make_app(AUTHOR))   # ivanov is neither author nor executor
+        assert _act(app_id, EXECUTOR, action="editDescription",
+                    description="x").status_code == 403
+
+    def test_manager_changes_work_type(self):
+        app_id = int(_make_app(AUTHOR))   # IT app, work type 1
+        assert "changeWorkType" in _detail(app_id, MANAGER)["availableActions"]
+        assert _act(app_id, MANAGER, action="changeWorkType", workTypeId="2").status_code == 204
+        assert _detail(app_id, MANAGER)["workTypeId"] == "2"
+
+    def test_change_work_type_requires_id_400(self):
+        app_id = int(_make_app(AUTHOR))
+        assert _act(app_id, MANAGER, action="changeWorkType").status_code == 400
+
+    def test_author_cannot_change_work_type_403(self):
+        # Author tier on `new` is {editDescription, cancel} — changeWorkType is manager-only.
+        app_id = int(_make_app(AUTHOR))
+        assert "changeWorkType" not in _detail(app_id, AUTHOR)["availableActions"]
+        assert _act(app_id, AUTHOR, action="changeWorkType", workTypeId="2").status_code == 403
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Attachments — uploaded files come back on the card with a downloadable link
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAttachmentContent:
+    def test_uploaded_file_visible_on_card_with_url(self):
+        app_id = int(_make_app(AUTHOR))
+        r = post(f"/applications/{app_id}/attachments", AUTHOR,
+                 files={"files": ("отчёт.txt", b"attachment body", "text/plain")})
+        assert r.status_code == 201, r.text
+        uploaded_ids = {i["id"] for i in r.json()["items"]}
+        assert uploaded_ids
+
+        atts = _detail(app_id, AUTHOR)["attachments"]
+        ours = [a for a in atts if a["id"] in uploaded_ids]
+        assert ours, "uploaded attachment must appear on the card"
+        att = ours[0]
+        assert att["name"] == "отчёт.txt"
+        assert att["applicationId"] == str(app_id)
+        # The local stack runs MinIO → a presigned download link must be issued.
+        assert isinstance(att["url"], str) and att["url"].startswith("http")
+
+    def test_upload_to_missing_application_404(self):
+        r = post("/applications/999999/attachments", MANAGER,
+                 files={"files": ("a.txt", b"x", "text/plain")})
+        assert r.status_code == 404
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATCH /employees — a plain manager cannot grant a role above their own
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestUpdateEmployeeRoleGuard:
+    OGE_EXECUTOR_EMP = 4   # sidorova_a — executor in OGE (kuznetsov's department)
+
+    def test_plain_manager_cannot_promote_to_top_manager_403(self):
+        r = patch(f"/employees/{self.OGE_EXECUTOR_EMP}", DEPT_MANAGER,
+                  json={"role": "top-manager"})
+        assert r.status_code == 403
+
+    def test_plain_manager_can_set_role_within_ladder_204(self):
+        # Manager-or-below roles are allowed; also restores the seeded role.
+        r = patch(f"/employees/{self.OGE_EXECUTOR_EMP}", DEPT_MANAGER,
+                  json={"role": "executor"})
+        assert r.status_code == 204
+
+    def test_plain_manager_cannot_touch_other_department_403(self):
+        # Employee 2 (ivanov) is IT — out of the OGE manager's scope.
+        r = patch("/employees/2", DEPT_MANAGER, json={"isActive": True})
+        assert r.status_code == 403
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /notifications — unreadOnly really filters, and read state flips correctly
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestNotificationsReadState:
+    def test_unread_only_filters_and_read_flips_state(self):
+        # Assignment generates a notification for the executor (ivanov).
+        app_id = int(_make_app(AUTHOR))
+        assert _act(app_id, MANAGER, action="assignExecutor", executorId="2").status_code == 204
+
+        unread = get("/notifications", EXECUTOR, params={"unreadOnly": True}).json()["items"]
+        ours = [n for n in unread if str(n.get("applicationId")) == str(app_id)]
+        assert ours, "assignment notification must be unread initially"
+        assert all(n["isRead"] is False for n in unread)
+        notif_id = ours[0]["id"]
+
+        assert post(f"/notifications/{notif_id}/read", EXECUTOR).status_code == 204
+
+        unread_after = get("/notifications", EXECUTOR, params={"unreadOnly": True}).json()["items"]
+        assert all(n["id"] != notif_id for n in unread_after), "read notification must leave unreadOnly"
+        # …but it is still present (as read) in the full list.
+        full = get("/notifications", EXECUTOR).json()["items"]
+        match = [n for n in full if n["id"] == notif_id]
+        assert match and match[0]["isRead"] is True

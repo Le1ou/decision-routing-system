@@ -110,3 +110,41 @@ def test_period_filter_accepted():
                 createdFrom="2099-01-01T00:00:00Z", createdTo="2099-12-31T00:00:00Z").json()
     assert data["total"] == 0
     assert data["period"] == {"from": "2099-01-01T00:00:00Z", "to": "2099-12-31T00:00:00Z"}
+
+
+# ── idle / occupancy (реальный расчёт, не заглушка) ───────────────────────────
+
+def _idle_occ_ok(idle, occ):
+    """Поля согласованы: оба либо null, либо числа; ratio в [0..1], idle >= 0."""
+    assert (idle is None) == (occ is None)
+    if occ is not None:
+        assert 0.0 <= occ <= 1.0
+        assert idle >= 0.0
+
+
+def test_executor_idle_occupancy_computed():
+    data = _get("/analytics/executors", TOP_MANAGER).json()
+    rows = data["executors"]
+    assert rows, "seeded executors with applications must exist"
+    for row in rows:
+        _idle_occ_ok(row["idleTimeSeconds"], row["occupancyRatio"])
+    # У сидовых исполнителей есть заявки с executor_at → хотя бы у одного занятость посчитана.
+    assert any(r["occupancyRatio"] is not None for r in rows), \
+        "occupancy must be computed for at least one executor (not a stub null)"
+
+
+def test_department_idle_occupancy_computed():
+    data = _get("/analytics/departments", TOP_MANAGER).json()
+    rows = data["departments"]
+    for row in rows:
+        _idle_occ_ok(row["idleTimeSeconds"], row["occupancyRatio"])
+    assert any(r["occupancyRatio"] is not None for r in rows), \
+        "occupancy must be computed for at least one department"
+
+
+def test_future_period_yields_zero_occupancy():
+    # Окно целиком в будущем → заявок в окне нет, занятость 0 (поля согласованы, без падений).
+    data = _get("/analytics/departments", TOP_MANAGER,
+                createdFrom="2099-01-01T00:00:00Z", createdTo="2099-12-31T00:00:00Z").json()
+    for row in data["departments"]:
+        _idle_occ_ok(row["idleTimeSeconds"], row["occupancyRatio"])
