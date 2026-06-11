@@ -120,18 +120,35 @@ jobs:
             # Полностью обновляем ветку
             git reset --hard origin/develop
 
-            # Останавливаем старый stack, чтобы изменения ports/container topology
-            # применялись без конфликтов и orphan-контейнеров.
+            # Сначала собираем images, не останавливая текущий production stack.
+            # Docker Hub иногда даёт TLS timeout; retry снижает шанс ложного deploy fail.
+            for attempt in 1 2 3; do
+              if docker compose \
+                --env-file .env \
+                -f infra/compose/docker-compose.prod.yml \
+                build; then
+                break
+              fi
+
+              if [ "$attempt" = "3" ]; then
+                exit 1
+              fi
+
+              sleep $((attempt * 30))
+            done
+
+            # Останавливаем старый stack только после успешной сборки, чтобы изменения
+            # ports/container topology применялись без конфликтов и orphan-контейнеров.
             docker compose \
               --env-file .env \
               -f infra/compose/docker-compose.prod.yml \
               down --remove-orphans
 
-            # Пересобираем и запускаем production stack
+            # Запускаем production stack из уже собранных images.
             docker compose \
               --env-file .env \
               -f infra/compose/docker-compose.prod.yml \
-              up -d --build
+              up -d --no-build
 
             # Проверяем backend
             sleep 15
