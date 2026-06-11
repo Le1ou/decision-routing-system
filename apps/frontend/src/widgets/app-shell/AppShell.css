@@ -16,21 +16,6 @@
   box-shadow: 0 4px 18px rgba(34, 45, 72, 0.05);
 }
 
-.app-shell__back {
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #d7dde8;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #263247;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 800;
-  padding: 0 12px;
-}
-
 .app-shell__home-link {
   display: inline-flex;
   flex: 1;
@@ -261,18 +246,6 @@
 
   .app-shell__home-link small {
     display: none;
-  }
-
-  .app-shell__back {
-    width: 38px;
-    padding: 0;
-    font-size: 0;
-  }
-
-  .app-shell__back::before {
-    content: "‹";
-    font-size: 26px;
-    line-height: 1;
   }
 
   .app-shell__profile {

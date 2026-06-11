@@ -86,7 +86,7 @@ export function LoginPage() {
             <input
               type={passwordVisible ? "text" : "password"}
               value={password}
-              placeholder="Введите пароль"
+              placeholder="Пароль"
               autoComplete="off"
               onChange={(event) => {
                 setPassword(event.target.value);
@@ -97,8 +97,10 @@ export function LoginPage() {
               className={passwordVisible ? "login-card__eye login-card__eye--open" : "login-card__eye"}
               type="button"
               onClick={() => setPasswordVisible((value) => !value)}
-              aria-label="Показать пароль"
-            />
+              aria-label={passwordVisible ? "Скрыть пароль" : "Показать пароль"}
+            >
+              {passwordVisible ? "Скрыть" : "Показать"}
+            </button>
           </div>
         </label>
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
@@ -13,7 +13,6 @@ import "./AppShell.css";
 export function AppShell({ children }: { children: ReactNode }) {
   const { currentUser, credentials, logout } = useAuth();
   const { applicationItems } = useApplicationsStore();
-  const navigate = useNavigate();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -60,20 +59,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     await refreshNotifications();
   };
 
-  const goHome = () => {
-    navigate("/");
-  };
-
   return (
     <div className="app-shell">
       <header className="app-shell__header">
-        <button
-          className="app-shell__back"
-          type="button"
-          onClick={goHome}
-        >
-          Назад
-        </button>
         <Link className="app-shell__home-link" to="/" aria-label="ДиспетчерЗаявок">
           <img src="/application-dispatcher-mark.svg" alt="" aria-hidden="true" />
           <span>

@@ -166,8 +166,8 @@
 
 .login-card__password {
   display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   border-bottom: 2px solid #ccd3df;
 }
 
@@ -175,40 +175,28 @@
   border-bottom: 0;
 }
 
+.login-card__password input::placeholder {
+  color: #9aa4b2;
+  font-size: 20px;
+  font-weight: 700;
+}
+
 .login-card__eye {
-  position: relative;
-  width: 64px;
-  height: 54px;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-
-.login-card__eye::before {
-  content: "";
-  position: absolute;
-  left: 8px;
-  top: 16px;
-  width: 44px;
-  height: 24px;
-  border: 4px solid #1d1d1d;
-  border-radius: 50%;
-}
-
-.login-card__eye::after {
-  content: "";
-  position: absolute;
-  left: 5px;
-  top: 27px;
-  width: 56px;
-  height: 4px;
+  min-width: 76px;
+  min-height: 34px;
+  border: 1px solid #d7dde8;
   border-radius: 999px;
-  background: #1d1d1d;
-  transform: rotate(-34deg);
+  background: transparent;
+  color: #4b5b73;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 0 12px;
 }
 
-.login-card__eye--open::after {
-  display: none;
+.login-card__eye:hover {
+  border-color: #b8cdf8;
+  color: #1f6feb;
 }
 
 .login-card__submit {

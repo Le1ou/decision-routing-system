@@ -8,6 +8,10 @@ import { Button } from "@shared/ui";
 
 import "./CreateApplicationPage.css";
 
+const MAX_FILES_COUNT = 5;
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_FILE_SIZE_BYTES = 30 * 1024 * 1024;
+
 type CreateApplicationForm = {
   title: string;
   departmentId: string;
@@ -89,6 +93,12 @@ export function CreateApplicationPage() {
       nextErrors.description = "Опишите проблему.";
     }
 
+    const filesError = validateFiles(form.files);
+
+    if (filesError) {
+      nextErrors.files = filesError;
+    }
+
     setErrors(nextErrors);
 
     return Object.keys(nextErrors).length === 0;
@@ -123,6 +133,14 @@ export function CreateApplicationPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleFilesChange = (files: File[]) => {
+    const filesError = validateFiles(files);
+
+    setForm((current) => ({ ...current, files: filesError ? [] : files }));
+    setErrors((current) => ({ ...current, files: filesError }));
+    setCreatedApplicationId("");
   };
 
   return (
@@ -240,9 +258,13 @@ export function CreateApplicationPage() {
             <input
               type="file"
               multiple
-              onChange={(event) => updateField("files", Array.from(event.target.files ?? []))}
+              onChange={(event) => handleFilesChange(Array.from(event.target.files ?? []))}
             />
           </label>
+          <small>
+            До {MAX_FILES_COUNT} файлов, по {formatMegabytes(MAX_FILE_SIZE_BYTES)} МБ каждый, всего до {formatMegabytes(MAX_TOTAL_FILE_SIZE_BYTES)} МБ.
+          </small>
+          {errors.files ? <span className="create-window__error create-window__error--files">{errors.files}</span> : null}
         </div>
 
         <footer className="create-window__footer">
@@ -253,4 +275,28 @@ export function CreateApplicationPage() {
       </form>
     </section>
   );
+}
+
+function validateFiles(files: File[]) {
+  if (files.length > MAX_FILES_COUNT) {
+    return `Можно прикрепить не больше ${MAX_FILES_COUNT} файлов.`;
+  }
+
+  const oversizedFile = files.find((file) => file.size > MAX_FILE_SIZE_BYTES);
+
+  if (oversizedFile) {
+    return `Файл «${oversizedFile.name}» больше ${formatMegabytes(MAX_FILE_SIZE_BYTES)} МБ.`;
+  }
+
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+
+  if (totalSize > MAX_TOTAL_FILE_SIZE_BYTES) {
+    return `Общий размер файлов больше ${formatMegabytes(MAX_TOTAL_FILE_SIZE_BYTES)} МБ.`;
+  }
+
+  return "";
+}
+
+function formatMegabytes(bytes: number) {
+  return Math.round(bytes / 1024 / 1024);
 }
