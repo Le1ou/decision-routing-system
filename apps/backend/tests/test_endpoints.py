@@ -611,8 +611,16 @@ class TestAdUsers:
         assert r.status_code == 200
         assert "items" in r.json()
 
-    def test_executor_200(self):
-        assert get("/ad/users", EXECUTOR).status_code == 200
+    def test_dept_manager_200(self):
+        assert get("/ad/users", DEPT_MANAGER).status_code == 200
+
+    def test_executor_403(self):
+        # Каталог AD доступен только держателям canManageEmployees: рядовым
+        # пользователям ФИО/логины не заведённых людей не отдаются.
+        assert get("/ad/users", EXECUTOR).status_code == 403
+
+    def test_author_403(self):
+        assert get("/ad/users", AUTHOR).status_code == 403
 
     def test_filter_by_query_200(self):
         assert get("/ad/users", MANAGER, params={"query": "Смирнова"}).status_code == 200
@@ -865,7 +873,14 @@ class TestReports:
         assert r.status_code == 200
 
     def test_xls_manager_200(self):
-        assert get("/reports/applications.xls", MANAGER).status_code == 200
+        r = get("/reports/applications.xls", MANAGER)
+        assert r.status_code == 200
+        # openpyxl генерирует xlsx — заголовки должны отдавать честный тип и имя
+        # (раньше: vnd.ms-excel + .xls, и Excel предупреждал о формате).
+        assert r.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        assert "applications.xlsx" in r.headers.get("content-disposition", "")
+        assert r.content[:2] == b"PK"   # xlsx = zip-контейнер
 
     def test_xls_executor_403(self):
         assert get("/reports/applications.xls", EXECUTOR).status_code == 403
@@ -1419,6 +1434,8 @@ class TestAttachmentContent:
         att = ours[0]
         assert att["name"] == "отчёт.txt"
         assert att["applicationId"] == str(app_id)
+        # MIME-тип нужен фронтенду, чтобы отличать фото от документов.
+        assert att["contentType"] == "text/plain"
         # The local stack runs MinIO → a presigned download link must be issued.
         assert isinstance(att["url"], str) and att["url"].startswith("http")
 

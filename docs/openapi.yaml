@@ -18,8 +18,8 @@ paths:
       tags:
       - Auth
       summary: Получить текущего пользователя
-      description: Возвращает пользователя, найденного через Basic Auth/Active Directory,
-        его роль, отдел, должность и права frontend.
+      description: Возвращает пользователя, найденного через Basic Auth/Active Directory, его роль, отдел,
+        должность и права frontend.
       operationId: get_current_user_auth_me_get
       responses:
         '200':
@@ -35,9 +35,8 @@ paths:
       tags:
       - Applications
       summary: Получить список заявок
-      description: Без query-параметров backend возвращает список заявок по умолчанию
-        для текущего пользователя. Видимость заявок определяется ролью пользователя
-        на backend.
+      description: Без query-параметров backend возвращает список заявок по умолчанию для текущего пользователя.
+        Видимость заявок определяется ролью пользователя на backend.
       operationId: list_applications_applications_get
       security:
       - HTTPBasic: []
@@ -146,9 +145,8 @@ paths:
       tags:
       - Applications
       summary: Создать заявку
-      description: Создает заявку от имени текущего пользователя. Приоритет и статус
-        рассчитывает backend. Вложения загружаются отдельным запросом, если frontend
-        реально отправляет файлы.
+      description: Создает заявку от имени текущего пользователя. Приоритет и статус рассчитывает backend.
+        Вложения загружаются отдельным запросом, если frontend реально отправляет файлы.
       operationId: create_application_applications_post
       security:
       - HTTPBasic: []
@@ -204,9 +202,8 @@ paths:
       tags:
       - Applications
       summary: Выполнить действие над заявкой
-      description: Единая точка для действий из карточки заявки. Backend проверяет
-        роль пользователя, текущий статус заявки и обязательность полей для конкретного
-        action.
+      description: Единая точка для действий из карточки заявки. Backend проверяет роль пользователя,
+        текущий статус заявки и обязательность полей для конкретного action.
       operationId: application_action_applications__applicationId__actions_post
       security:
       - HTTPBasic: []
@@ -269,9 +266,8 @@ paths:
       tags:
       - Applications
       summary: Загрузить вложения к заявке
-      description: Frontend отправляет файлы на backend через multipart/form-data.
-        Backend проверяет права, загружает файлы в S3 и сохраняет метаданные вложений
-        в БД. Frontend не работает с S3 напрямую.
+      description: Frontend отправляет файлы на backend через multipart/form-data. Backend проверяет права,
+        загружает файлы в S3 и сохраняет метаданные вложений в БД. Frontend не работает с S3 напрямую.
       operationId: upload_attachments_applications__applicationId__attachments_post
       security:
       - HTTPBasic: []
@@ -321,8 +317,8 @@ paths:
       tags:
       - Directories
       summary: Получить сотрудников, подключенных к системе
-      description: Обычный руководитель получает сотрудников только своего отдела.
-        top-manager может получать сотрудников всех отделов и фильтровать по departmentId.
+      description: Обычный руководитель получает сотрудников только своего отдела. top-manager может получать
+        сотрудников всех отделов и фильтровать по departmentId.
       operationId: get_employees_employees_get
       security:
       - HTTPBasic: []
@@ -368,10 +364,9 @@ paths:
       tags:
       - Directories
       summary: Добавить AD-пользователя в систему
-      description: Не создает человека в AD. Backend создает локальную запись участия
-        в системе для уже существующего AD-пользователя. Роль выбирает руководитель,
-        должность приходит из AD. Обычный руководитель может добавлять сотрудников
-        только в свой отдел, top-manager — в любой.
+      description: Не создает человека в AD. Backend создает локальную запись участия в системе для уже
+        существующего AD-пользователя. Роль выбирает руководитель, должность приходит из AD. Обычный руководитель
+        может добавлять сотрудников только в свой отдел, top-manager — в любой.
       operationId: add_employee_employees_post
       security:
       - HTTPBasic: []
@@ -399,8 +394,8 @@ paths:
       tags:
       - Directories
       summary: Изменить роль сотрудника или участие в распределении
-      description: Обычный руководитель может менять только сотрудников своего отдела,
-        top-manager — любого отдела.
+      description: Обычный руководитель может менять только сотрудников своего отдела, top-manager — любого
+        отдела.
       operationId: update_employee_employees__employeeId__patch
       security:
       - HTTPBasic: []
@@ -430,9 +425,8 @@ paths:
       tags:
       - Directories
       summary: Удалить сотрудника из системы
-      description: Удаляет локальную запись участия сотрудника в системе, не удаляя
-        пользователя из AD. Обычный руководитель может удалять только сотрудников
-        своего отдела, top-manager — любого отдела.
+      description: Удаляет локальную запись участия сотрудника в системе, не удаляя пользователя из AD.
+        Обычный руководитель может удалять только сотрудников своего отдела, top-manager — любого отдела.
       operationId: delete_employee_employees__employeeId__delete
       security:
       - HTTPBasic: []
@@ -483,13 +477,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /departments/{departmentId}:
+    patch:
+      tags:
+      - Directories
+      summary: Изменить настройки отдела (кулдаун назначения, порог уведомления о дедлайне)
+      description: Меняет empl_appl_delay (минуты) и/или deadline_notification (0..1). Обычный руководитель
+        — только свой отдел, top-manager — любой.
+      operationId: update_department_departments__departmentId__patch
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: departmentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Departmentid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepartmentPayload'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /positions:
     get:
       tags:
       - Directories
       summary: Получить должности
-      description: Должность сотрудника приходит из AD и не редактируется руководителем
-        вручную. Соответствует таблице post.
+      description: Должность сотрудника приходит из AD и не редактируется руководителем вручную. Соответствует
+        таблице post.
       operationId: get_positions_positions_get
       responses:
         '200':
@@ -505,8 +531,8 @@ paths:
       tags:
       - Directories
       summary: Получить грейды
-      description: Грейды используются только в матрице допустимости вида работ и
-        не являются должностью сотрудника. Соответствует таблице grade.
+      description: Грейды используются только в матрице допустимости вида работ и не являются должностью
+        сотрудника. Соответствует таблице grade.
       operationId: get_grades_grades_get
       responses:
         '200':
@@ -522,7 +548,8 @@ paths:
       tags:
       - Directories
       summary: Найти пользователей AD для добавления в систему
-      description: Returns AD people not yet onboarded into the system (addable candidates).
+      description: Кандидаты из AD для добавления в систему. Требует право canManageEmployees (руководитель/top-manager)
+        — рядовым пользователям каталог AD не отдаётся.
       operationId: get_ad_users_ad_users_get
       security:
       - HTTPBasic: []
@@ -561,8 +588,8 @@ paths:
       tags:
       - Directories
       summary: Получить виды работ
-      description: Все авторизованные пользователи видят виды работ всех отделов и
-        могут фильтровать их по departmentId.
+      description: Все авторизованные пользователи видят виды работ всех отделов и могут фильтровать их
+        по departmentId.
       operationId: get_work_types_all_work_types_get
       security:
       - HTTPBasic: []
@@ -592,8 +619,8 @@ paths:
       tags:
       - Directories
       summary: Создать вид работ
-      description: Обычный руководитель создает виды работ только для своего отдела,
-        top-manager — для любого.
+      description: Обычный руководитель создает виды работ только для своего отдела, top-manager — для
+        любого.
       operationId: create_work_type_work_types_post
       security:
       - HTTPBasic: []
@@ -621,8 +648,7 @@ paths:
       tags:
       - Directories
       summary: Изменить вид работ, сложность или допустимые грейды
-      description: Обычный руководитель может менять виды работ только своего отдела,
-        top-manager — любого.
+      description: Обычный руководитель может менять виды работ только своего отдела, top-manager — любого.
       operationId: update_work_type_work_types__workTypeId__patch
       security:
       - HTTPBasic: []
@@ -652,8 +678,7 @@ paths:
       tags:
       - Directories
       summary: Удалить вид работ
-      description: Обычный руководитель может удалять виды работ только своего отдела,
-        top-manager — любого.
+      description: Обычный руководитель может удалять виды работ только своего отдела, top-manager — любого.
       operationId: delete_work_type_work_types__workTypeId__delete
       security:
       - HTTPBasic: []
@@ -678,8 +703,9 @@ paths:
       tags:
       - Priority
       summary: Получить коэффициенты расчета приоритета
-      description: Обычный руководитель получает настройки только своего отдела в
-        режиме чтения. top-manager получает все отделы и может редактировать.
+      description: Обычный руководитель получает настройки только своего отдела в режиме чтения. top-manager
+        получает все отделы и может редактировать. Дополнительно отдаёт read-only параметры срочности
+        (urgent) для предпросмотра на фронте.
       operationId: get_priority_settings_priority_settings_get
       responses:
         '200':
@@ -687,7 +713,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PrioritySettingsModel'
+                $ref: '#/components/schemas/PrioritySettingsResponse'
       security:
       - HTTPBasic: []
     put:
@@ -722,9 +748,8 @@ paths:
       tags:
       - Notifications
       summary: Получить уведомления текущего пользователя
-      description: 'Текущий контракт рассчитан на pull-модель: backend создает уведомления
-        при событиях системы, frontend периодически запрашивает список или обновляет
-        его после действий пользователя.'
+      description: 'Текущий контракт рассчитан на pull-модель: backend создает уведомления при событиях
+        системы, frontend периодически запрашивает список или обновляет его после действий пользователя.'
       operationId: get_notifications_notifications_get
       security:
       - HTTPBasic: []
@@ -789,8 +814,8 @@ paths:
       tags:
       - Reports
       summary: Сформировать предварительный отчет по заявкам
-      description: Возвращает JSON-данные для предпросмотра отчета. Фильтры передаются
-        query-параметрами, потому что формирование отчета не меняет состояние backend.
+      description: Возвращает JSON-данные для предпросмотра отчета. Фильтры передаются query-параметрами,
+        потому что формирование отчета не меняет состояние backend.
       operationId: report_applications_reports_applications_get
       security:
       - HTTPBasic: []
@@ -860,9 +885,10 @@ paths:
     get:
       tags:
       - Reports
-      summary: Скачать XLS-отчет по заявкам
-      description: Возвращает готовый XLS-файл по тем же фильтрам, что и предпросмотр
-        отчета. Генерация файла выполняется на backend.
+      summary: Скачать Excel-отчет по заявкам
+      description: 'Возвращает готовый Excel-файл (xlsx) по тем же фильтрам, что и предпросмотр отчета.
+        Генерация файла выполняется на backend; имя и тип файла — в заголовках ответа (Content-Disposition:
+        applications.xlsx). Путь сохранён как .xls для совместимости.'
       operationId: report_applications_xls_reports_applications_xls_get
       security:
       - HTTPBasic: []
@@ -915,6 +941,154 @@ paths:
           - type: string
           - type: 'null'
           title: Executorid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /analytics/applications:
+    get:
+      tags:
+      - Analytics
+      summary: Аналитика по заявкам
+      operationId: analytics_applications_analytics_applications_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /analytics/executors:
+    get:
+      tags:
+      - Analytics
+      summary: Аналитика по исполнителям
+      operationId: analytics_executors_analytics_executors_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /analytics/work-types:
+    get:
+      tags:
+      - Analytics
+      summary: Аналитика по видам работ
+      operationId: analytics_work_types_analytics_work_types_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /analytics/departments:
+    get:
+      tags:
+      - Analytics
+      summary: Аналитика по отделам
+      operationId: analytics_departments_analytics_departments_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
       responses:
         '200':
           description: Successful Response
@@ -1677,6 +1851,32 @@ components:
       - managerAuthor
       - deadline
       title: PrioritySettingsModel
+    PrioritySettingsResponse:
+      properties:
+        department:
+          additionalProperties:
+            type: number
+          type: object
+          title: Department
+        managerAuthor:
+          additionalProperties:
+            type: number
+          type: object
+          title: Managerauthor
+        deadline:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Deadline
+        urgent:
+          $ref: '#/components/schemas/UrgentSettingsOut'
+      type: object
+      required:
+      - department
+      - managerAuthor
+      - deadline
+      - urgent
+      title: PrioritySettingsResponse
     ReportSummaryOut:
       properties:
         total:
@@ -1706,6 +1906,23 @@ components:
       required:
       - delegatedToSameDepartment
       title: UpdateDepartmentDelegationSettingsPayload
+    UpdateDepartmentPayload:
+      properties:
+        employeeApplicationDelayMinutes:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Employeeapplicationdelayminutes
+        deadlineNotificationRatio:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Deadlinenotificationratio
+      type: object
+      title: UpdateDepartmentPayload
     UpdateEmployeePayload:
       properties:
         role:
@@ -1757,6 +1974,20 @@ components:
           title: Allowedgradeids
       type: object
       title: UpdateWorkTypePayload
+    UrgentSettingsOut:
+      properties:
+        thresholdHours:
+          type: number
+          title: Thresholdhours
+        bonus:
+          type: number
+          title: Bonus
+      type: object
+      required:
+      - thresholdHours
+      - bonus
+      title: UrgentSettingsOut
+      description: Параметры бонуса срочности (read-only, из config.json → priority).
     UserOut:
       properties:
         id:
@@ -1902,4 +2133,5 @@ tags:
   description: Уведомления текущего пользователя
 - name: Reports
   description: Отчеты и XLS-выгрузка
-
+- name: Analytics
+  description: Статистика по заявкам, исполнителям, видам работ и отделам

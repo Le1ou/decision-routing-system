@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import Response
 from psycopg.rows import dict_row
 
+from src import backup_module
 from src.application_module import project_timezone
 from src.core import (
     DBController, _ad_directory, _find_ad_by_id, _get_user_role, _is_top_manager,
@@ -27,6 +28,16 @@ from src.schemas import (
 )
 
 router = APIRouter(tags=["Directories"])
+
+
+def _persist_directory_state() -> None:
+    """Best-effort снимок onboarding-состояния каталога в S3 после его изменения,
+    чтобы привязка логин ↔ employee_id переживала рестарт в релизном режиме
+    (seed_on_start=false). Сбой снимка не ломает уже применённую операцию."""
+    try:
+        backup_module.save_directory_snapshot(_ad_directory())
+    except Exception as e:
+        print(f"[backup] directory snapshot after change failed: {e}")
 
 
 @router.get("/departments", summary="Получить отделы", response_model=DepartmentListResponse)
@@ -179,10 +190,12 @@ def add_employee(
                 ).fetchone()["employee_id"]
 
         # Reflect the onboarding back into the in-memory directory so this person
-        # stops appearing as an addable AD candidate (mock-only; resets on restart).
+        # stops appearing as an addable AD candidate; the S3 snapshot makes the
+        # binding survive a restart when seeding is disabled (release mode).
         ad_user["inSystem"] = True
         ad_user["employee_id"] = emp_id
         ad_user["role"] = payload.role
+        _persist_directory_state()
 
         return {"id": str(emp_id)}
 
@@ -237,6 +250,16 @@ def update_employee(
                         (payload.isActive, now, int(employeeId))
                     )
 
+        if payload.role is not None:
+            # Зеркалим роль в каталог пользователей: именно из него берутся роль и
+            # права при аутентификации (раньше смена роли влияла только на справочник
+            # и не меняла фактические права до перезапуска).
+            for _entry in _ad_directory().values():
+                if _entry.get("employee_id") == int(employeeId):
+                    _entry["role"] = payload.role
+                    break
+            _persist_directory_state()
+
         return Response(status_code=204)
 
     except HTTPException:
@@ -272,14 +295,15 @@ def delete_employee(
                 )
 
         # Reverse of add_employee: free the AD person in the in-memory directory so
-        # they reappear as an addable candidate in /ad/users (mock-only; not deleted
-        # from AD). Resets on restart.
+        # they reappear as an addable candidate in /ad/users (not deleted from AD).
+        # The S3 snapshot persists this across restarts when seeding is disabled.
         for _entry in _ad_directory().values():
             if _entry.get("employee_id") == int(employeeId):
                 _entry["inSystem"] = False
                 _entry.pop("employee_id", None)
                 _entry.pop("role", None)
                 break
+        _persist_directory_state()
 
         return Response(status_code=204)
 
@@ -405,6 +429,8 @@ def get_grades(userData=Depends(authObj.authenticate)):
 
 
 @router.get("/ad/users", summary="Найти пользователей AD для добавления в систему",
+            description="Кандидаты из AD для добавления в систему. Требует право canManageEmployees "
+                        "(руководитель/top-manager) — рядовым пользователям каталог AD не отдаётся.",
             response_model=AdUserListResponse)
 def get_ad_users(
     userData=Depends(authObj.authenticate),
@@ -413,6 +439,9 @@ def get_ad_users(
 ):
     """Returns AD people not yet onboarded into the system (addable candidates)."""
     try:
+        # Каталог AD (ФИО/логины не заведённых людей) — данные для управления
+        # сотрудниками; фронтенд запрашивает его только при canManageEmployees.
+        require_permission(userData, "canManageEmployees")
         get_db_user(userData)
         result = []
         for ad_login, ucfg in _ad_directory().items():

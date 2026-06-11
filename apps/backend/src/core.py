@@ -12,15 +12,49 @@ core.py — общая инфраструктура backend, вынесена и
 импортировать core — иначе импорт в тестах перезатрёт базу сидом.
 """
 
+import os
 import threading
 
 import psycopg
 from fastapi import HTTPException, status
 
+from src import backup_module
 from src.application_module import (
     ActiveDirectoryAuth, PgDbOperator, configData,
 )
 from src.seed import seed_database, seed_demo_notifications
+
+
+def _bool_setting(env_name: str, cfg_value, default: bool) -> bool:
+    """Флаг из ENV (приоритет) либо config.json, либо default.
+
+    Пустая строка в ENV = «не задано» (compose пробрасывает `${VAR:-}`, что создаёт
+    пустую переменную) — иначе пустое значение молча выключало бы флаг."""
+    env = os.environ.get(env_name)
+    if env is not None and env.strip() != "":
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    if isinstance(cfg_value, bool):
+        return cfg_value
+    if cfg_value is None:
+        return default
+    return str(cfg_value).strip().lower() in ("1", "true", "yes", "on")
+
+
+# ─────────────────────────── Startup mode (config.json → "startup") ───────────
+# seed_on_start    — пересевать БД демо-данными при каждом старте (режим разработки,
+#                    по умолчанию). false = релизный режим: данные переживают рестарт,
+#                    onboarding-состояние каталога восстанавливается из S3-снимка.
+# backup_on_shutdown — при выключении снять дамп БД и снимок каталога в S3.
+# restore_from_backup — ОДНОКРАТНЫЙ режим (по умолчанию false): на старте восстановить
+#                    БД из backups/db/latest.dump; при успехе сидирование пропускается.
+#                    После восстановления флаг нужно выключить обратно.
+# ENV-переопределения: SEED_ON_START, BACKUP_ON_SHUTDOWN, RESTORE_FROM_BACKUP.
+_startup_cfg = configData.get("startup", {}) or {}
+SEED_ON_START = _bool_setting("SEED_ON_START", _startup_cfg.get("seed_on_start"), True)
+BACKUP_ON_SHUTDOWN = _bool_setting("BACKUP_ON_SHUTDOWN",
+                                   _startup_cfg.get("backup_on_shutdown"), True)
+RESTORE_FROM_BACKUP = _bool_setting("RESTORE_FROM_BACKUP",
+                                    _startup_cfg.get("restore_from_backup"), False)
 
 # ──────────────────── Mock Active Directory ────────────────────
 # configData["MOCK_AD"] is ONE directory keyed by login. Each entry is an AD
@@ -107,6 +141,12 @@ def _is_top_manager(login: str) -> bool:
 # ─────────────────────────── App bootstrap ───────────────────────────
 
 DBController = PgDbOperator("postgres", "postgres")
+# Однократное восстановление из бэкапа — ДО миграций (они idempotent и докатят
+# восстановленную схему до актуальной) и до сидирования (см. ниже: успешное
+# восстановление отменяет пересев, иначе сид затёр бы восстановленные данные).
+_restored_from_backup = False
+if RESTORE_FROM_BACKUP:
+    _restored_from_backup = backup_module.restore_database()
 with DBController.pool.connection() as _conn:
     # Idempotent migrations so an already-created DB picks up the new contract columns
     # and tables BEFORE role grants and seed_database() (which reference them) run.
@@ -144,8 +184,9 @@ with DBController.pool.connection() as _conn:
     # Dedup flag for the events subsystem: set once a deadline-approaching
     # notification has been sent for a `new` application (so it isn't re-sent each tick).
     _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS deadline_notified boolean")
-    # Dedup flag for the routing subsystem: set once a critical application was escalated
-    # to the manager (нет свободных и некого вытеснять); сбрасывается при назначении.
+    # Dedup flag for the routing subsystem: set once the manager was notified that an
+    # application could not be auto-assigned (нет свободных подходящих исполнителей;
+    # для критичной — и некого вытеснять); сбрасывается при назначении.
     _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS escalation_notified boolean")
     # Status-transition journal — written by the management subsystem on every
     # status change; the analytics subsystem reads it.
@@ -176,12 +217,23 @@ with DBController.pool.connection() as _conn:
 DBController.setupRoleTableGrants()
 DBController.fillPermissionRoles(configData["PERMISSIONS"])
 authObj = ActiveDirectoryAuth()
-seed_database(DBController)
-# In mock mode, drop in a few demo applications whose deadlines trigger the events
-# subsystem (overdue / deadline-approaching notifications) for the IT manager so the
-# behaviour is visible right after the project starts. Not seeded in AD mode.
-if authObj.mode == "mock":
-    seed_demo_notifications(DBController)
+if SEED_ON_START and _restored_from_backup:
+    print("[startup] database restored from backup — seeding skipped "
+          "(seed would overwrite the restored data).")
+if SEED_ON_START and not _restored_from_backup:
+    seed_database(DBController)
+    # In mock mode, drop in a few demo applications whose deadlines trigger the events
+    # subsystem (overdue / deadline-approaching notifications) for the IT manager so the
+    # behaviour is visible right after the project starts. Not seeded in AD mode.
+    if authObj.mode == "mock":
+        seed_demo_notifications(DBController)
+else:
+    # Релизный режим / восстановление из бэкапа: БД не пересевается. Каталог
+    # пользователей восстанавливает onboarding-состояние (inSystem/employee_id/role)
+    # из S3-снимка — иначе добавленные через API сотрудники теряли бы привязку
+    # логин ↔ employee_id и не могли бы войти после рестарта.
+    _applied = backup_module.load_directory_snapshot(_ad_directory())
+    print(f"[startup] seeding skipped; directory snapshot applied to {_applied} login(s).")
 # Pre-create a Postgres login role for every onboarded user that has a known
 # password. In mock mode that's everyone; in AD mode (where AD owns the password)
 # entries may have none — those roles are created lazily on first login instead.

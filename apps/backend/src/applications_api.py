@@ -15,7 +15,7 @@ from fastapi.responses import Response
 from psycopg.rows import dict_row
 
 from src import db_helpers, priority_module, s3_module
-from src.application_module import PgDbOperator, project_timezone
+from src.application_module import PgDbOperator, configData, project_timezone
 from src.core import (
     DBController, _employee_id, _get_user_role, _raise_for_db_error,
     _user_department_id, authObj, get_db_user, login_by_employee_map, row_or_404,
@@ -30,7 +30,10 @@ from src.schemas import (
 router = APIRouter(tags=["Applications"])
 
 # Number of days after which a rejected application disappears from the main UI.
-REJECTED_VISIBLE_DAYS = 7
+# Настраивается в config.json → applications.rejected_visible_days (default 7).
+REJECTED_VISIBLE_DAYS = int(
+    (configData.get("applications") or {}).get("rejected_visible_days", 7)
+)
 
 # ─────────────────────────── Business logic helpers ──────────────────
 

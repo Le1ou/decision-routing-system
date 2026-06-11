@@ -63,7 +63,10 @@ def get_s3_public():
 
 
 def build_attachment_items(photos) -> list:
-    """Contract attachment dicts for photo rows; presigned url when S3 is configured."""
+    """Contract attachment dicts for photo rows; presigned url when S3 is configured.
+
+    contentType отдаётся для фронтенда: его маппер вложений различает фото/документ
+    по MIME-типу (image/*), а не по полю type."""
     s3 = get_s3_public() if is_configured() else None
     return [
         {
@@ -71,6 +74,7 @@ def build_attachment_items(photos) -> list:
             "applicationId": str(p["application_id"]),
             "name": p["name"],
             "type": "photo",
+            "contentType": p.get("content_type"),
             "url": s3.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": S3_BUCKET, "Key": p["s3_key"]},

@@ -92,8 +92,12 @@ def _fetch_report_rows(userData, createdFrom, createdTo, finishedFrom, finishedT
             return cur.execute(query, params).fetchall()
 
 
-def _build_xls_bytes(rows) -> bytes:
-    """Готовый XLS-файл отчёта (openpyxl); CSV-фоллбек, если openpyxl не установлен."""
+def _build_export_file(rows) -> tuple[bytes, str, str]:
+    """Файл отчёта → (содержимое, media_type, имя файла).
+
+    openpyxl генерирует современный **xlsx** — отдаём его с честным MIME-типом и
+    расширением (раньше файл назывался .xls с типом vnd.ms-excel, и Excel ругался
+    на несоответствие формата). CSV-фоллбек, если openpyxl не установлен."""
     def _s(v):
         if isinstance(v, datetime):
             return v.isoformat()
@@ -125,7 +129,9 @@ def _build_xls_bytes(rows) -> bytes:
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        return buf.read()
+        return (buf.read(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "applications.xlsx")
     except ImportError:
         # Fallback: CSV as plain text if openpyxl not installed
         out = io.StringIO()
@@ -140,7 +146,9 @@ def _build_xls_bytes(rows) -> bytes:
                 r.get("created_at"), r.get("work_at"), r.get("finished_at"),
                 r.get("executor_name"), r.get("department_name"), r.get("work_type_name"),
             ])
-        return out.getvalue().encode("utf-8-sig")
+        return (out.getvalue().encode("utf-8-sig"),
+                "text/csv; charset=utf-8",
+                "applications.csv")
 
 
 @router.get("/reports/applications", summary="Сформировать предварительный отчет по заявкам",
@@ -179,8 +187,10 @@ def report_applications(
         _raise_for_db_error(e)
 
 
-@router.get("/reports/applications.xls", summary="Скачать XLS-отчет по заявкам",
-            description="Возвращает готовый XLS-файл по тем же фильтрам, что и предпросмотр отчета. Генерация файла выполняется на backend.")
+@router.get("/reports/applications.xls", summary="Скачать Excel-отчет по заявкам",
+            description="Возвращает готовый Excel-файл (xlsx) по тем же фильтрам, что и предпросмотр отчета. "
+                        "Генерация файла выполняется на backend; имя и тип файла — в заголовках ответа "
+                        "(Content-Disposition: applications.xlsx). Путь сохранён как .xls для совместимости.")
 def report_applications_xls(
     userData=Depends(authObj.authenticate),
     createdFrom:  Optional[str] = Query(default=None),
@@ -194,10 +204,11 @@ def report_applications_xls(
         rows = _fetch_report_rows(userData, createdFrom, createdTo,
                                   finishedFrom, finishedTo, status_filter, executorId)
 
+        content, media_type, filename = _build_export_file(rows)
         return Response(
-            content=_build_xls_bytes(rows),
-            media_type="application/vnd.ms-excel",
-            headers={"Content-Disposition": "attachment; filename=applications.xls"},
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     except HTTPException:

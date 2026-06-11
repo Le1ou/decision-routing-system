@@ -8,6 +8,14 @@
     "enabled": true,
     "tick_seconds": 30
   },
+  "startup": {
+    "seed_on_start": true,
+    "backup_on_shutdown": true,
+    "restore_from_backup": false
+  },
+  "applications": {
+    "rejected_visible_days": 7
+  },
   "priority": {
     "urgent_deadline_threshold_hours": 24,
     "urgent_deadline_bonus": 0.5

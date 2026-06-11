@@ -30,8 +30,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.application_module import configData
-# Импорт core выполняет bootstrap: миграции, Postgres-роли/гранты, сидинг БД.
-from src.core import DBController
+# Импорт core выполняет bootstrap: миграции, Postgres-роли/гранты, сидинг БД
+# (или восстановление состояния из S3 — см. config.json → "startup").
+from src import backup_module
+from src.core import BACKUP_ON_SHUTDOWN, DBController, _ad_directory
 from src import events_module as events
 from src import (
     analytics_api, applications_api, auth_api, directories_api,
@@ -56,7 +58,7 @@ EVENTS_ENABLED = (_events_enabled if isinstance(_events_enabled, bool)
 # тестах его удобно выключить, не трогая config.json/compose. Тесты вызывают run_routing/
 # run_tick напрямую, фоновый цикл им не нужен.
 _env_events = os.environ.get("EVENTS_ENABLED")
-if _env_events is not None:
+if _env_events is not None and _env_events.strip() != "":   # пустая строка = «не задано»
     EVENTS_ENABLED = _env_events.strip().lower() in ("1", "true", "yes", "on")
 try:
     EVENTS_TICK_SECONDS = max(1, int(_events_cfg.get("tick_seconds", 60)))
@@ -96,6 +98,15 @@ async def lifespan(_app):
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+        # Резервная копия при аккуратном выключении: дамп БД + снимок onboarding-
+        # состояния каталога в S3 (см. backup_module). Best-effort: сбой бэкапа не
+        # должен мешать остановке процесса.
+        if BACKUP_ON_SHUTDOWN:
+            try:
+                await asyncio.to_thread(backup_module.backup_database)
+                await asyncio.to_thread(backup_module.save_directory_snapshot, _ad_directory())
+            except Exception as e:
+                print(f"[backup] shutdown backup failed: {e}")
 
 
 app = FastAPI(

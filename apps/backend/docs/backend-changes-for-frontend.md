@@ -124,6 +124,19 @@ read-only блок `urgent`:
   пока не отдаёт**. Если захотите бейдж «Просрочена» на заявке — скажите, добавим поле
   в ответ `GET /applications/{id}` (это +поле, не ломающее изменение).
 
+### Требуется на фронте (одна строка): отчёт скачивается как .xlsx
+`GET /reports/applications.xls` всегда генерировал современный **xlsx** (openpyxl), но
+отдавал его под именем `.xls` — Excel предупреждал о несоответствии формата. Бэкенд
+исправлен: тот же путь, но `Content-Type` = xlsx и `Content-Disposition: attachment;
+filename=applications.xlsx`. На фронте имя файла захардкожено
+(`ReportsPage.tsx → link.download = "applications-report.xls"`) — замените на
+`"applications-report.xlsx"` (или берите имя из заголовка `Content-Disposition`).
+
+### Новое поле вложений: `attachments[].contentType`
+В карточке заявки вложения теперь содержат MIME-тип (`contentType`, например
+`image/png`). Маппер фронта уже ожидает это поле (`raw.contentType`) — изображения
+начнут классифицироваться как «фото» автоматически, ничего менять не нужно.
+
 ## 3. Внутренние изменения (фронту невидимы)
 
 - Колонка `application.priority_score` (непрерывный приоритет) — пока не наполняется и не
