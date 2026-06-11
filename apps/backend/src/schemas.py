@@ -114,9 +114,14 @@ class DepartmentOut(BaseModel):
 # ── Positions (должности) ──
 
 class PositionOut(BaseModel):
-    """A job title (должность) coming from AD; maps to the `post` table."""
+    """A job title (должность) coming from AD; maps to the `post` table.
+
+    gradeIds — грейды, доступные этой должности (матрица post_grade). Пересечение с
+    workType.allowedGradeIds даёт должности, которые могут приступать к виду работ.
+    """
     id: CoercedStr   = Field(validation_alias="post_id")
     name: CoercedStr = Field(validation_alias="name")
+    gradeIds: ListOfStrings = Field(default_factory=list, validation_alias="grade_ids")
 
     model_config = {"populate_by_name": True}
 

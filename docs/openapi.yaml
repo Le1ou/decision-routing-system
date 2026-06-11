@@ -514,8 +514,9 @@ paths:
       tags:
       - Directories
       summary: Получить должности
-      description: Должность сотрудника приходит из AD и не редактируется руководителем вручную. Соответствует
-        таблице post.
+      description: 'Должность сотрудника приходит из AD и не редактируется руководителем вручную. Соответствует
+        таблице post. gradeIds — грейды должности (матрица post_grade): пересечение с allowedGradeIds
+        вида работ даёт должности, которым доступен вид работ.'
       operationId: get_positions_positions_get
       responses:
         '200':
@@ -1822,12 +1823,22 @@ components:
         name:
           type: string
           title: Name
+        gradeIds:
+          items:
+            type: string
+          type: array
+          title: Gradeids
       type: object
       required:
       - id
       - name
       title: PositionOut
-      description: A job title (должность) coming from AD; maps to the `post` table.
+      description: 'A job title (должность) coming from AD; maps to the `post` table.
+
+
+        gradeIds — грейды, доступные этой должности (матрица post_grade). Пересечение с
+
+        workType.allowedGradeIds даёт должности, которые могут приступать к виду работ.'
     PrioritySettingsModel:
       properties:
         department:

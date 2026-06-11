@@ -600,6 +600,26 @@ class TestPositions:
     def test_no_auth_401(self):
         assert get("/positions").status_code == 401
 
+    def test_positions_carry_grade_ids(self):
+        # Матрица должность ↔ грейды (post_grade) отдаётся для фронта: пересечение
+        # gradeIds должности с allowedGradeIds вида работ = «кто может приступать».
+        items = get("/positions", MANAGER).json()["items"]
+        assert all(isinstance(p["gradeIds"], list) for p in items)
+        engineer = next(p for p in items if p["name"] == "Инженер")
+        assert set(engineer["gradeIds"]) == {"0", "1"}      # junior + middle (seed)
+
+    def test_grade_ids_match_work_type_positions(self):
+        # Сквозная проверка рецепта для фронта: вид работ 1 (easy, junior/middle)
+        # должен быть доступен должностям «Инженер» и «Специалист», но не «Руководителю»
+        # (senior/lead) — вычисляется пересечением gradeIds × allowedGradeIds.
+        positions = get("/positions", MANAGER).json()["items"]
+        wt = next(w for w in get("/work-types", MANAGER).json()["items"]
+                  if w["id"] == str(WORK_TYPE_IT_REPAIR))
+        allowed = set(wt["allowedGradeIds"])
+        eligible = {p["name"] for p in positions if allowed & set(p["gradeIds"])}
+        assert "Инженер" in eligible and "Специалист" in eligible
+        assert "Руководитель" not in eligible
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # /ad/users

@@ -387,7 +387,9 @@ def update_department(
 
 
 @router.get("/positions", summary="Получить должности",
-            description="Должность сотрудника приходит из AD и не редактируется руководителем вручную. Соответствует таблице post.",
+            description="Должность сотрудника приходит из AD и не редактируется руководителем вручную. "
+                        "Соответствует таблице post. gradeIds — грейды должности (матрица post_grade): "
+                        "пересечение с allowedGradeIds вида работ даёт должности, которым доступен вид работ.",
             response_model=PositionListResponse)
 def get_positions(userData=Depends(authObj.authenticate)):
     try:
@@ -395,7 +397,17 @@ def get_positions(userData=Depends(authObj.authenticate)):
         with db.pool.connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 rows = cur.execute(
-                    "SELECT post_id, name FROM public.post ORDER BY post_id"
+                    """
+                    SELECT
+                        p.post_id,
+                        p.name,
+                        COALESCE(json_agg(pg.grade_grade_id ORDER BY pg.grade_grade_id)
+                                 FILTER (WHERE pg.grade_grade_id IS NOT NULL), '[]'::json) AS grade_ids
+                    FROM public.post p
+                    LEFT JOIN public.post_grade pg ON pg.post_post_id = p.post_id
+                    GROUP BY p.post_id, p.name
+                    ORDER BY p.post_id
+                    """
                 ).fetchall()
 
         items = [PositionOut.model_validate(r).model_dump() for r in rows]
