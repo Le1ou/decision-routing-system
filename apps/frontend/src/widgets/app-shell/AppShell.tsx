@@ -4,6 +4,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
 import { apiClient, mapNotification } from "@shared/api";
+import { env } from "@shared/config/env";
+import { usePolling } from "@shared/hooks/usePolling";
 import type { Notification } from "@shared/model/domain";
 
 import "./AppShell.css";
@@ -32,6 +34,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshNotifications();
   }, [refreshNotifications]);
+
+  usePolling(refreshNotifications, env.pollIntervalMs, Boolean(credentials));
 
   if (!currentUser) {
     return <>{children}</>;

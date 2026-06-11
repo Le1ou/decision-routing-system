@@ -1,6 +1,7 @@
 export { ApiError, apiClient, apiRequest } from "./client";
 export type {
   ApiCredentials,
+  ApplicationListItemDto,
   ApplicationReportResponseDto,
   CurrentUserDto,
   NotificationDto,
