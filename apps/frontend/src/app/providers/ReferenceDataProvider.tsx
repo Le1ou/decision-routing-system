@@ -21,7 +21,7 @@ type ReferenceDataContextValue = {
 const ReferenceDataContext = createContext<ReferenceDataContextValue | null>(null);
 
 export function ReferenceDataProvider({ children }: { children: ReactNode }) {
-  const { credentials, permissions } = useAuth();
+  const { credentials, currentUser, permissions } = useAuth();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
@@ -58,11 +58,13 @@ export function ReferenceDataProvider({ children }: { children: ReactNode }) {
 
       const [adUsersResponse, priorityResponse] = await Promise.all([
         permissions?.canManageEmployees ? apiClient.getAdUsers(credentials) : Promise.resolve({ items: [] }),
-        permissions?.canManagePrioritySettings ? apiClient.getPrioritySettings(credentials) : Promise.resolve(null),
+        currentUser?.role === "manager" || currentUser?.role === "top-manager" || permissions?.canManagePrioritySettings
+          ? apiClient.getPrioritySettings(credentials)
+          : Promise.resolve(null),
       ]);
 
       setDepartments(departmentsResponse.items);
-      setPositions(positionsResponse.items);
+      setPositions(positionsResponse.items.map((position) => ({ ...position, gradeIds: position.gradeIds ?? [] })));
       setGrades(gradesResponse.items.map((grade) => ({ ...grade, name: getGradeLabel(grade) })));
       setWorkTypes(workTypesResponse.items);
       setEmployees(employeesResponse.items.map(mapUser));
@@ -73,7 +75,7 @@ export function ReferenceDataProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [credentials, permissions]);
+  }, [credentials, currentUser, permissions]);
 
   useEffect(() => {
     void refresh();

@@ -150,6 +150,16 @@
   padding: 18px 20px;
 }
 
+.applications-list__more {
+  border-bottom: 1px solid #f5d7a1;
+  background: #fff8eb;
+  color: #8a5a00;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  padding: 12px 20px;
+}
+
 .application-card {
   position: relative;
   min-width: 0;
@@ -564,6 +574,17 @@
   color: #b42318;
   font-size: 13px;
   font-weight: 800;
+  padding: 10px 12px;
+}
+
+.application-modal__warning {
+  border: 1px solid #f5d7a1;
+  border-radius: 6px;
+  background: #fff8eb;
+  color: #8a5a00;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
   padding: 10px 12px;
 }
 

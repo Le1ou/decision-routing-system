@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 import { useAuth } from "@app/providers/AuthProvider";
 import { ApplicationsProvider } from "@app/providers/ApplicationsProvider";
 import { ReferenceDataProvider } from "@app/providers/ReferenceDataProvider";
-import type { UserPermissions } from "@shared/model/domain";
+import type { UserPermissions, UserRole } from "@shared/model/domain";
+import { hasAnyRole } from "@shared/model/roles";
 import { AppShell } from "@widgets/app-shell";
 import {
   CreateApplicationPage,
@@ -40,7 +41,7 @@ export function App() {
           <Route path="/reports" element={<RequirePermission permission="canViewReports"><ReportsPage /></RequirePermission>} />
           <Route path="/employees" element={<RequirePermission permission="canManageEmployees"><EmployeesPage /></RequirePermission>} />
           <Route path="/work-types" element={<RequirePermission permission="canManageWorkTypes"><WorkTypesPage /></RequirePermission>} />
-          <Route path="/priority-settings" element={<RequirePermission permission="canManagePrioritySettings"><PrioritySettingsPage /></RequirePermission>} />
+          <Route path="/priority-settings" element={<RequireRole roles={["manager", "top-manager"]}><PrioritySettingsPage /></RequireRole>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </AppShell>
@@ -53,6 +54,16 @@ function RequirePermission({ children, permission }: { children: ReactNode; perm
   const { permissions } = useAuth();
 
   if (!permissions?.[permission]) {
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
+}
+
+function RequireRole({ children, roles }: { children: ReactNode; roles: UserRole[] }) {
+  const { currentUser } = useAuth();
+
+  if (!currentUser || !hasAnyRole(currentUser, roles)) {
     return <Navigate to="/" replace />;
   }
 

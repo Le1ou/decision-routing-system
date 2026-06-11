@@ -40,11 +40,16 @@ export type PrioritySettings = {
   department: Record<string, number>;
   deadline: number;
   managerAuthor: Record<string, number>;
+  urgent: {
+    thresholdHours: number;
+    bonus: number;
+  };
 };
 
 export type Position = {
   id: string;
   name: string;
+  gradeIds: string[];
 };
 
 export type JobTitle = Position & {

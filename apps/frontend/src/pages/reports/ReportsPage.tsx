@@ -2,8 +2,15 @@ import { FormEvent, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useReferenceData } from "@app/providers/ReferenceDataProvider";
-import { apiClient, type ApplicationReportResponseDto } from "@shared/api";
-import type { ApplicationStatus } from "@shared/model/domain";
+import {
+  apiClient,
+  type ApplicationReportResponseDto,
+  type ApplicationsAnalyticsResponseDto,
+  type DepartmentsAnalyticsResponseDto,
+  type ExecutorsAnalyticsResponseDto,
+  type WorkTypesAnalyticsResponseDto,
+} from "@shared/api";
+import type { ApplicationPriority, ApplicationStatus, Complexity } from "@shared/model/domain";
 import { priorityLabels, statusLabels } from "@shared/model/labels";
 import { Button } from "@shared/ui";
 
@@ -16,6 +23,13 @@ type ReportFilters = {
   finishedTo: string;
   status: "all" | ApplicationStatus;
   executorId: "all" | string;
+};
+
+type AnalyticsState = {
+  applications: ApplicationsAnalyticsResponseDto;
+  executors: ExecutorsAnalyticsResponseDto;
+  workTypes: WorkTypesAnalyticsResponseDto;
+  departments: DepartmentsAnalyticsResponseDto;
 };
 
 const initialFilters: ReportFilters = {
@@ -33,6 +47,7 @@ export function ReportsPage() {
   const [filters, setFilters] = useState<ReportFilters>(initialFilters);
   const [errors, setErrors] = useState<Partial<Record<keyof ReportFilters, string>>>({});
   const [report, setReport] = useState<ApplicationReportResponseDto | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsState | null>(null);
   const [notice, setNotice] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -50,6 +65,7 @@ export function ReportsPage() {
     setFilters((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: undefined }));
     setReport(null);
+    setAnalytics(null);
     setNotice("");
   };
 
@@ -86,6 +102,11 @@ export function ReportsPage() {
     executorId: filters.executorId === "all" ? undefined : filters.executorId,
   });
 
+  const getAnalyticsQuery = () => ({
+    createdFrom: toIsoDateStart(filters.createdFrom),
+    createdTo: toIsoDateEnd(filters.createdTo),
+  });
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -96,7 +117,21 @@ export function ReportsPage() {
     setIsLoading(true);
 
     try {
-      setReport(await apiClient.getApplicationReport(credentials, getQuery()));
+      const [nextReport, applications, executorsAnalytics, workTypesAnalytics, departmentsAnalytics] = await Promise.all([
+        apiClient.getApplicationReport(credentials, getQuery()),
+        apiClient.getApplicationsAnalytics(credentials, getAnalyticsQuery()),
+        apiClient.getExecutorsAnalytics(credentials, getAnalyticsQuery()),
+        apiClient.getWorkTypesAnalytics(credentials, getAnalyticsQuery()),
+        apiClient.getDepartmentsAnalytics(credentials, getAnalyticsQuery()),
+      ]);
+
+      setReport(nextReport);
+      setAnalytics({
+        applications,
+        executors: executorsAnalytics,
+        workTypes: workTypesAnalytics,
+        departments: departmentsAnalytics,
+      });
       setNotice("Предварительный отчет сформирован.");
     } catch {
       setNotice("Backend не сформировал отчет.");
@@ -122,15 +157,16 @@ export function ReportsPage() {
       }
 
       const blob = await response.blob();
+      const filename = getFilenameFromContentDisposition(response.headers.get("Content-Disposition")) ?? "applications-report.xlsx";
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "applications-report.xls";
+      link.download = filename;
       link.click();
       URL.revokeObjectURL(url);
-      setNotice("XLS-отчет скачан.");
+      setNotice("XLSX-отчет скачан.");
     } catch {
-      setNotice("Backend не выгрузил XLS.");
+      setNotice("Backend не выгрузил XLSX.");
     }
   };
 
@@ -215,7 +251,7 @@ export function ReportsPage() {
             <span>{report ? "Актуален" : "Сформируйте отчет"}</span>
           </div>
           <Button type="button" variant="secondary" onClick={() => void handleExport()} disabled={!report}>
-            Выгрузить .xls
+            Выгрузить .xlsx
           </Button>
         </header>
 
@@ -252,7 +288,123 @@ export function ReportsPage() {
           )}
         </div>
       </article>
+
+      <section className="reports-analytics" aria-label="Аналитика">
+        <header>
+          <h2>Аналитика</h2>
+          <span>{analytics ? "По периоду создания заявок" : "Сформируйте отчет"}</span>
+        </header>
+
+        <div className="reports-analytics__summary">
+          <article>
+            <span>Всего заявок</span>
+            <strong>{analytics?.applications.total ?? 0}</strong>
+          </article>
+          <article>
+            <span>Делегирований</span>
+            <strong>{analytics?.applications.delegations.total ?? 0}</strong>
+          </article>
+          <article>
+            <span>Среднее назначение</span>
+            <strong>{formatSeconds(analytics?.applications.timeToAssignSeconds.avg)}</strong>
+          </article>
+          <article>
+            <span>Среднее закрытие</span>
+            <strong>{formatSeconds(analytics?.applications.completionTimeSeconds.avg)}</strong>
+          </article>
+        </div>
+
+        <div className="reports-analytics__grid">
+          <AnalyticsBreakdown
+            title="По статусам"
+            items={statusOrder.map((status) => ({ label: statusLabels[status], value: analytics?.applications.byStatus[status] ?? 0 }))}
+          />
+          <AnalyticsBreakdown
+            title="По приоритетам"
+            items={priorityOrder.map((priority) => ({ label: priorityLabels[priority], value: analytics?.applications.byPriority[priority] ?? 0 }))}
+          />
+          <AnalyticsBreakdown
+            title="По сложности"
+            items={complexityOrder.map((complexity) => ({ label: complexityLabels[complexity], value: analytics?.applications.byComplexity[complexity] ?? 0 }))}
+          />
+        </div>
+
+        <AnalyticsTable
+          title="Исполнители"
+          emptyText="Нет данных по исполнителям."
+          columns={["Исполнитель", "Назначено", "Завершено", "В работе", "Реакция", "Занятость"]}
+          rows={(analytics?.executors.executors ?? []).map((executor) => [
+            executor.fullName,
+            String(executor.assignedCount),
+            String(executor.completedCount),
+            String(executor.inProgressCount),
+            formatSeconds(executor.avgReactionTimeSeconds),
+            formatPercent(executor.occupancyRatio),
+          ])}
+        />
+
+        <AnalyticsTable
+          title="Виды работ"
+          emptyText="Нет данных по видам работ."
+          columns={["Вид работ", "Создано", "Завершено", "Делегировано", "Среднее закрытие", "Частый исполнитель"]}
+          rows={(analytics?.workTypes.workTypes ?? []).map((workType) => [
+            workType.name,
+            String(workType.createdCount),
+            String(workType.completedCount),
+            String(workType.delegatedCount),
+            formatSeconds(workType.avgCompletionTimeSeconds),
+            workType.topExecutorName ?? "-",
+          ])}
+        />
+
+        <AnalyticsTable
+          title="Отделы"
+          emptyText="Нет данных по отделам."
+          columns={["Отдел", "Сотрудники", "Заявки", "Завершено", "Реакция", "Занятость", "Делегирования"]}
+          rows={(analytics?.departments.departments ?? []).map((department) => [
+            department.name,
+            String(department.employeeCount),
+            String(department.applicationCount),
+            String(department.completedCount),
+            formatSeconds(department.avgReactionTimeSeconds),
+            formatPercent(department.occupancyRatio),
+            `${department.delegations.sent} / ${department.delegations.received}`,
+          ])}
+        />
+      </section>
     </section>
+  );
+}
+
+function AnalyticsBreakdown({ title, items }: { title: string; items: Array<{ label: string; value: number }> }) {
+  return (
+    <article className="reports-analytics-card">
+      <h3>{title}</h3>
+      {items.map((item) => (
+        <div key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </article>
+  );
+}
+
+function AnalyticsTable({ title, emptyText, columns, rows }: { title: string; emptyText: string; columns: string[]; rows: string[][] }) {
+  return (
+    <article className="reports-analytics-table">
+      <h3>{title}</h3>
+      <div className="reports-analytics-table__scroller">
+        <div className="reports-analytics-table__row reports-analytics-table__row--head" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(130px, 1fr))` }}>
+          {columns.map((column) => <span key={column}>{column}</span>)}
+        </div>
+        {rows.length > 0 ? rows.map((row, rowIndex) => (
+          <div className="reports-analytics-table__row" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(130px, 1fr))` }} key={`${title}-${rowIndex}`}>
+            {row.map((cell, cellIndex) => <span key={`${title}-${rowIndex}-${cellIndex}`}>{cell}</span>)}
+          </div>
+        )) : <div className="reports-analytics-table__empty">{emptyText}</div>}
+      </div>
+    </article>
   );
 }
 
@@ -269,3 +421,51 @@ function formatDateTime(value?: string) {
     minute: "2-digit",
   }).format(new Date(value));
 }
+
+function formatSeconds(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+
+  if (value < 60) {
+    return `${Math.round(value)} сек`;
+  }
+
+  if (value < 3600) {
+    return `${Math.round(value / 60)} мин`;
+  }
+
+  if (value < 86400) {
+    return `${Math.round(value / 3600)} ч`;
+  }
+
+  return `${Math.round(value / 86400)} д`;
+}
+
+function formatPercent(value: number | null | undefined) {
+  return value === null || value === undefined ? "-" : `${Math.round(value * 100)}%`;
+}
+
+function toIsoDateStart(value: string) {
+  return value ? `${value}T00:00:00.000Z` : undefined;
+}
+
+function toIsoDateEnd(value: string) {
+  return value ? `${value}T23:59:59.999Z` : undefined;
+}
+
+function getFilenameFromContentDisposition(value: string | null) {
+  const match = value?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+const statusOrder: ApplicationStatus[] = ["new", "assigned", "inProgress", "delegated", "completed", "rejected"];
+const priorityOrder: ApplicationPriority[] = ["low", "medium", "high", "critical"];
+const complexityOrder: Complexity[] = ["easy", "medium", "hard", "critical"];
+const complexityLabels: Record<Complexity, string> = {
+  easy: "Легкая",
+  medium: "Средняя",
+  hard: "Высокая",
+  critical: "Критичная",
+};

@@ -254,6 +254,15 @@
   accent-color: #1f6feb;
 }
 
+.work-types-positions {
+  display: block;
+  margin-top: 8px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .work-types-matrix-preview {
   display: grid;
   gap: 6px;
@@ -321,7 +330,7 @@
   font-weight: 800;
 }
 
-.work-types-modal__panel small {
+.work-types-modal__panel small:not(.work-types-positions) {
   color: #b42318;
   font-size: 13px;
 }

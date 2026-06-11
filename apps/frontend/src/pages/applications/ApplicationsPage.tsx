@@ -19,7 +19,15 @@ import "./ApplicationsPage.css";
 
 export function ApplicationsPage() {
   const { currentUser } = useAuth();
-  const { applicationItems, isLoading, error, performAction, refreshApplicationDetail } = useApplicationsStore();
+  const {
+    applicationItems,
+    applicationsTotal,
+    hasMoreApplications,
+    isLoading,
+    error,
+    performAction,
+    refreshApplicationDetail,
+  } = useApplicationsStore();
   const { departments, positions, workTypes, employees } = useReferenceData();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sortKey, setSortKey] = useState<ApplicationSortKey>("priority");
@@ -111,6 +119,12 @@ export function ApplicationsPage() {
   const delegatingExecutorJobTitle = positions.find((position) => position.id === delegatingExecutor?.positionId);
   const applicationAttachments = selectedApplication?.attachments ?? [];
   const applicationExtraNames = selectedApplication?.attachmentNames ?? [];
+  const busyExecutorApplication = applicationItems.find(
+    (application) =>
+      application.id !== selectedApplication?.id &&
+      application.executorId === actionForm.executorId &&
+      (application.status === "assigned" || application.status === "inProgress"),
+  );
 
   const executorsForDepartment = employees.filter(
     (user) => user.role === "executor" && user.departmentId === selectedApplication?.departmentId && user.isActive,
@@ -270,6 +284,11 @@ export function ApplicationsPage() {
         </div>
 
         <div className="applications-list">
+          {hasMoreApplications ? (
+            <div className="applications-list__more">
+              Показаны первые {applicationItems.length} из {applicationsTotal} заявок. Уточните фильтр или ID.
+            </div>
+          ) : null}
           {visibleApplications.length > 0 ? (
             visibleApplications.map((application) => (
               <button
@@ -478,20 +497,27 @@ export function ApplicationsPage() {
             </header>
 
             {pendingAction === "assignExecutor" ? (
-              <label>
-                Исполнитель
-                <select
-                  value={actionForm.executorId}
-                  onChange={(event) => {
-                    setActionForm((current) => ({ ...current, executorId: event.target.value }));
-                    setActionError("");
-                  }}
-                >
-                  {executorsForDepartment.map((user) => (
-                    <option value={user.id} key={user.id}>{user.fullName}</option>
-                  ))}
-                </select>
-              </label>
+              <>
+                <label>
+                  Исполнитель
+                  <select
+                    value={actionForm.executorId}
+                    onChange={(event) => {
+                      setActionForm((current) => ({ ...current, executorId: event.target.value }));
+                      setActionError("");
+                    }}
+                  >
+                    {executorsForDepartment.map((user) => (
+                      <option value={user.id} key={user.id}>{user.fullName}</option>
+                    ))}
+                  </select>
+                </label>
+                {busyExecutorApplication ? (
+                  <div className="application-modal__warning">
+                    Исполнитель уже занят заявкой ID {busyExecutorApplication.id}. При назначении backend вернет прежнюю активную заявку в статус «Новый».
+                  </div>
+                ) : null}
+              </>
             ) : null}
 
             {pendingAction === "delegateExternal" ? (

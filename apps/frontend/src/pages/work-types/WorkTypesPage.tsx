@@ -33,7 +33,7 @@ const defaultAllowedGradeIdsByComplexity: Record<Complexity, string[]> = {
 
 export function WorkTypesPage() {
   const { currentUser, credentials } = useAuth();
-  const { departments, grades, workTypes, refresh } = useReferenceData();
+  const { departments, grades, positions, workTypes, refresh } = useReferenceData();
   const availableDepartments = currentUser?.role === "manager"
     ? departments.filter((department) => department.id === currentUser.departmentId)
     : departments;
@@ -264,6 +264,9 @@ export function WorkTypesPage() {
                         </label>
                       ))}
                     </span>
+                    <small className="work-types-positions">
+                      Должности: {getAllowedPositionNames(item.allowedGradeIds, positions)}
+                    </small>
                   </span>
                   <span role="cell">Доступен для новых заявок</span>
                   <span role="cell">
@@ -365,6 +368,9 @@ export function WorkTypesPage() {
                   </label>
                 ))}
               </div>
+              <small className="work-types-positions">
+                Должности: {getAllowedPositionNames(form.allowedGradeIds, positions)}
+              </small>
               {errors.complexity ? <small>{errors.complexity}</small> : null}
             </div>
 
@@ -379,4 +385,13 @@ export function WorkTypesPage() {
       ) : null}
     </section>
   );
+}
+
+function getAllowedPositionNames(allowedGradeIds: string[], positions: Array<{ name: string; gradeIds: string[] }>) {
+  const allowed = new Set(allowedGradeIds);
+  const names = positions
+    .filter((position) => position.gradeIds.some((gradeId) => allowed.has(gradeId)))
+    .map((position) => position.name);
+
+  return names.length > 0 ? names.join(", ") : "нет подходящих должностей";
 }

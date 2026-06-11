@@ -11,9 +11,9 @@ export const departments: Department[] = [
 ];
 
 export const jobTitles: JobTitle[] = [
-  { id: "engineer", name: "Инженер", isTop: false },
-  { id: "lead-engineer", name: "Ведущий инженер", isTop: false },
-  { id: "department-head", name: "Руководитель отдела", isTop: true },
+  { id: "engineer", name: "Инженер", gradeIds: ["junior", "middle"], isTop: false },
+  { id: "lead-engineer", name: "Ведущий инженер", gradeIds: ["senior", "lead"], isTop: false },
+  { id: "department-head", name: "Руководитель отдела", gradeIds: ["senior", "lead"], isTop: true },
 ];
 
 export const grades: Grade[] = [
