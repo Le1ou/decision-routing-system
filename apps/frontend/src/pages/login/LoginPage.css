@@ -21,8 +21,22 @@
 
 .login-card__header {
   display: grid;
-  gap: 14px;
+  justify-items: center;
+  gap: 12px;
   text-align: center;
+}
+
+.login-card__header img {
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(31, 111, 235, 0.2);
+}
+
+.login-card__header span {
+  color: #1f6feb;
+  font-size: 16px;
+  font-weight: 900;
 }
 
 .login-card h1 {
@@ -53,6 +67,85 @@
   color: #8a8a8a;
   font-size: 22px;
   font-weight: 800;
+}
+
+.login-field__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.login-field__hint {
+  display: inline-grid;
+  position: relative;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #1f6feb;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.login-field__hint::before {
+  content: "";
+  display: none;
+  position: absolute;
+  left: -150px;
+  bottom: 100%;
+  width: 330px;
+  height: 14px;
+}
+
+.login-field__tooltip {
+  display: grid;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  width: min(390px, calc(100vw - 48px));
+  gap: 5px;
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  background: #15243b;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+  opacity: 0;
+  padding: 10px 12px;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  cursor: text;
+  user-select: text;
+}
+
+.login-field__tooltip b {
+  color: #bdebdc;
+  font-size: 13px;
+}
+
+.login-field__tooltip span {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.login-field__hint:hover .login-field__tooltip,
+.login-field__hint:focus .login-field__tooltip,
+.login-field__hint:focus-visible .login-field__tooltip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.login-field__hint:hover::before,
+.login-field__hint:focus::before,
+.login-field__hint:focus-visible::before {
+  display: block;
 }
 
 .login-field select,
@@ -143,5 +236,22 @@
   .login-field,
   .login-card__submit {
     font-size: 22px;
+  }
+
+  .login-field__tooltip {
+    left: -96px;
+    width: calc(100vw - 64px);
+    transform: translateY(4px);
+  }
+
+  .login-field__hint::before {
+    left: -96px;
+    width: calc(100vw - 64px);
+  }
+
+  .login-field__hint:hover .login-field__tooltip,
+  .login-field__hint:focus .login-field__tooltip,
+  .login-field__hint:focus-visible .login-field__tooltip {
+    transform: translateY(0);
   }
 }

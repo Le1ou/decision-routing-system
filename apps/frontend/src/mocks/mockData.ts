@@ -17,10 +17,10 @@ export const jobTitles: JobTitle[] = [
 ];
 
 export const grades: Grade[] = [
-  { id: "junior", name: "Junior" },
-  { id: "middle", name: "Middle" },
-  { id: "senior", name: "Senior" },
-  { id: "lead", name: "Lead" },
+  { id: "junior", name: "Младший" },
+  { id: "middle", name: "Старший" },
+  { id: "senior", name: "Ведущий" },
+  { id: "lead", name: "Главный" },
 ];
 
 export const mockUsers: User[] = [

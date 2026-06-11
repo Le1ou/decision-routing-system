@@ -74,8 +74,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           Назад
         </button>
-        <Link className="app-shell__home-link" to="/">
-          Маршрутизация заявок
+        <Link className="app-shell__home-link" to="/" aria-label="ДиспетчерЗаявок">
+          <img src="/application-dispatcher-mark.svg" alt="" aria-hidden="true" />
+          <span>
+            <strong>ДиспетчерЗаявок</strong>
+            <small>Маршрутизация и контроль</small>
+          </span>
         </Link>
         <div className="app-shell__notifications-wrap">
           <button
