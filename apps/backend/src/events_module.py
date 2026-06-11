@@ -1,40 +1,30 @@
 """
-events_module.py — подсистема событий и исполнения решений (каркас).
+events_module.py — подсистема событий и исполнения решений.
 
-Реализованная сейчас часть (не зависит от формулы приоритета):
-  • уведомление руководителя отдела о приближении дедлайна заявки в статусе `new`
-    (когда доля ОСТАВШЕГОСЯ времени <= department.deadline_notification);
-  • пометка просроченных заявок (`is_expired`) + уведомление руководителя.
+На каждом тике `run_tick(db)`:
+  • пересчитывает `application.priority_score` открытых заявок (k_времени растёт
+    со временем) — см. priority_module;
+  • помечает просроченные заявки (`is_expired`) и уведомляет руководителя отдела
+    и назначенного исполнителя;
+  • шлёт уведомление о приближении дедлайна по всем открытым статусам (когда доля
+    ОСТАВШЕГОСЯ времени <= department.deadline_notification) — руководителю отдела
+    и назначенному исполнителю.
 
-НЕ реализовано (ждёт открытых вопросов по формуле, см. docs/open-questions-for-discussion.md):
-  • пересчёт application.priority_score;
-  • инициация авто-назначения (подсистема маршрутизации).
-
-run_tick(db) выполняет один проход и идемпотентен: повторные вызовы не шлют дубли
-(дедуп через application.is_expired и application.deadline_notified). Работает под
-системным соединением (DBController) — на привилегии пользователя не завязан.
-Фоновый цикл, вызывающий run_tick по таймеру, поднимается в lifespan FastAPI (main.py).
+run_tick идемпотентен: повторные вызовы не шлют дубли (дедуп через
+application.is_expired и application.deadline_notified). Работает под системным
+соединением (DBController) — на привилегии пользователя не завязан.
+Фоновый цикл, вызывающий run_tick по таймеру, поднимается в lifespan FastAPI
+(main.py); следом за событиями тот же цикл запускает маршрутизацию
+(routing_module.run_routing).
 """
 
 from datetime import datetime, timezone
 
 from psycopg.rows import dict_row
 
+from src.db_helpers import dept_manager_ids, notify
+
 DEFAULT_DEADLINE_NOTIFICATION = 0.25  # доля оставшегося времени, если у отдела не задано
-
-
-def _dept_manager_ids(cur, dept_id) -> list:
-    """Активные руководители/топ-менеджеры отдела — получатели уведомлений."""
-    if dept_id is None:
-        return []
-    rows = cur.execute(
-        "SELECT e.employee_id FROM public.employee e "
-        "JOIN public.role r ON r.role_id = e.role_id "
-        "WHERE e.department_id = %s AND r.name IN ('manager', 'top-manager') "
-        "AND e.is_active = true",
-        (int(dept_id),),
-    ).fetchall()
-    return [r["employee_id"] for r in rows]
 
 
 def _assigned_executor_id(cur, app_id):
@@ -50,21 +40,11 @@ def _assigned_executor_id(cur, app_id):
 
 def _recipients(cur, dept_id, app_id) -> set:
     """Получатели уведомления по заявке: руководители отдела + назначенный исполнитель."""
-    ids = set(_dept_manager_ids(cur, dept_id))
+    ids = set(dept_manager_ids(cur, dept_id))
     exec_id = _assigned_executor_id(cur, app_id)
     if exec_id is not None:
         ids.add(exec_id)
     return ids
-
-
-def _notify(cur, text, employee_id, application_id, at) -> None:
-    if employee_id is None:
-        return
-    cur.execute(
-        "INSERT INTO public.notification (text, created_at, employee_id, is_read, application_id) "
-        "VALUES (%s, %s, %s, false, %s)",
-        (text, at, int(employee_id), int(application_id)),
-    )
 
 
 def run_tick(db, now=None) -> dict:
@@ -98,8 +78,8 @@ def run_tick(db, now=None) -> dict:
                     (now, r["application_id"]),
                 )
                 for rid in _recipients(cur, r["department_id"], r["application_id"]):
-                    _notify(cur, f"Заявка «{r['name']}» просрочена.",
-                            rid, r["application_id"], now)
+                    notify(cur, f"Заявка «{r['name']}» просрочена.",
+                           rid, r["application_id"], now)
                 expired_count += 1
 
             # ── 2. Приближение дедлайна (все открытые статусы, ещё не просрочена) ─
@@ -129,9 +109,9 @@ def run_tick(db, now=None) -> dict:
                 if ratio <= threshold:
                     pct = max(0, int(round(ratio * 100)))
                     for rid in _recipients(cur, r["department_id"], r["application_id"]):
-                        _notify(cur,
-                                f"По заявке «{r['name']}» истекает срок (осталось ~{pct}% времени).",
-                                rid, r["application_id"], now)
+                        notify(cur,
+                               f"По заявке «{r['name']}» истекает срок (осталось ~{pct}% времени).",
+                               rid, r["application_id"], now)
                     cur.execute(
                         "UPDATE public.application SET deadline_notified = true, updated_at = %s "
                         "WHERE application_id = %s",

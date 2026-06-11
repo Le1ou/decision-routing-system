@@ -48,6 +48,11 @@ services:
     restart: always
     environment:
       AUTH_MODE: ${AUTH_MODE:-mock}
+      # Для прода обычно SEED_ON_START=false (данные переживают рестарт; см.
+      # apps/backend/config.json → "startup" и src/backup_module.py).
+      SEED_ON_START: ${SEED_ON_START:-}
+      BACKUP_ON_SHUTDOWN: ${BACKUP_ON_SHUTDOWN:-}
+      RESTORE_FROM_BACKUP: ${RESTORE_FROM_BACKUP:-}
       AD_SERVER: ${AD_SERVER:-}
       AD_DOMAIN: ${AD_DOMAIN:-}
       AD_USE_SSL: ${AD_USE_SSL:-}

@@ -6,26 +6,42 @@ routing_module.py — подсистема принятия решений и м
 
   • Обычная (не критичная) заявка: назначается свободному подходящему исполнителю
     («минимально способному»); если свободных нет — остаётся в `new` (не вытесняет никого
-    и автоматически не перераспределяется).
+    и автоматически не перераспределяется), а руководителю отдела уходит уведомление
+    «нет свободных подходящих исполнителей» (однократно на заявку).
   • Критичная заявка: назначается свободному; если свободных нет — вытесняет у подходящего
     исполнителя НЕ критичную заявку с наименьшим приоритетом (та возвращается в `new` с
     признаком «Незавершённая»); если вытеснять некого — остаётся в `new` и руководителю
     уходит уведомление-эскалация (однократно).
 
+  Дедуп уведомлений «не удалось распределить» — флаг application.escalation_notified,
+  сбрасывается при назначении (вручную флаг не сбрасывается — повторное уведомление
+  придёт только после нового цикла назначение → возврат в `new`).
+
 «Свободный подходящий исполнитель»: активен, роль executor, его отдел = отделу заявки,
-грейд входит в матрицу вида работ, нет активной заявки (assigned/inProgress), и прошёл
-кулдаун `empl_appl_delay` после последней завершённой заявки (кулдаун соблюдают все, в т.ч.
-критичные). «Минимально способный» — наименьший грейд; при равенстве — дольше всех
-простаивавший.
+грейд входит в матрицу вида работ, нет активной заявки (assigned/inProgress) и нет
+внутреннего делегирования, ждущего подтверждения руководителя (при отклонении такая
+заявка вернётся исполнителю), и прошёл кулдаун `empl_appl_delay` после последней
+завершённой заявки (кулдаун соблюдают все, в т.ч. критичные). «Минимально способный» —
+наименьший грейд; при равенстве — дольше всех простаивавший.
 
 Запускается фоновым циклом (lifespan) ОТДЕЛЬНО от events.run_tick. Работает под системным
 соединением (DBController). Всё (назначение/вытеснение/журнал/уведомления) — в одной
 транзакции прохода.
+
+Помимо периодического полного прохода, `run_routing(db, only_application_id=...)` вызывается
+из create_application сразу при создании КРИТИЧНОЙ заявки — немедленное распределение одной
+заявки, без ожидания тика (см. параметр only_application_id).
 """
 
 from datetime import datetime, timezone, timedelta
 
 from psycopg.rows import dict_row
+
+from src.db_helpers import dept_manager_ids, notify, record_status_change
+
+# Произвольный, но фиксированный ключ для transaction-level advisory lock,
+# сериализующего проходы run_routing между собой (фон + немедленный триггер).
+_ROUTING_LOCK_KEY = 727274
 
 
 def _role_id(cur, name):
@@ -55,32 +71,9 @@ def _dept_delay_minutes(cur, dept_id):
     return (r["empl_appl_delay"] if r and r["empl_appl_delay"] is not None else 0)
 
 
-def _dept_manager_ids(cur, dept_id):
-    rows = cur.execute(
-        "SELECT e.employee_id FROM public.employee e JOIN public.role r ON r.role_id = e.role_id "
-        "WHERE e.department_id = %s AND r.name IN ('manager', 'top-manager') AND e.is_active = true",
-        (dept_id,),
-    ).fetchall()
-    return [r["employee_id"] for r in rows]
-
-
-def _notify(cur, text, employee_id, application_id, at):
-    if employee_id is None:
-        return
-    cur.execute(
-        "INSERT INTO public.notification (text, created_at, employee_id, is_read, application_id) "
-        "VALUES (%s, %s, %s, false, %s)",
-        (text, at, int(employee_id), int(application_id)),
-    )
-
-
 def _journal(cur, application_id, from_sid, to_sid, reason, at):
-    cur.execute(
-        "INSERT INTO public.application_status_history "
-        "(application_id, from_status_id, to_status_id, changed_at, by_employee_id, reason) "
-        "VALUES (%s, %s, %s, %s, NULL, %s)",
-        (int(application_id), from_sid, to_sid, at, reason),
-    )
+    # Маршрутизация действует от имени системы → by_employee_id = NULL.
+    record_status_change(cur, application_id, from_sid, to_sid, None, reason, at)
 
 
 def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, delay_minutes, now):
@@ -107,8 +100,15 @@ def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, delay_minutes, 
               SELECT 1 FROM public.employee_to_application eta2
               JOIN public.application a2 ON a2.application_id = eta2.application_id
               JOIN public.status s2 ON s2.status_id = a2.status_id
+              LEFT JOIN public.delegated d2 ON d2.delegated_id = a2.delegated_id
               WHERE eta2.employee_id = e.employee_id AND eta2.role_id = %(exec)s
-                AND s2.name IN ('assigned', 'inProgress'))
+                AND (s2.name IN ('assigned', 'inProgress')
+                     -- Внутреннее делегирование, ждущее подтверждения руководителя:
+                     -- при отклонении заявка ВЕРНЁТСЯ этому исполнителю (assigned/
+                     -- inProgress), поэтому до решения он считается занятым — иначе
+                     -- авто-назначение могло бы дать ему вторую активную заявку.
+                     OR (s2.name = 'delegated'
+                         AND d2.delegated_from = d2.delegated_to)))
         """,
         {"exec": exec_role_id, "dept": dept_id, "allowed": list(allowed_grades)},
     ).fetchall()
@@ -149,7 +149,7 @@ def _evictable(cur, exec_role_id, dept_id, allowed_grades):
 def _assign(cur, exec_role_id, application_id, from_sid, assigned_sid, employee_id, now, reason):
     cur.execute(
         "UPDATE public.application SET status_id = %s, executor_at = %s, updated_at = %s, "
-        "escalation_notified = false WHERE application_id = %s",
+        "is_unfinished = false, escalation_notified = false WHERE application_id = %s",
         (assigned_sid, now, now, int(application_id)),
     )
     cur.execute(
@@ -163,27 +163,42 @@ def _assign(cur, exec_role_id, application_id, from_sid, assigned_sid, employee_
     _journal(cur, application_id, from_sid, assigned_sid, reason, now)
 
 
-def run_routing(db, now=None) -> dict:
+def run_routing(db, now=None, only_application_id=None) -> dict:
+    """Один проход распределения `new`-заявок по убыванию приоритета.
+
+    `only_application_id` (необязательно) — обработать ТОЛЬКО одну заявку (если она в
+    статусе `new`), не трогая остальную очередь. Используется для немедленного
+    распределения критичной заявки сразу при создании (без ожидания фонового тика);
+    переиспользует ту же логику назначения/вытеснения/эскалации, что и полный проход.
+    """
     now = now or datetime.now(timezone.utc)
     assigned = evicted = escalated = 0
 
     with db.pool.connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
+            # Сериализуем проходы маршрутизации (фоновый цикл + немедленный триггер
+            # критичной заявки могут идти параллельно на разных соединениях) — иначе два
+            # прохода могут назначить одного свободного исполнителя на две заявки и нарушить
+            # инвариант «одна заявка/исполнитель». Lock держится до конца транзакции прохода.
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (_ROUTING_LOCK_KEY,))
             exec_role = _role_id(cur, "executor")
             new_sid = _status_id(cur, "new")
             assigned_sid = _status_id(cur, "assigned")
             if exec_role is None or new_sid is None or assigned_sid is None:
                 return {"assigned": 0, "evicted": 0, "escalated": 0}
 
+            one_filter = " AND a.application_id = %s" if only_application_id is not None else ""
             apps = cur.execute(
-                """
+                f"""
                 SELECT a.application_id, a.name, a.department_id, a.types_of_works,
                        a.priority_score, a.escalation_notified, p.name AS priority_name
                 FROM public.application a
                 JOIN public.status s ON s.status_id = a.status_id AND s.name = 'new'
                 LEFT JOIN public.priority p ON p.priority_id = a.priority_id
+                WHERE 1=1{one_filter}
                 ORDER BY a.priority_score DESC NULLS LAST
-                """
+                """,
+                (int(only_application_id),) if only_application_id is not None else None,
             ).fetchall()
 
             for app in apps:
@@ -193,49 +208,53 @@ def run_routing(db, now=None) -> dict:
                 if dept is None or wt is None:
                     continue
                 allowed = _allowed_grade_ids(cur, wt)
-                if not allowed:
-                    continue
                 is_critical = (app["priority_name"] == "critical")
 
                 free = _free_candidates(cur, exec_role, dept, allowed,
-                                        _dept_delay_minutes(cur, dept), now)
+                                        _dept_delay_minutes(cur, dept), now) if allowed else []
                 if free:
                     emp = free[0]["employee_id"]
                     _assign(cur, exec_role, app_id, new_sid, assigned_sid, emp, now, "auto_assign")
-                    _notify(cur, f"Вам назначена заявка: «{app['name']}».", emp, app_id, now)
+                    notify(cur, f"Вам назначена заявка: «{app['name']}».", emp, app_id, now)
                     assigned += 1
                     continue
 
-                if not is_critical:
-                    continue  # обычная заявка без свободных исполнителей — ждёт
+                if is_critical and allowed:
+                    # Критичная: вытеснение наименее приоритетной НЕ критичной заявки.
+                    victim = _evictable(cur, exec_role, dept, allowed)
+                    if victim:
+                        emp = victim["employee_id"]
+                        cur.execute(
+                            "UPDATE public.application SET status_id = %s, is_unfinished = true, "
+                            "previous_executor_id = %s, updated_at = %s WHERE application_id = %s",
+                            (new_sid, emp, now, victim["victim_app"]),
+                        )
+                        _journal(cur, victim["victim_app"], victim["victim_status_id"], new_sid,
+                                 "critical_evict", now)
+                        _assign(cur, exec_role, app_id, new_sid, assigned_sid, emp, now, "auto_assign")
+                        notify(cur, f"Вам назначена критичная заявка: «{app['name']}».", emp, app_id, now)
+                        notify(cur, f"Заявка «{victim['victim_name']}» снята с вас под критичную и "
+                                    f"возвращена в «Новый».", emp, victim["victim_app"], now)
+                        for mid in dept_manager_ids(cur, dept):
+                            notify(cur, f"Критичная заявка «{app['name']}» вытеснила заявку "
+                                        f"«{victim['victim_name']}».", mid, app_id, now)
+                        evicted += 1
+                        assigned += 1
+                        continue
 
-                # Критичная: вытеснение наименее приоритетной НЕ критичной заявки.
-                victim = _evictable(cur, exec_role, dept, allowed)
-                if victim:
-                    emp = victim["employee_id"]
-                    cur.execute(
-                        "UPDATE public.application SET status_id = %s, is_unfinished = true, "
-                        "previous_executor_id = %s, updated_at = %s WHERE application_id = %s",
-                        (new_sid, emp, now, victim["victim_app"]),
-                    )
-                    _journal(cur, victim["victim_app"], victim["victim_status_id"], new_sid,
-                             "critical_evict", now)
-                    _assign(cur, exec_role, app_id, new_sid, assigned_sid, emp, now, "auto_assign")
-                    _notify(cur, f"Вам назначена критичная заявка: «{app['name']}».", emp, app_id, now)
-                    _notify(cur, f"Заявка «{victim['victim_name']}» снята с вас под критичную и "
-                                 f"возвращена в «Новый».", emp, victim["victim_app"], now)
-                    for mid in _dept_manager_ids(cur, dept):
-                        _notify(cur, f"Критичная заявка «{app['name']}» вытеснила заявку "
-                                     f"«{victim['victim_name']}».", mid, app_id, now)
-                    evicted += 1
-                    assigned += 1
-                    continue
-
-                # Вытеснять некого (все подходящие заняты критичными или их нет) — эскалация.
+                # Заявку некому отдать: свободных подходящих исполнителей нет, а вытеснение
+                # невозможно (не критичная / все заняты критичными / нет подходящих по
+                # грейду). Уведомляем руководителя отдела — однократно на заявку
+                # (дедуп через escalation_notified; сбрасывается при назначении).
                 if not app["escalation_notified"]:
-                    for mid in _dept_manager_ids(cur, dept):
-                        _notify(cur, f"Критичную заявку «{app['name']}» не удалось распределить "
-                                     f"автоматически — требуется ручное назначение.", mid, app_id, now)
+                    if is_critical:
+                        text = (f"Критичную заявку «{app['name']}» не удалось распределить "
+                                f"автоматически — требуется ручное назначение.")
+                    else:
+                        text = (f"Заявку «{app['name']}» не удалось распределить автоматически: "
+                                f"нет свободных подходящих исполнителей.")
+                    for mid in dept_manager_ids(cur, dept):
+                        notify(cur, text, mid, app_id, now)
                     cur.execute(
                         "UPDATE public.application SET escalation_notified = true WHERE application_id = %s",
                         (app_id,),

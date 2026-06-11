@@ -157,6 +157,34 @@ def test_update_department_out_of_range_422():
                              {"deadlineNotificationRatio": 1.5}).status_code == 422
 
 
+def _delegations(auth=TOP_MANAGER):
+    return _session.get(f"{BASE_URL}/analytics/applications", auth=auth).json()["delegations"]
+
+
+def test_runtime_external_delegation_counted_in_analytics():
+    """Рантайм-делегирование должно попадать в аналитику (delegated.application_id
+    заполняется при создании, а не только в seed)."""
+    before = _delegations()["total"]
+    app_id = _create_app(AUTHOR_IT, DEP_IT)
+    assert _act(app_id, TOP_MANAGER, action="delegateExternal", departmentId=str(DEP_OGE)).status_code == 204
+    after = _delegations()["total"]
+    assert after >= before + 1, "runtime delegation must be counted in analytics"
+
+
+def test_confirmed_external_delegation_survives_assignment():
+    """Подтверждённое внешнее делегирование не должно перебиваться в 'declined' при
+    последующем назначении исполнителя в новом отделе (delegated_id очищается при confirm)."""
+    app_id = _create_app(AUTHOR_IT, DEP_IT)
+    assert _act(app_id, TOP_MANAGER, action="delegateExternal", departmentId=str(DEP_OGE)).status_code == 204
+    assert _act(app_id, DEPT_MANAGER, action="confirmExternalDelegation").status_code == 204
+    confirmed_before = _delegations()["confirmed"]
+    # Назначаем исполнителя ОГЭ на перемещённую заявку.
+    assert _act(app_id, DEPT_MANAGER, action="assignExecutor", executorId="4").status_code == 204
+    confirmed_after = _delegations()["confirmed"]
+    assert confirmed_after >= confirmed_before, \
+        "confirmed delegation must not flip to declined on subsequent assignExecutor"
+
+
 def test_reports_are_department_scoped_for_plain_manager():
     departments = _session.get(f"{BASE_URL}/departments", auth=DEPT_MANAGER).json()["items"]
     oge_name = next(d["name"] for d in departments if str(d["id"]) == str(DEP_OGE))
