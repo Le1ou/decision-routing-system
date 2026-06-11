@@ -47,6 +47,7 @@ export type DepartmentDto = {
 export type PositionDto = {
   id: string;
   name: string;
+  gradeIds?: string[];
 };
 
 export type GradeDto = {
@@ -154,6 +155,93 @@ export type ApplicationReportResponseDto = {
     completed: number;
     inProgressOrAssigned: number;
   };
+};
+
+export type RangeMetricDto = {
+  min: number | null;
+  avg: number | null;
+  max: number | null;
+};
+
+export type AnalyticsPeriodDto = {
+  from: string | null;
+  to: string | null;
+} | null;
+
+export type AnalyticsMetaDto = {
+  scope: "all" | "department";
+  departmentId: string | null;
+  period: AnalyticsPeriodDto;
+};
+
+export type ApplicationsAnalyticsResponseDto = AnalyticsMetaDto & {
+  total: number;
+  byStatus: Partial<Record<ApplicationStatus, number>>;
+  byPriority: Partial<Record<"low" | "medium" | "high" | "critical", number>>;
+  byComplexity: Partial<Record<Complexity, number>>;
+  completionTimeSeconds: RangeMetricDto;
+  timeToAssignSeconds: RangeMetricDto;
+  timeWithoutExecutorSeconds: RangeMetricDto;
+  timePerStatusSeconds: Partial<Record<ApplicationStatus, RangeMetricDto>>;
+  delegations: {
+    total: number;
+    confirmed: number;
+    declined: number;
+    pending: number;
+    decisionTimeSeconds: RangeMetricDto;
+  };
+};
+
+export type ExecutorsAnalyticsResponseDto = AnalyticsMetaDto & {
+  executors: Array<{
+    employeeId: string;
+    fullName: string;
+    departmentId: string;
+    assignedCount: number;
+    completedCount: number;
+    inProgressCount: number;
+    takenInWorkCount: number;
+    rejectedCount: number;
+    delegatedCount: number;
+    byPriority: Partial<Record<"low" | "medium" | "high" | "critical", number>>;
+    avgReactionTimeSeconds: number | null;
+    avgHandlingTimeSeconds: number | null;
+    totalWorkSeconds: number | null;
+    idleTimeSeconds: number | null;
+    occupancyRatio: number | null;
+  }>;
+};
+
+export type WorkTypesAnalyticsResponseDto = AnalyticsMetaDto & {
+  workTypes: Array<{
+    workTypeId: string;
+    name: string;
+    departmentId: string;
+    createdCount: number;
+    completedCount: number;
+    delegatedCount: number;
+    byPriority: Partial<Record<"low" | "medium" | "high" | "critical", number>>;
+    avgCompletionTimeSeconds: number | null;
+    topExecutorId: string | null;
+    topExecutorName: string | null;
+  }>;
+};
+
+export type DepartmentsAnalyticsResponseDto = AnalyticsMetaDto & {
+  departments: Array<{
+    departmentId: string;
+    name: string;
+    employeeCount: number;
+    applicationCount: number;
+    completedCount: number;
+    avgReactionTimeSeconds: number | null;
+    idleTimeSeconds: number | null;
+    occupancyRatio: number | null;
+    delegations: {
+      sent: number;
+      received: number;
+    };
+  }>;
 };
 
 export type NotificationDto = {
@@ -295,8 +383,13 @@ export const apiClient = {
     departmentId: string,
     payload: { delegatedToSameDepartment: boolean },
   ) => jsonRequest<void>(`/departments/${departmentId}/delegation-settings`, credentials, payload, { method: "PATCH" }),
+  updateDepartmentSettings: (
+    credentials: ApiCredentials,
+    departmentId: string,
+    payload: Partial<{ employeeApplicationDelayMinutes: number; deadlineNotificationRatio: number }>,
+  ) => jsonRequest<void>(`/departments/${departmentId}`, credentials, payload, { method: "PATCH" }),
   getPrioritySettings: (credentials: ApiCredentials) => apiRequest<PrioritySettings>("/priority-settings", credentials),
-  updatePrioritySettings: (credentials: ApiCredentials, payload: PrioritySettings) =>
+  updatePrioritySettings: (credentials: ApiCredentials, payload: Omit<PrioritySettings, "urgent">) =>
     jsonRequest<PrioritySettings>("/priority-settings", credentials, payload, { method: "PUT" }),
   getNotifications: (credentials: ApiCredentials, params?: QueryParams) =>
     apiRequest<NotificationsResponseDto>(withQuery("/notifications", params), credentials),
@@ -307,4 +400,12 @@ export const apiClient = {
   getApplicationReport: (credentials: ApiCredentials, params?: QueryParams) =>
     apiRequest<ApplicationReportResponseDto>(withQuery("/reports/applications", params), credentials),
   getApplicationReportXlsUrl: (params?: QueryParams) => `${env.apiUrl}${withQuery("/reports/applications.xls", params)}`,
+  getApplicationsAnalytics: (credentials: ApiCredentials, params?: QueryParams) =>
+    apiRequest<ApplicationsAnalyticsResponseDto>(withQuery("/analytics/applications", params), credentials),
+  getExecutorsAnalytics: (credentials: ApiCredentials, params?: QueryParams) =>
+    apiRequest<ExecutorsAnalyticsResponseDto>(withQuery("/analytics/executors", params), credentials),
+  getWorkTypesAnalytics: (credentials: ApiCredentials, params?: QueryParams) =>
+    apiRequest<WorkTypesAnalyticsResponseDto>(withQuery("/analytics/work-types", params), credentials),
+  getDepartmentsAnalytics: (credentials: ApiCredentials, params?: QueryParams) =>
+    apiRequest<DepartmentsAnalyticsResponseDto>(withQuery("/analytics/departments", params), credentials),
 };

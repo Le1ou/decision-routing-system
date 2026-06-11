@@ -2,23 +2,25 @@ import { Link } from "react-router-dom";
 
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
 import { useAuth } from "@app/providers/AuthProvider";
-import type { UserPermissions } from "@shared/model/domain";
-import { canAccessManagement } from "@shared/model/roles";
+import type { UserPermissions, UserRole } from "@shared/model/domain";
+import { canAccessManagement, hasAnyRole } from "@shared/model/roles";
 
 import "./HomePage.css";
 
 const sections = [
-  { title: "Отчетность", description: "Фильтры, период и выгрузка .xls", to: "/reports", permission: "canViewReports" },
+  { title: "Отчетность", description: "Фильтры, период и выгрузка .xlsx", to: "/reports", permission: "canViewReports" },
   { title: "Сотрудники", description: "Состав отдела, должности и активность", to: "/employees", permission: "canManageEmployees" },
   { title: "Виды работ", description: "Справочник работ и сложности", to: "/work-types", permission: "canManageWorkTypes" },
-  { title: "Приоритеты", description: "Коэффициенты расчета заявки", to: "/priority-settings", permission: "canManagePrioritySettings" },
-] satisfies Array<{ title: string; description: string; to: string; permission: keyof UserPermissions }>;
+  { title: "Приоритеты", description: "Коэффициенты и настройки отдела", to: "/priority-settings", roles: ["manager", "top-manager"] },
+] satisfies Array<{ title: string; description: string; to: string; permission?: keyof UserPermissions; roles?: UserRole[] }>;
 
 export function HomePage() {
   const { currentUser, permissions } = useAuth();
   const { applicationItems } = useApplicationsStore();
   const hasManagementAccess = currentUser ? canAccessManagement(currentUser, permissions) : false;
-  const visibleSections = sections.filter((section) => permissions?.[section.permission]);
+  const visibleSections = sections.filter((section) =>
+    section.permission ? permissions?.[section.permission] : currentUser && section.roles ? hasAnyRole(currentUser, section.roles) : false,
+  );
   const activeApplications = applicationItems.filter((application) => application.status !== "completed" && application.status !== "rejected");
   const criticalApplications = applicationItems.filter((application) => application.priority === "critical");
   const inProgressApplications = applicationItems.filter((application) => application.status === "inProgress");

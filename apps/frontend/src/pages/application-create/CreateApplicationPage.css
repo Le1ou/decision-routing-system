@@ -220,6 +220,17 @@
   display: none;
 }
 
+.create-window__toolbar small {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.create-window__error--files {
+  color: #b42318;
+}
+
 .create-window__footer {
   display: flex;
   min-height: 78px;

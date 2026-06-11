@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
@@ -13,7 +13,9 @@ import "./AppShell.css";
 export function AppShell({ children }: { children: ReactNode }) {
   const { currentUser, credentials, logout } = useAuth();
   const { applicationItems } = useApplicationsStore();
+  const location = useLocation();
   const navigate = useNavigate();
+  const notificationsRef = useRef<HTMLDivElement | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -37,6 +39,22 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   usePolling(refreshNotifications, env.pollIntervalMs, Boolean(credentials));
 
+  useEffect(() => {
+    if (!isNotificationsOpen) {
+      return;
+    }
+
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      if (!notificationsRef.current?.contains(event.target as Node)) {
+        setIsNotificationsOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointerDown);
+
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointerDown);
+  }, [isNotificationsOpen]);
+
   if (!currentUser) {
     return <>{children}</>;
   }
@@ -50,6 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     [applicationItems, notifications],
   );
   const displayName = currentUser.fullName.split(" ").slice(0, 2).join(" ");
+  const showBackButton = location.pathname !== "/";
 
   const markAllAsRead = async () => {
     if (!credentials) {
@@ -60,20 +79,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     await refreshNotifications();
   };
 
-  const goHome = () => {
-    navigate("/");
-  };
-
   return (
     <div className="app-shell">
       <header className="app-shell__header">
-        <button
-          className="app-shell__back"
-          type="button"
-          onClick={goHome}
-        >
-          Назад
-        </button>
+        {showBackButton ? (
+          <button
+            className="app-shell__back"
+            type="button"
+            onClick={() => navigate("/")}
+          >
+            Назад
+          </button>
+        ) : null}
         <Link className="app-shell__home-link" to="/" aria-label="ДиспетчерЗаявок">
           <img src="/application-dispatcher-mark.svg" alt="" aria-hidden="true" />
           <span>
@@ -81,7 +98,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <small>Маршрутизация и контроль</small>
           </span>
         </Link>
-        <div className="app-shell__notifications-wrap">
+        <div className="app-shell__notifications-wrap" ref={notificationsRef}>
           <button
             className="app-shell__notifications"
             type="button"

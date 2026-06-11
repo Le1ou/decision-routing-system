@@ -71,6 +71,7 @@ export function LoginPage() {
           </span>
           <input
             value={selectedLogin}
+            placeholder="Введите логин"
             onChange={(event) => {
               setSelectedLogin(event.target.value);
               setError("");
@@ -97,8 +98,10 @@ export function LoginPage() {
               className={passwordVisible ? "login-card__eye login-card__eye--open" : "login-card__eye"}
               type="button"
               onClick={() => setPasswordVisible((value) => !value)}
-              aria-label="Показать пароль"
-            />
+              aria-label={passwordVisible ? "Скрыть пароль" : "Показать пароль"}
+            >
+              {passwordVisible ? "Скрыть" : "Показать"}
+            </button>
           </div>
         </label>
 

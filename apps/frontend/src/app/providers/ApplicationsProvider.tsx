@@ -8,6 +8,8 @@ import type { Application, ApplicationAction, Complexity } from "@shared/model/d
 
 type ApplicationsContextValue = {
   applicationItems: Application[];
+  applicationsTotal: number;
+  hasMoreApplications: boolean;
   isLoading: boolean;
   error: string;
   refreshApplications: () => Promise<void>;
@@ -37,16 +39,19 @@ type ApplicationsContextValue = {
 };
 
 const ApplicationsContext = createContext<ApplicationsContextValue | null>(null);
+const APPLICATIONS_PAGE_SIZE = 100;
 
 export function ApplicationsProvider({ children }: { children: ReactNode }) {
   const { credentials } = useAuth();
   const [applicationItems, setApplicationItems] = useState<Application[]>([]);
+  const [applicationsTotal, setApplicationsTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
   const refreshApplicationList = useCallback(async (options: { showLoading?: boolean; reportError?: boolean } = {}) => {
     if (!credentials) {
       setApplicationItems([]);
+      setApplicationsTotal(0);
       return;
     }
 
@@ -56,7 +61,8 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const response = await apiClient.getApplications(credentials);
+      const response = await apiClient.getApplications(credentials, { pageSize: APPLICATIONS_PAGE_SIZE });
+      setApplicationsTotal(response.pagination.total);
 
       setApplicationItems((current) => {
         const currentById = new Map(current.map((application) => [application.id, application]));
@@ -80,6 +86,7 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
     async () => {
       if (!credentials) {
         setApplicationItems([]);
+        setApplicationsTotal(0);
         return;
       }
 
@@ -87,7 +94,8 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
       setError("");
 
       try {
-        const response = await apiClient.getApplications(credentials);
+        const response = await apiClient.getApplications(credentials, { pageSize: APPLICATIONS_PAGE_SIZE });
+        setApplicationsTotal(response.pagination.total);
         const details = await Promise.all(
           response.items.map((application) =>
             apiClient
@@ -140,6 +148,8 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ApplicationsContextValue>(
     () => ({
       applicationItems,
+      applicationsTotal,
+      hasMoreApplications: applicationsTotal > applicationItems.length,
       isLoading,
       error,
       refreshApplications,
@@ -178,7 +188,7 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
         await refreshApplicationDetail(applicationId);
       },
     }),
-    [applicationItems, credentials, error, isLoading, refreshApplicationDetail, refreshApplications],
+    [applicationItems, applicationsTotal, credentials, error, isLoading, refreshApplicationDetail, refreshApplications],
   );
 
   return <ApplicationsContext.Provider value={value}>{children}</ApplicationsContext.Provider>;
