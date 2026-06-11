@@ -403,6 +403,83 @@ def test_min_capable_executor_preferred(sysdb):
         _reactivate_executors(sysdb, others)
 
 
+def test_position_axis_filters_candidates(sysdb):
+    """Допуск по двум осям: должность И грейд. ivanov (emp 2) — Инженер-middle,
+    petrov (emp 3) — Старший инженер-middle: грейд у обоих подходит, но вид работ,
+    ограниченный должностью «Старший инженер», должен достаться только petrov.
+    Пустая матрица должностей (старые виды работ) ограничения не накладывает."""
+    _free_executor(sysdb, EXEC1)
+    _free_executor(sysdb, EXEC2)
+    others = _deactivate_other_it_executors(sysdb)
+    wt_id = None
+    try:
+        with sysdb.pool.connection() as c:
+            senior_post = c.execute(
+                "SELECT post_id FROM public.post WHERE name = 'Старший инженер'").fetchone()[0]
+            wt_id = c.execute(
+                "INSERT INTO public.types_of_works (name, complexity_value, department_id) "
+                "VALUES ('Только для старших', 2, %s) RETURNING type_of_works_id",
+                (DEP_IT,)).fetchone()[0]
+            for g in (0, 1):   # junior, middle — грейды обоих исполнителей подходят
+                c.execute("INSERT INTO public.type_of_work_to_grade (type_of_works_id, grade_id) "
+                          "VALUES (%s, %s)", (wt_id, g))
+            c.execute("INSERT INTO public.type_of_work_to_post (type_of_works_id, post_id) "
+                      "VALUES (%s, %s)", (wt_id, senior_post))
+
+        app = _create_app(DEP_IT, wt_id)
+        _demote_other_new_apps(sysdb, app)
+        _set_priority_score(sysdb, app, 9.0)
+
+        routing_module.run_routing(sysdb)
+
+        a = _app(app)
+        assert a["status"] == "assigned"
+        assert a["executorId"] == str(EXEC2), \
+            "ivanov (Инженер) не подходит по должности — заявка должна уйти petrov (Старший инженер)"
+    finally:
+        if wt_id is not None:
+            with sysdb.pool.connection() as c:
+                c.execute("DELETE FROM public.type_of_work_to_post WHERE type_of_works_id = %s", (wt_id,))
+                c.execute("DELETE FROM public.type_of_work_to_grade WHERE type_of_works_id = %s", (wt_id,))
+        _reactivate_executors(sysdb, others)
+
+
+def test_position_axis_no_match_waits(sysdb):
+    """Если по должности не подходит никто (а по грейду подходят) — заявка ждёт в new
+    и руководителю уходит эскалация."""
+    _free_executor(sysdb, EXEC1)
+    _free_executor(sysdb, EXEC2)
+    others = _deactivate_other_it_executors(sysdb)
+    wt_id = None
+    try:
+        with sysdb.pool.connection() as c:
+            spec_post = c.execute(
+                "SELECT post_id FROM public.post WHERE name = 'Специалист'").fetchone()[0]
+            wt_id = c.execute(
+                "INSERT INTO public.types_of_works (name, complexity_value, department_id) "
+                "VALUES ('Только для специалистов', 1, %s) RETURNING type_of_works_id",
+                (DEP_IT,)).fetchone()[0]
+            for g in (0, 1):
+                c.execute("INSERT INTO public.type_of_work_to_grade (type_of_works_id, grade_id) "
+                          "VALUES (%s, %s)", (wt_id, g))
+            c.execute("INSERT INTO public.type_of_work_to_post (type_of_works_id, post_id) "
+                      "VALUES (%s, %s)", (wt_id, spec_post))   # в ИТ специалистов нет
+
+        app = _create_app(DEP_IT, wt_id)
+        _demote_other_new_apps(sysdb, app)
+        _set_priority_score(sysdb, app, 9.0)
+
+        routing_module.run_routing(sysdb)
+
+        assert _app(app)["status"] == "new"   # по должности никто не подходит → ждёт
+    finally:
+        if wt_id is not None:
+            with sysdb.pool.connection() as c:
+                c.execute("DELETE FROM public.type_of_work_to_post WHERE type_of_works_id = %s", (wt_id,))
+                c.execute("DELETE FROM public.type_of_work_to_grade WHERE type_of_works_id = %s", (wt_id,))
+        _reactivate_executors(sysdb, others)
+
+
 def test_cooldown_blocks_recently_finished(sysdb):
     _free_executor(sysdb, EXEC1)
     others = _deactivate_other_it_executors(sysdb)

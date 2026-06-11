@@ -10,6 +10,7 @@
   },
   "startup": {
     "seed_on_start": true,
+    "seed_profile": "test",
     "backup_on_shutdown": true,
     "restore_from_backup": false
   },

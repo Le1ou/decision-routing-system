@@ -346,7 +346,7 @@ class PgDbOperator:
             "GRANT USAGE ON SCHEMA public TO app_table_manage",
             "GRANT INSERT, UPDATE, DELETE ON "
             "public.department, public.employee, public.types_of_works, "
-            "public.type_of_work_to_grade TO app_table_manage",
+            "public.type_of_work_to_grade, public.type_of_work_to_post TO app_table_manage",
             # Priority settings are persisted by a top-manager via PUT /priority-settings.
             "GRANT INSERT, UPDATE, DELETE ON public.priority_settings TO app_table_manage",
         ]

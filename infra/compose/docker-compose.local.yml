@@ -36,6 +36,9 @@ services:
       # берутся из config.json. SEED_ON_START=false — релизный режим без пересева БД;
       # BACKUP_ON_SHUTDOWN=false — выключить дамп БД в S3 при остановке.
       SEED_ON_START: ${SEED_ON_START:-}
+      # Профиль сидирования: test (детерминированный, для разработки/тестов) или
+      # demo (реалистичный «чистый запуск»). Тесты гонять только под test.
+      SEED_PROFILE: ${SEED_PROFILE:-}
       BACKUP_ON_SHUTDOWN: ${BACKUP_ON_SHUTDOWN:-}
       # Однократно: true = восстановить БД из backups/db/latest.dump на старте.
       RESTORE_FROM_BACKUP: ${RESTORE_FROM_BACKUP:-}

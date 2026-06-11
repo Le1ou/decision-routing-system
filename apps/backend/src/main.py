@@ -71,6 +71,7 @@ async def lifespan(_app):
     task = None
     if EVENTS_ENABLED:
         async def _loop():
+            import traceback
             from src import routing_module
             while True:
                 await asyncio.sleep(EVENTS_TICK_SECONDS)
@@ -79,14 +80,16 @@ async def lifespan(_app):
                     if result.get("expired") or result.get("deadlineNotifications"):
                         print(f"[events] tick: {result}")
                 except Exception as e:
-                    print(f"[events] tick error: {e}")
+                    # Полный traceback: по одной строке вида «can't subtract …» причину
+                    # тика не локализовать (выяснено на практике).
+                    print(f"[events] tick error: {e}\n{traceback.format_exc()}")
                 # Маршрутизация — отдельным шагом после событий (использует свежий приоритет).
                 try:
                     routed = await asyncio.to_thread(routing_module.run_routing, DBController)
                     if routed.get("assigned") or routed.get("evicted") or routed.get("escalated"):
                         print(f"[routing] tick: {routed}")
                 except Exception as e:
-                    print(f"[routing] tick error: {e}")
+                    print(f"[routing] tick error: {e}\n{traceback.format_exc()}")
         task = asyncio.create_task(_loop())
         print(f"[events] background loop enabled (tick={EVENTS_TICK_SECONDS}s).")
     try:
