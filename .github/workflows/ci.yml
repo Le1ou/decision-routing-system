@@ -100,6 +100,9 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
 
           script: |
+            set -eu
+            set -o pipefail 2>/dev/null || true
+
             cd ~/decision-routing-system
 
             # Удаляем локальные изменения
@@ -117,11 +120,35 @@ jobs:
             # Полностью обновляем ветку
             git reset --hard origin/develop
 
-            # Пересобираем и запускаем production stack
+            # Сначала собираем images, не останавливая текущий production stack.
+            # Docker Hub иногда даёт TLS timeout; retry снижает шанс ложного deploy fail.
+            for attempt in 1 2 3; do
+              if docker compose \
+                --env-file .env \
+                -f infra/compose/docker-compose.prod.yml \
+                build; then
+                break
+              fi
+
+              if [ "$attempt" = "3" ]; then
+                exit 1
+              fi
+
+              sleep $((attempt * 30))
+            done
+
+            # Останавливаем старый stack только после успешной сборки, чтобы изменения
+            # ports/container topology применялись без конфликтов и orphan-контейнеров.
             docker compose \
               --env-file .env \
               -f infra/compose/docker-compose.prod.yml \
-              up -d --build
+              down --remove-orphans
+
+            # Запускаем production stack из уже собранных images.
+            docker compose \
+              --env-file .env \
+              -f infra/compose/docker-compose.prod.yml \
+              up -d --no-build
 
             # Проверяем backend
             sleep 15

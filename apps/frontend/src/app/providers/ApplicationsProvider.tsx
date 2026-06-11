@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
-import { apiClient, mapApplication } from "@shared/api";
+import { apiClient, mapApplication, type ApplicationListItemDto } from "@shared/api";
+import { env } from "@shared/config/env";
+import { usePolling } from "@shared/hooks/usePolling";
 import type { Application, ApplicationAction, Complexity } from "@shared/model/domain";
 
 type ApplicationsContextValue = {
@@ -9,6 +11,7 @@ type ApplicationsContextValue = {
   isLoading: boolean;
   error: string;
   refreshApplications: () => Promise<void>;
+  refreshApplicationDetail: (applicationId: string) => Promise<void>;
   addApplication: (payload: {
     title: string;
     departmentId: string;
@@ -41,45 +44,86 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const refreshApplications = useCallback(async () => {
+  const refreshApplicationList = useCallback(async (options: { showLoading?: boolean; reportError?: boolean } = {}) => {
     if (!credentials) {
       setApplicationItems([]);
       return;
     }
 
-    setIsLoading(true);
-    setError("");
+    if (options.showLoading) {
+      setIsLoading(true);
+      setError("");
+    }
 
     try {
       const response = await apiClient.getApplications(credentials);
-      const details = await Promise.all(
-        response.items.map((application) =>
-          apiClient
-            .getApplication(credentials, application.id)
-            .then((detailResponse) => mapApplication(detailResponse.application))
-            .catch(() => ({
-              id: application.id,
-              title: application.name,
-              description: "",
-              status: application.status,
-              priority: application.priority,
-              departmentId: "",
-              workTypeId: "",
-              authorId: "",
-              isUnfinished: false,
-              createdAt: application.createdAt,
-              deadlineAt: application.createdAt,
-              updatedAt: application.createdAt,
-              finishedAt: application.finishedAt ?? undefined,
-            })),
-        ),
-      );
 
-      setApplicationItems(details);
+      setApplicationItems((current) => {
+        const currentById = new Map(current.map((application) => [application.id, application]));
+
+        return response.items.map((application) => mapApplicationListItem(application, currentById.get(application.id)));
+      });
     } catch {
-      setError("Не удалось загрузить заявки backend.");
+      if (options.reportError) {
+        setError("Не удалось загрузить заявки backend.");
+      } else {
+        console.warn("Не удалось обновить список заявок.");
+      }
     } finally {
-      setIsLoading(false);
+      if (options.showLoading) {
+        setIsLoading(false);
+      }
+    }
+  }, [credentials]);
+
+  const refreshApplications = useCallback(
+    async () => {
+      if (!credentials) {
+        setApplicationItems([]);
+        return;
+      }
+
+      setIsLoading(true);
+      setError("");
+
+      try {
+        const response = await apiClient.getApplications(credentials);
+        const details = await Promise.all(
+          response.items.map((application) =>
+            apiClient
+              .getApplication(credentials, application.id)
+              .then((detailResponse) => mapApplication(detailResponse.application))
+              .catch(() => mapApplicationListItem(application)),
+          ),
+        );
+
+        setApplicationItems(details);
+      } catch {
+        setError("Не удалось загрузить заявки backend.");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [credentials],
+  );
+
+  const refreshApplicationDetail = useCallback(async (applicationId: string) => {
+    if (!credentials) {
+      setApplicationItems([]);
+      return;
+    }
+
+    try {
+      const response = await apiClient.getApplication(credentials, applicationId);
+      const application = mapApplication(response.application);
+
+      setApplicationItems((current) =>
+        current.some((item) => item.id === applicationId)
+          ? current.map((item) => (item.id === applicationId ? application : item))
+          : [...current, application],
+      );
+    } catch {
+      console.warn("Не удалось обновить карточку заявки.");
     }
   }, [credentials]);
 
@@ -87,12 +131,19 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
     void refreshApplications();
   }, [refreshApplications]);
 
+  usePolling(
+    () => refreshApplicationList(),
+    env.pollIntervalMs,
+    Boolean(credentials),
+  );
+
   const value = useMemo<ApplicationsContextValue>(
     () => ({
       applicationItems,
       isLoading,
       error,
       refreshApplications,
+      refreshApplicationDetail,
       addApplication: async (payload) => {
         if (!credentials) {
           throw new Error("Нет активной авторизации.");
@@ -111,6 +162,7 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
         }
 
         await refreshApplications();
+        await refreshApplicationDetail(response.id);
 
         return response.id;
       },
@@ -123,12 +175,32 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
 
         await apiClient.performApplicationAction(credentials, applicationId, payload);
         await refreshApplications();
+        await refreshApplicationDetail(applicationId);
       },
     }),
-    [applicationItems, credentials, error, isLoading, refreshApplications],
+    [applicationItems, credentials, error, isLoading, refreshApplicationDetail, refreshApplications],
   );
 
   return <ApplicationsContext.Provider value={value}>{children}</ApplicationsContext.Provider>;
+}
+
+function mapApplicationListItem(dto: ApplicationListItemDto, previous?: Application): Application {
+  return {
+    ...previous,
+    id: dto.id,
+    title: dto.name,
+    description: previous?.description ?? "",
+    status: dto.status,
+    priority: dto.priority,
+    departmentId: previous?.departmentId ?? "",
+    workTypeId: previous?.workTypeId ?? "",
+    authorId: previous?.authorId ?? "",
+    isUnfinished: previous?.isUnfinished ?? false,
+    createdAt: dto.createdAt,
+    deadlineAt: previous?.deadlineAt ?? dto.createdAt,
+    updatedAt: previous?.updatedAt ?? dto.createdAt,
+    finishedAt: dto.finishedAt ?? undefined,
+  };
 }
 
 export function useApplicationsStore() {

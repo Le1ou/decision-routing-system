@@ -1,0 +1,15 @@
+{
+    email {$CADDY_EMAIL:admin@routeflow.ru}
+}
+
+{$APP_DOMAIN:routeflow.ru} {
+    reverse_proxy frontend:80
+}
+
+{$API_DOMAIN:api.routeflow.ru} {
+    reverse_proxy backend:3000
+}
+
+{$S3_DOMAIN:s3.routeflow.ru} {
+    reverse_proxy minio:9000
+}

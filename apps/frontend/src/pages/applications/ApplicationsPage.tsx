@@ -4,6 +4,8 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
 import { useReferenceData } from "@app/providers/ReferenceDataProvider";
+import { env } from "@shared/config/env";
+import { usePolling } from "@shared/hooks/usePolling";
 import type { Complexity, Application, ApplicationAction } from "@shared/model/domain";
 import { actionLabels, priorityLabels, statusLabels } from "@shared/model/labels";
 import {
@@ -17,7 +19,7 @@ import "./ApplicationsPage.css";
 
 export function ApplicationsPage() {
   const { currentUser } = useAuth();
-  const { applicationItems, isLoading, error, performAction } = useApplicationsStore();
+  const { applicationItems, isLoading, error, performAction, refreshApplicationDetail } = useApplicationsStore();
   const { departments, positions, workTypes, employees } = useReferenceData();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sortKey, setSortKey] = useState<ApplicationSortKey>("priority");
@@ -73,6 +75,22 @@ export function ApplicationsPage() {
     setActionError("");
     setPendingAction(null);
   }, [selectedApplicationId]);
+
+  useEffect(() => {
+    if (selectedApplicationId) {
+      void refreshApplicationDetail(selectedApplicationId);
+    }
+  }, [refreshApplicationDetail, selectedApplicationId]);
+
+  usePolling(
+    async () => {
+      if (selectedApplicationId) {
+        await refreshApplicationDetail(selectedApplicationId);
+      }
+    },
+    env.pollIntervalMs,
+    Boolean(currentUser && selectedApplicationId),
+  );
 
   const selectedApplication = visibleApplications.find((application) => application.id === selectedApplicationId) ?? visibleApplications[0];
   const applicationActions = selectedApplication?.availableActions ?? [];

@@ -32,12 +32,45 @@
 }
 
 .app-shell__home-link {
+  display: inline-flex;
   flex: 1;
   min-width: 160px;
+  align-items: center;
+  gap: 10px;
   color: #1f2a44;
   font-size: 15px;
   font-weight: 800;
   letter-spacing: 0;
+}
+
+.app-shell__home-link img {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  box-shadow: 0 8px 18px rgba(31, 111, 235, 0.18);
+}
+
+.app-shell__home-link span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.app-shell__home-link strong {
+  overflow: hidden;
+  color: #15243b;
+  font-size: 15px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell__home-link small {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.1;
 }
 
 .app-shell__notifications-wrap {
@@ -224,6 +257,10 @@
   .app-shell__home-link {
     min-width: 0;
     font-size: 13px;
+  }
+
+  .app-shell__home-link small {
+    display: none;
   }
 
   .app-shell__back {

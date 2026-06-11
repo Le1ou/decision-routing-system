@@ -56,20 +56,26 @@ compose-файлом, т.е. в `infra/compose/`; эта переменная п
 Для сервера укажите в `.env` адреса, доступные из браузера пользователя:
 
 ```env
-VITE_API_URL=http://<SERVER_IP_OR_DOMAIN>:3000
-S3_PUBLIC_ENDPOINT_URL=http://<SERVER_IP_OR_DOMAIN>:9000
+COMPOSE_FILE=infra/compose/docker-compose.prod.yml
+APP_DOMAIN=routeflow.ru
+API_DOMAIN=api.routeflow.ru
+S3_DOMAIN=s3.routeflow.ru
+CADDY_EMAIL=admin@routeflow.ru
+VITE_API_URL=https://api.routeflow.ru
+S3_PUBLIC_ENDPOINT_URL=https://s3.routeflow.ru
 ```
 
-Например:
+Перед запуском создайте DNS A-записи на IP сервера:
 
-```env
-VITE_API_URL=http://132.243.230.84:3000
-S3_PUBLIC_ENDPOINT_URL=http://132.243.230.84:9000
+```text
+routeflow.ru      A  <SERVER_IP>
+api.routeflow.ru  A  <SERVER_IP>
+s3.routeflow.ru   A  <SERVER_IP>
 ```
 
-`localhost` в браузере означает компьютер пользователя, а не сервер. Frontend
-также автоматически заменяет `localhost` из `VITE_API_URL` на hostname страницы
-при удалённом открытии, но явная серверная конфигурация предпочтительнее.
+На сервере должны быть открыты порты `80/tcp` и `443/tcp`. Caddy сам выпустит
+и будет обновлять HTTPS-сертификаты. MinIO Console остаётся закрытой снаружи и
+доступна через SSH tunnel на `127.0.0.1:9001`.
 
 После изменения `.env` пересоздайте контейнеры:
 
@@ -78,9 +84,9 @@ docker compose --env-file .env -f infra/compose/docker-compose.prod.yml up -d --
 ```
 
 Production-стек использует `infra/compose/docker-compose.prod.yml`: frontend
-собирается в статические файлы и отдаётся через nginx на `FRONTEND_PORT` (по
-умолчанию `80`). Локальный стек `docker-compose.local.yml` оставляет Vite dev
-server на порту `5173`.
+собирается в статические файлы, отдаётся через nginx внутри Docker-сети, а
+публичный HTTPS-трафик принимает Caddy. Локальный стек `docker-compose.local.yml`
+оставляет Vite dev server на порту `5173`.
 
 На сервере удобнее использовать production-команды:
 

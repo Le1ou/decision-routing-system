@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useAuth } from "@app/providers/AuthProvider";
 import { apiClient, mapAdUser, mapUser } from "@shared/api";
 import type { AdUser, Department, Grade, Position, PrioritySettings, User, WorkType } from "@shared/model/domain";
+import { getGradeLabel } from "@shared/model/labels";
 
 type ReferenceDataContextValue = {
   departments: Department[];
@@ -62,7 +63,7 @@ export function ReferenceDataProvider({ children }: { children: ReactNode }) {
 
       setDepartments(departmentsResponse.items);
       setPositions(positionsResponse.items);
-      setGrades(gradesResponse.items);
+      setGrades(gradesResponse.items.map((grade) => ({ ...grade, name: getGradeLabel(grade) })));
       setWorkTypes(workTypesResponse.items);
       setEmployees(employeesResponse.items.map(mapUser));
       setAdUsers(adUsersResponse.items.map(mapAdUser));

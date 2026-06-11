@@ -1,4 +1,4 @@
-import type { ApplicationAction, ApplicationPriority, ApplicationStatus, UserRole } from "./domain";
+import type { ApplicationAction, ApplicationPriority, ApplicationStatus, Grade, UserRole } from "./domain";
 
 export const roleLabels: Record<UserRole, string> = {
   author: "Автор",
@@ -38,3 +38,14 @@ export const actionLabels: Record<ApplicationAction, string> = {
   declineExternalDelegation: "Отклонить делегирование",
   changeWorkType: "Изменить вид работ",
 };
+
+export const gradeLabels: Record<string, string> = {
+  junior: "Младший",
+  middle: "Старший",
+  senior: "Ведущий",
+  lead: "Главный",
+};
+
+export function getGradeLabel(grade: Pick<Grade, "id" | "name">) {
+  return gradeLabels[grade.id] ?? gradeLabels[grade.name.toLowerCase()] ?? grade.name;
+}

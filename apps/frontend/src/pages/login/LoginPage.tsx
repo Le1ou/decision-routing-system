@@ -4,11 +4,13 @@ import { useAuth } from "@app/providers/AuthProvider";
 
 import "./LoginPage.css";
 
+const showDemoCredentials = import.meta.env.DEV;
+
 export function LoginPage() {
   const { login } = useAuth();
-  const [selectedLogin, setSelectedLogin] = useState("orlova_m");
+  const [selectedLogin, setSelectedLogin] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [password, setPassword] = useState("Manager!1");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -41,8 +43,10 @@ export function LoginPage() {
 
   return (
     <main className="login-page">
-      <form className="login-card surface" onSubmit={onSubmit}>
+      <form className="login-card surface" onSubmit={onSubmit} autoComplete="off">
         <header className="login-card__header">
+          <img src="/application-dispatcher-mark.svg" alt="" aria-hidden="true" />
+          <span>ДиспетчерЗаявок</span>
           <h1>Окно авторизации</h1>
           <p>Введите данные вашей<br />учетной записи:</p>
         </header>
@@ -50,7 +54,21 @@ export function LoginPage() {
         {error ? <div className="login-card__error">{error}</div> : null}
 
         <label className="login-field">
-          <span>Логин</span>
+          <span className="login-field__label">
+            Логин
+            {showDemoCredentials ? (
+              <span className="login-field__hint" tabIndex={0} aria-label="Демо-доступы">
+                ?
+                <span className="login-field__tooltip" role="tooltip">
+                  <b>Демо-доступы</b>
+                  <span>Топ-менеджер: orlova_m / Manager!1</span>
+                  <span>Руководитель: kuznetsov_m / Kuznetsov!7</span>
+                  <span>Исполнитель: ivanov_i / SecretPassword!1</span>
+                  <span>Автор: fedorov_a / Fedorov!6</span>
+                </span>
+              </span>
+            ) : null}
+          </span>
           <input
             value={selectedLogin}
             onChange={(event) => {
@@ -58,14 +76,8 @@ export function LoginPage() {
               setError("");
             }}
             aria-label="Логин"
-            list="login-suggestions"
+            autoComplete="off"
           />
-          <datalist id="login-suggestions">
-            <option value="orlova_m" />
-            <option value="kuznetsov_m" />
-            <option value="ivanov_i" />
-            <option value="fedorov_a" />
-          </datalist>
         </label>
 
         <label className="login-field">
@@ -75,6 +87,7 @@ export function LoginPage() {
               type={passwordVisible ? "text" : "password"}
               value={password}
               placeholder="Введите пароль"
+              autoComplete="off"
               onChange={(event) => {
                 setPassword(event.target.value);
                 setError("");
