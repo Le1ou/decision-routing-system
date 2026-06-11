@@ -71,6 +71,7 @@ export function LoginPage() {
           </span>
           <input
             value={selectedLogin}
+            placeholder="Введите логин"
             onChange={(event) => {
               setSelectedLogin(event.target.value);
               setError("");
@@ -86,7 +87,7 @@ export function LoginPage() {
             <input
               type={passwordVisible ? "text" : "password"}
               value={password}
-              placeholder="Пароль"
+              placeholder="Введите пароль"
               autoComplete="off"
               onChange={(event) => {
                 setPassword(event.target.value);
