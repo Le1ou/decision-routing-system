@@ -42,6 +42,9 @@ services:
       BACKUP_ON_SHUTDOWN: ${BACKUP_ON_SHUTDOWN:-}
       # Однократно: true = восстановить БД из backups/db/latest.dump на старте.
       RESTORE_FROM_BACKUP: ${RESTORE_FROM_BACKUP:-}
+      # false = выключить фоновый цикл событий/маршрутизации (детерминированные тесты;
+      # см. apps/backend/src/main.py). Пусто — берётся из config.json → events.enabled.
+      EVENTS_ENABLED: ${EVENTS_ENABLED:-}
       # Active Directory connection (only used when AUTH_MODE=ad). Empty values
       # fall back to the AD_auth block in apps/backend/config.json.
       AD_SERVER: ${AD_SERVER:-}
