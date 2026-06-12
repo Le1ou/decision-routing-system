@@ -721,7 +721,8 @@ paths:
       tags:
       - Priority
       summary: Сохранить коэффициенты расчета приоритета
-      description: Доступно только top-manager.
+      description: Доступно только top-manager. Ответ повторяет сохранённое и, как и GET, содержит read-only
+        блок urgent (тип фронта един для GET и PUT).
       operationId: update_priority_settings_priority_settings_put
       requestBody:
         content:
@@ -735,7 +736,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PrioritySettingsModel'
+                $ref: '#/components/schemas/PrioritySettingsResponse'
         '422':
           description: Validation Error
           content:
@@ -1096,6 +1097,106 @@ paths:
           content:
             application/json:
               schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /applications/{applicationId}/messages:
+    get:
+      tags:
+      - Chat
+      summary: Получить сообщения чата заявки
+      description: Сообщения чата заявки + число непрочитанных для текущего пользователя. afterId — вернуть
+        только сообщения с message_id больше указанного (инкрементальная дозагрузка для опроса). Читать
+        может любой, кто видит карточку.
+      operationId: get_messages_applications__applicationId__messages_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      - name: afterId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          title: Afterid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessagesResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Chat
+      summary: Отправить сообщение в чат заявки
+      description: Писать могут автор, назначенный исполнитель и руководитель-в-scope. После завершения/отклонения
+        заявки чат read-only (409).
+      operationId: post_message_applications__applicationId__messages_post
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChatMessagePayload'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /applications/{applicationId}/messages/read:
+    post:
+      tags:
+      - Chat
+      summary: Отметить чат заявки прочитанным
+      description: Двигает маркер прочитанности текущего пользователя на текущий момент.
+      operationId: mark_chat_read_applications__applicationId__messages_read_post
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      responses:
+        '204':
+          description: Successful Response
         '422':
           description: Validation Error
           content:
@@ -1510,6 +1611,54 @@ components:
       required:
       - files
       title: Body_upload_attachments_applications__applicationId__attachments_post
+    ChatMessageOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        applicationId:
+          type: string
+          title: Applicationid
+        authorId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorid
+        text:
+          type: string
+          title: Text
+        createdAt:
+          type: string
+          title: Createdat
+        author:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Author
+      type: object
+      required:
+      - id
+      - applicationId
+      - text
+      - createdAt
+      title: ChatMessageOut
+    ChatMessagesResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ChatMessageOut'
+          type: array
+          title: Items
+        unreadCount:
+          type: integer
+          minimum: 0.0
+          title: Unreadcount
+      type: object
+      required:
+      - items
+      - unreadCount
+      title: ChatMessagesResponse
     CreateApplicationPayload:
       properties:
         name:
@@ -1545,6 +1694,17 @@ components:
         description: Необходимо настроить новый сервер отдела.
         name: Настройка сервера
         workTypeId: '2'
+    CreateChatMessagePayload:
+      properties:
+        text:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Text
+      type: object
+      required:
+      - text
+      title: CreateChatMessagePayload
     CreateEmployeePayload:
       properties:
         adUserId:
@@ -2163,3 +2323,5 @@ tags:
   description: Отчеты и XLS-выгрузка
 - name: Analytics
   description: Статистика по заявкам, исполнителям, видам работ и отделам
+- name: Chat
+  description: Чат заявки между автором, исполнителем и руководителем

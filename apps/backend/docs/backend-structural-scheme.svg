@@ -1,0 +1,117 @@
+<svg width="680" height="648" viewBox="0 0 680 648" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Структурная схема серверной части</title>
+<desc>Структурная схема: веб-клиент, тесты и конфигурация сверху; внутри серверной части четыре слоя — HTTP API, фоновые процессы, бизнес-логика, интеграции; внизу внешние системы PostgreSQL, MinIO, Active Directory и SMTP.</desc>
+<style>
+  text { font-family: Arial, Helvetica, sans-serif; }
+  .th { font-size: 14px; font-weight: 600; fill: #1a1a1a; }
+  .ts { font-size: 12px; font-weight: 400; fill: #4a4a4a; }
+  .box { fill: #f6f5f0; stroke: #5f5e5a; stroke-width: 0.75; }
+  .grp { fill: none; stroke: #8a8880; stroke-width: 0.75; stroke-dasharray: 5 4; }
+  .arr { stroke: #3a3a38; stroke-width: 1.25; fill: none; }
+  .cap { font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-size: 13px; fill: #4a4a4a; }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#3a3a38" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="0" y="0" width="680" height="648" fill="#ffffff"/>
+
+<rect class="box" x="60" y="40" width="190" height="52"/>
+<text class="th" x="155" y="59" text-anchor="middle" dominant-baseline="central">Веб-клиент</text>
+<text class="ts" x="155" y="77" text-anchor="middle" dominant-baseline="central">React + Vite</text>
+
+<rect class="box" x="290" y="40" width="160" height="52"/>
+<text class="th" x="370" y="59" text-anchor="middle" dominant-baseline="central">Тесты — pytest</text>
+<text class="ts" x="370" y="77" text-anchor="middle" dominant-baseline="central">294 интеграционных</text>
+
+<rect class="grp" x="475" y="40" width="165" height="52"/>
+<text class="th" x="557" y="59" text-anchor="middle" dominant-baseline="central">config.json + ENV</text>
+<text class="ts" x="557" y="77" text-anchor="middle" dominant-baseline="central">параметры системы</text>
+
+<line class="arr" x1="155" y1="94" x2="155" y2="162" marker-end="url(#arrow)"/>
+<text class="ts" x="165" y="126" dominant-baseline="central">HTTP</text>
+<line class="arr" x1="370" y1="94" x2="370" y2="162" marker-end="url(#arrow)"/>
+<line class="arr" x1="557" y1="94" x2="557" y2="126" marker-end="url(#arrow)"/>
+
+<rect x="40" y="130" width="600" height="390" fill="none" stroke="#1a1a1a" stroke-width="1.25"/>
+<text class="th" x="56" y="148" dominant-baseline="central">Серверная часть — FastAPI</text>
+
+<rect class="grp" x="60" y="166" width="350" height="110"/>
+<text class="th" x="72" y="186" dominant-baseline="central">HTTP API (роутеры)</text>
+<rect class="box" x="72" y="200" width="40" height="24"/>
+<text class="ts" x="92" y="212" text-anchor="middle" dominant-baseline="central">auth</text>
+<rect class="box" x="118" y="200" width="96" height="24"/>
+<text class="ts" x="166" y="212" text-anchor="middle" dominant-baseline="central">applications</text>
+<rect class="box" x="220" y="200" width="89" height="24"/>
+<text class="ts" x="264" y="212" text-anchor="middle" dominant-baseline="central">directories</text>
+<rect class="box" x="315" y="200" width="68" height="24"/>
+<text class="ts" x="349" y="212" text-anchor="middle" dominant-baseline="central">priority</text>
+<rect class="box" x="72" y="230" width="103" height="24"/>
+<text class="ts" x="123" y="242" text-anchor="middle" dominant-baseline="central">notifications</text>
+<rect class="box" x="181" y="230" width="61" height="24"/>
+<text class="ts" x="211" y="242" text-anchor="middle" dominant-baseline="central">reports</text>
+<rect class="box" x="248" y="230" width="75" height="24"/>
+<text class="ts" x="285" y="242" text-anchor="middle" dominant-baseline="central">analytics</text>
+<rect class="box" x="329" y="230" width="40" height="24"/>
+<text class="ts" x="349" y="242" text-anchor="middle" dominant-baseline="central">chat</text>
+
+<rect class="grp" x="430" y="166" width="190" height="110"/>
+<text class="th" x="442" y="186" dominant-baseline="central">Фоновые процессы</text>
+<rect class="box" x="442" y="200" width="166" height="24"/>
+<text class="ts" x="525" y="212" text-anchor="middle" dominant-baseline="central">events_module</text>
+<rect class="box" x="442" y="230" width="166" height="24"/>
+<text class="ts" x="525" y="242" text-anchor="middle" dominant-baseline="central">routing_module</text>
+
+<line class="arr" x1="235" y1="278" x2="235" y2="302" marker-end="url(#arrow)"/>
+<line class="arr" x1="525" y1="278" x2="525" y2="302" marker-end="url(#arrow)"/>
+
+<rect class="grp" x="60" y="306" width="560" height="84"/>
+<text class="th" x="72" y="326" dominant-baseline="central">Бизнес-логика</text>
+<rect class="box" x="72" y="344" width="117" height="26"/>
+<text class="ts" x="130" y="357" text-anchor="middle" dominant-baseline="central">priority_module</text>
+<rect class="box" x="199" y="344" width="124" height="26"/>
+<text class="ts" x="261" y="357" text-anchor="middle" dominant-baseline="central">analytics_module</text>
+<rect class="box" x="333" y="344" width="138" height="26"/>
+<text class="ts" x="402" y="357" text-anchor="middle" dominant-baseline="central">db_helpers · notify</text>
+<rect class="box" x="481" y="344" width="61" height="26"/>
+<text class="ts" x="511" y="357" text-anchor="middle" dominant-baseline="central">schemas</text>
+
+<line class="arr" x1="340" y1="392" x2="340" y2="416" marker-end="url(#arrow)"/>
+
+<rect class="grp" x="60" y="420" width="560" height="84"/>
+<text class="th" x="72" y="440" dominant-baseline="central">Интеграции с внешними системами</text>
+<rect class="box" x="72" y="458" width="138" height="26"/>
+<text class="ts" x="141" y="471" text-anchor="middle" dominant-baseline="central">application_module</text>
+<rect class="box" x="220" y="458" width="78" height="26"/>
+<text class="ts" x="259" y="471" text-anchor="middle" dominant-baseline="central">core · сид</text>
+<rect class="box" x="308" y="458" width="75" height="26"/>
+<text class="ts" x="345" y="471" text-anchor="middle" dominant-baseline="central">s3_module</text>
+<rect class="box" x="393" y="458" width="103" height="26"/>
+<text class="ts" x="444" y="471" text-anchor="middle" dominant-baseline="central">backup_module</text>
+<rect class="box" x="506" y="458" width="96" height="26"/>
+<text class="ts" x="554" y="471" text-anchor="middle" dominant-baseline="central">email_module</text>
+
+<line class="arr" x1="135" y1="506" x2="118" y2="544" marker-end="url(#arrow)"/>
+<text class="ts" x="137" y="526" dominant-baseline="central">SQL</text>
+<line class="arr" x1="290" y1="506" x2="277" y2="544" marker-end="url(#arrow)"/>
+<text class="ts" x="298" y="526" dominant-baseline="central">S3 API</text>
+<line class="arr" x1="450" y1="506" x2="442" y2="544" marker-end="url(#arrow)"/>
+<text class="ts" x="458" y="526" dominant-baseline="central">LDAP</text>
+<line class="arr" x1="565" y1="506" x2="585" y2="544" marker-end="url(#arrow)"/>
+<text class="ts" x="558" y="526" text-anchor="end" dominant-baseline="central">SMTP</text>
+
+<rect class="box" x="40" y="548" width="145" height="52"/>
+<text class="th" x="112" y="567" text-anchor="middle" dominant-baseline="central">PostgreSQL 15</text>
+<text class="ts" x="112" y="585" text-anchor="middle" dominant-baseline="central">данные системы</text>
+
+<rect class="box" x="205" y="548" width="140" height="52"/>
+<text class="th" x="275" y="567" text-anchor="middle" dominant-baseline="central">MinIO (S3)</text>
+<text class="ts" x="275" y="585" text-anchor="middle" dominant-baseline="central">вложения, дампы</text>
+
+<rect class="box" x="365" y="548" width="150" height="52"/>
+<text class="th" x="440" y="567" text-anchor="middle" dominant-baseline="central">Active Directory</text>
+<text class="ts" x="440" y="585" text-anchor="middle" dominant-baseline="central">вход · поиск mail</text>
+
+<rect class="box" x="535" y="548" width="105" height="52"/>
+<text class="th" x="587" y="567" text-anchor="middle" dominant-baseline="central">SMTP-сервер</text>
+<text class="ts" x="587" y="585" text-anchor="middle" dominant-baseline="central">письма</text>
+
+<text class="cap" x="340" y="630" text-anchor="middle" dominant-baseline="central">Рис. 1 — Структурная схема серверной части системы маршрутизации заявок</text>
+</svg>

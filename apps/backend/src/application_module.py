@@ -341,6 +341,9 @@ class PgDbOperator:
             # Status-transition journal: every user records transitions for their
             # own application actions (written in the same tx as the state change).
             "GRANT INSERT ON public.application_status_history TO app_table_base",
+            # Чат заявки: писать сообщения и обновлять свой маркер прочитанности.
+            "GRANT INSERT ON public.application_message TO app_table_base",
+            "GRANT INSERT, UPDATE ON public.application_chat_read TO app_table_base",
         ]
         manage_grants = [
             "GRANT USAGE ON SCHEMA public TO app_table_manage",

@@ -51,8 +51,9 @@ def get_priority_settings(userData=Depends(authObj.authenticate)):
 
 
 @router.put("/priority-settings", summary="Сохранить коэффициенты расчета приоритета",
-            description="Доступно только top-manager.",
-            response_model=PrioritySettingsModel)
+            description="Доступно только top-manager. Ответ повторяет сохранённое и, как и GET, "
+                        "содержит read-only блок urgent (тип фронта един для GET и PUT).",
+            response_model=PrioritySettingsResponse)
 def update_priority_settings(
     payload: PrioritySettingsModel,
     userData=Depends(authObj.authenticate),
@@ -63,12 +64,16 @@ def update_priority_settings(
         login = userData[0]
         require_top_manager(login)   # only a top-manager may persist settings
         ps_store.save(db, dict(payload.department), dict(payload.managerAuthor), payload.deadline)
-        # Echo back exactly what was saved (unchanged API contract); the merged
-        # per-department defaults are applied on read (GET /priority-settings).
+        # Echo back what was saved; the merged per-department defaults are applied on
+        # read (GET /priority-settings). urgent добавлен и сюда: фронт описывает ответ
+        # PUT тем же типом, что и GET (PrioritySettings с обязательным urgent).
+        _urgent = priority_module._load_urgent_cfg()
         return {
             "department":    dict(payload.department),
             "managerAuthor": dict(payload.managerAuthor),
             "deadline":      payload.deadline,
+            "urgent":        {"thresholdHours": _urgent["threshold_hours"],
+                              "bonus": _urgent["bonus"]},
         }
     except HTTPException:
         raise

@@ -5,9 +5,20 @@ db_helpers.py — маленькие общие SQL-хелперы, нужные
 
 Зависимостей от остального backend нет (только psycopg) — модуль можно импортировать
 из events_module/routing_module, которые тестируются отдельно от приложения.
+(email_module подтягивается лениво внутри функций и работает best-effort,
+поэтому правило сохраняется.)
 """
 
 from psycopg.rows import dict_row
+
+
+def _email_copy(text, employee_id, application_id) -> None:
+    """Продублировать уведомление на рабочую почту (best-effort, никогда не бросает)."""
+    try:
+        from src import email_module
+        email_module.send_notification_email(employee_id, text, application_id)
+    except Exception as e:
+        print(f"[email] notification email hook failed: {e}")
 
 
 def notify(cur, text, employee_id, application_id, at) -> None:
@@ -19,6 +30,7 @@ def notify(cur, text, employee_id, application_id, at) -> None:
         "VALUES (%s, %s, %s, false, %s)",
         (text, at, int(employee_id), int(application_id)),
     )
+    _email_copy(text, employee_id, application_id)
 
 
 def create_notification(db, text, employee_id, application_id, at) -> None:
@@ -35,6 +47,7 @@ def create_notification(db, text, employee_id, application_id, at) -> None:
             "VALUES (%s, %s, %s, false, %s)",
             (text, at, int(employee_id), int(application_id)),
         )
+    _email_copy(text, employee_id, application_id)
 
 
 def dept_manager_ids(cur, dept_id) -> list:

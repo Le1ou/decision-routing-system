@@ -651,6 +651,23 @@ def seed_database(db_operator) -> None:
             )
         print("[seed] notification → done")
 
+        # ── 14b. application_message (демо-чат заявки) ────────────────────────
+        # Небольшая переписка автор ↔ исполнитель по назначенной ИТ-заявке, чтобы у
+        # фронта сразу было что показать. author2=Фёдоров (автор), executor1=Иванов.
+        chat = (
+            ("assigned_it", "author2",   "Иван, когда сможете подойти к рабочему месту Смирновой?", 95),
+            ("assigned_it", "executor1", "Здравствуйте! Подойду сегодня после обеда, ~14:00.",        80),
+            ("assigned_it", "author2",   "Отлично, спасибо. ПК и коробка с 1С уже на месте.",         70),
+            ("assigned_it", "executor1", "Принял, выезжаю.",                                          20),
+        )
+        for app_key, emp_key, text, minutes_ago in chat:
+            conn.execute(
+                "INSERT INTO public.application_message "
+                "(application_id, author_employee_id, text, created_at) VALUES (%s, %s, %s, %s)",
+                (app_ids[app_key], emp_ids[emp_key], text, now - timedelta(minutes=minutes_ago))
+            )
+        print("[seed] application_message → done")
+
         # ── 15. photo (вложения в S3) ─────────────────────────────────────────
         # Реальные изображения берём из apps/backend/tests/images_for_tests и
         # раскладываем по нескольким заявкам. Загрузка best-effort: если бакет не

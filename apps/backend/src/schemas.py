@@ -458,6 +458,30 @@ class ApplicationReportRowOut(BaseModel):
 
     model_config = {"populate_by_name": True}
 
+# ── Application chat ──
+
+class ChatMessageOut(BaseModel):
+    id: CoercedStr            = Field(validation_alias="message_id")
+    applicationId: CoercedStr = Field(validation_alias="application_id")
+    authorId: Optional[CoercedStr] = Field(default=None, validation_alias="author_employee_id")
+    text: CoercedStr          = Field(validation_alias="text")
+    createdAt: str            = Field(validation_alias="created_at")
+    author: Optional[dict]    = Field(default=None)
+
+    @field_validator("createdAt", mode="before")
+    @classmethod
+    def fmt_dt(cls, v):
+        return v.isoformat() if isinstance(v, datetime) else str(v)
+
+    model_config = {"populate_by_name": True}
+
+class CreateChatMessagePayload(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+class ChatMessagesResponse(BaseModel):
+    items: list[ChatMessageOut]
+    unreadCount: int = Field(ge=0)
+
 # ─────────────────────────── Response wrappers ───────────────────────
 
 class PaginationOut(BaseModel):

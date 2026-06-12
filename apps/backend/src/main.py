@@ -36,7 +36,7 @@ from src import backup_module
 from src.core import BACKUP_ON_SHUTDOWN, DBController, _ad_directory
 from src import events_module as events
 from src import (
-    analytics_api, applications_api, auth_api, directories_api,
+    analytics_api, applications_api, auth_api, chat_api, directories_api,
     notifications_api, priority_api, reports_api,
 )
 
@@ -124,6 +124,7 @@ app = FastAPI(
         {"name": "Notifications", "description": "Уведомления текущего пользователя"},
         {"name": "Reports",       "description": "Отчеты и XLS-выгрузка"},
         {"name": "Analytics",     "description": "Статистика по заявкам, исполнителям, видам работ и отделам"},
+        {"name": "Chat",          "description": "Чат заявки между автором, исполнителем и руководителем"},
     ],
 )
 app.add_middleware(
@@ -147,3 +148,4 @@ app.include_router(priority_api.router)
 app.include_router(notifications_api.router)
 app.include_router(reports_api.router)
 app.include_router(analytics_api.router)
+app.include_router(chat_api.router)

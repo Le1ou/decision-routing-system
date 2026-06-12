@@ -51,6 +51,23 @@ services:
       # Optional AD group → role mapping (group_role_map lives in config.json).
       AD_ROLE_SOURCE: ${AD_ROLE_SOURCE:-}
       AD_SEARCH_BASE: ${AD_SEARCH_BASE:-}
+      # Service account for AD lookups from background jobs (email mode "ad").
+      AD_BIND_USER: ${AD_BIND_USER:-}
+      AD_BIND_PASSWORD: ${AD_BIND_PASSWORD:-}
+      # Email copies of notifications (см. apps/backend/config.json → "email").
+      # Empty values fall back to config.json.
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-}
+      EMAIL_MODE: ${EMAIL_MODE:-}
+      EMAIL_ORG_DOMAIN: ${EMAIL_ORG_DOMAIN:-}
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-}
+      SMTP_SSL: ${SMTP_SSL:-}
+      SMTP_TIMEOUT: ${SMTP_TIMEOUT:-}
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_USER: ${DB_USER}

@@ -28,7 +28,25 @@
     "port": 636,
     "role_source": "system",
     "search_base": "",
-    "group_role_map": {}
+    "group_role_map": {},
+    "bind_user": "",
+    "bind_password": ""
+  },
+  "email": {
+    "enabled": false,
+    "mode": "login_domain",
+    "organization_domain": "kptws.ru",
+    "transport": "console",
+    "smtp": {
+      "host": "",
+      "port": 587,
+      "username": "",
+      "password": "",
+      "starttls": true,
+      "use_ssl": false,
+      "from": "noreply@kptws.ru",
+      "timeout_seconds": 10
+    }
   },
   "MOCK_AD": {
     "orlova_m": {
@@ -39,7 +57,8 @@
       "inSystem": true,
       "password": "Manager!1",
       "employee_id": 1,
-      "role": "top-manager"
+      "role": "top-manager",
+      "email": "maria.orlova@kptws.ru"
     },
     "ivanov_i": {
       "adUserId": "2",
@@ -49,7 +68,8 @@
       "inSystem": true,
       "password": "SecretPassword!1",
       "employee_id": 2,
-      "role": "executor"
+      "role": "executor",
+      "email": "ivan.ivanov@kptws.ru"
     },
     "petrov_p": {
       "adUserId": "3",
@@ -59,7 +79,8 @@
       "inSystem": true,
       "password": "Pa$$w0rd",
       "employee_id": 3,
-      "role": "executor"
+      "role": "executor",
+      "email": "petr.petrov@kptws.ru"
     },
     "sidorova_a": {
       "adUserId": "4",
@@ -69,7 +90,8 @@
       "inSystem": true,
       "password": "Sidorova!3",
       "employee_id": 4,
-      "role": "executor"
+      "role": "executor",
+      "email": "anna.sidorova@kptws.ru"
     },
     "kozlov_d": {
       "adUserId": "5",
@@ -79,7 +101,8 @@
       "inSystem": true,
       "password": "Kozlov!4",
       "employee_id": 5,
-      "role": "executor"
+      "role": "executor",
+      "email": "dmitry.kozlov@kptws.ru"
     },
     "novikova_e": {
       "adUserId": "6",
@@ -89,7 +112,8 @@
       "inSystem": true,
       "password": "Novikova!5",
       "employee_id": 6,
-      "role": "author"
+      "role": "author",
+      "email": "elena.novikova@kptws.ru"
     },
     "fedorov_a": {
       "adUserId": "7",
@@ -99,7 +123,8 @@
       "inSystem": true,
       "password": "Fedorov!6",
       "employee_id": 7,
-      "role": "author"
+      "role": "author",
+      "email": "alexey.fedorov@kptws.ru"
     },
     "kuznetsov_m": {
       "adUserId": "8",
@@ -109,28 +134,32 @@
       "inSystem": true,
       "password": "Kuznetsov!7",
       "employee_id": 8,
-      "role": "manager"
+      "role": "manager",
+      "email": "mikhail.kuznetsov@kptws.ru"
     },
     "smirnova_t": {
       "adUserId": "1001",
       "fullName": "Смирнова Татьяна Владимировна",
       "departmentId": 1,
       "position": "Инженер",
-      "inSystem": false
+      "inSystem": false,
+      "email": "tatiana.smirnova@kptws.ru"
     },
     "titov_k": {
       "adUserId": "1002",
       "fullName": "Титов Кирилл Романович",
       "departmentId": 1,
       "position": "Специалист",
-      "inSystem": false
+      "inSystem": false,
+      "email": "kirill.titov@kptws.ru"
     },
     "morozov_s": {
       "adUserId": "1003",
       "fullName": "Морозов Сергей Игоревич",
       "departmentId": 3,
       "position": "Старший инженер",
-      "inSystem": false
+      "inSystem": false,
+      "email": "sergey.morozov@kptws.ru"
     }
   },
   "ROLE_LADDER": ["author", "executor", "manager", "top-manager"],

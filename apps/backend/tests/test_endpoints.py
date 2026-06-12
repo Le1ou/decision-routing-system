@@ -787,7 +787,12 @@ class TestPrioritySettings:
     def test_put_manager_200(self):
         r = put("/priority-settings", MANAGER, json=VALID_PRIORITY_BODY)
         assert r.status_code == 200
-        assert r.json() == VALID_PRIORITY_BODY
+        body = r.json()
+        # Эхо сохранённого + read-only блок urgent: фронт описывает ответ PUT тем же
+        # типом, что и GET (PrioritySettings с обязательным urgent).
+        for key, value in VALID_PRIORITY_BODY.items():
+            assert body[key] == value
+        assert {"thresholdHours", "bonus"} <= body["urgent"].keys()
 
     def test_put_executor_403(self):
         assert put("/priority-settings", EXECUTOR, json=VALID_PRIORITY_BODY).status_code == 403

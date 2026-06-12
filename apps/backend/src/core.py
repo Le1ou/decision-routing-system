@@ -256,6 +256,28 @@ with DBController.pool.connection() as _conn:
             PRIMARY KEY (id)
         )
     """)
+    # Чат заявки: сообщения между автором, исполнителем и руководителем (см. chat_api).
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS public.application_message (
+            message_id          integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
+            application_id      integer NOT NULL,
+            author_employee_id  integer,
+            text                text NOT NULL,
+            created_at          timestamp with time zone NOT NULL,
+            PRIMARY KEY (message_id)
+        )
+    """)
+    _conn.execute("CREATE INDEX IF NOT EXISTS ix_application_message_app "
+                  "ON public.application_message (application_id, message_id)")
+    # Маркер прочитанности чата на пользователя: одна строка (application_id, employee_id).
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS public.application_chat_read (
+            application_id integer NOT NULL,
+            employee_id    integer NOT NULL,
+            last_read_at   timestamp with time zone NOT NULL,
+            PRIMARY KEY (application_id, employee_id)
+        )
+    """)
 # Create the Postgres group roles that back the application's role model and the
 # technical permission marker roles. Both are derived from the AD role, not stored.
 DBController.setupRoleTableGrants()
