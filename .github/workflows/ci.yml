@@ -70,14 +70,29 @@ jobs:
         run: |
           docker build -f apps/frontend/Dockerfile.prod -t decision-routing-frontend-prod ./apps/frontend
 
+      # Тесты гоняются ТОЛЬКО под детерминированным профилем сидирования (test) и с
+      # выключенным фоновым циклом: config.json по умолчанию задаёт demo-профиль для
+      # «живого» запуска, а фоновый цикл со временем мутирует сид (вытеснения критичных
+      # заявок) и роняет сид-зависимые тесты. Переменные окружения шага перекрывают
+      # и .env.example, и config.json.
       - name: Start compose
+        env:
+          SEED_PROFILE: test
+          EVENTS_ENABLED: "false"
         run: docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml up -d --build
 
       - name: Wait backend
         run: |
-          sleep 15
-          curl --fail http://localhost:3000/health
-      
+          for i in $(seq 1 60); do
+            if curl --silent --fail http://localhost:3000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "backend did not become healthy in time" >&2
+          docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml logs backend | tail -50
+          exit 1
+
       - name: Run backend tests
         run: |
           docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml exec -T backend python -m pytest tests/
