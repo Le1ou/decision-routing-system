@@ -36,7 +36,7 @@ from src import backup_module
 from src.core import BACKUP_ON_SHUTDOWN, DBController, _ad_directory
 from src import events_module as events
 from src import (
-    analytics_api, applications_api, auth_api, directories_api,
+    analytics_api, applications_api, auth_api, chat_api, directories_api,
     notifications_api, priority_api, reports_api,
 )
 
@@ -71,6 +71,7 @@ async def lifespan(_app):
     task = None
     if EVENTS_ENABLED:
         async def _loop():
+            import traceback
             from src import routing_module
             while True:
                 await asyncio.sleep(EVENTS_TICK_SECONDS)
@@ -79,14 +80,16 @@ async def lifespan(_app):
                     if result.get("expired") or result.get("deadlineNotifications"):
                         print(f"[events] tick: {result}")
                 except Exception as e:
-                    print(f"[events] tick error: {e}")
+                    # Полный traceback: по одной строке вида «can't subtract …» причину
+                    # тика не локализовать (выяснено на практике).
+                    print(f"[events] tick error: {e}\n{traceback.format_exc()}")
                 # Маршрутизация — отдельным шагом после событий (использует свежий приоритет).
                 try:
                     routed = await asyncio.to_thread(routing_module.run_routing, DBController)
                     if routed.get("assigned") or routed.get("evicted") or routed.get("escalated"):
                         print(f"[routing] tick: {routed}")
                 except Exception as e:
-                    print(f"[routing] tick error: {e}")
+                    print(f"[routing] tick error: {e}\n{traceback.format_exc()}")
         task = asyncio.create_task(_loop())
         print(f"[events] background loop enabled (tick={EVENTS_TICK_SECONDS}s).")
     try:
@@ -121,6 +124,7 @@ app = FastAPI(
         {"name": "Notifications", "description": "Уведомления текущего пользователя"},
         {"name": "Reports",       "description": "Отчеты и XLS-выгрузка"},
         {"name": "Analytics",     "description": "Статистика по заявкам, исполнителям, видам работ и отделам"},
+        {"name": "Chat",          "description": "Чат заявки между автором, исполнителем и руководителем"},
     ],
 )
 app.add_middleware(
@@ -144,3 +148,4 @@ app.include_router(priority_api.router)
 app.include_router(notifications_api.router)
 app.include_router(reports_api.router)
 app.include_router(analytics_api.router)
+app.include_router(chat_api.router)

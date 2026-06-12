@@ -487,16 +487,21 @@ def get_work_types_all(
 ):
     try:
         db = get_db_user(userData)
+        # DISTINCT в агрегатах обязателен: два LEFT JOIN дают декартово произведение
+        # строк грейдов и должностей.
         query = """
             SELECT
                 t.type_of_works_id,
                 t.name,
                 t.department_id,
                 t.complexity_value,
-                COALESCE(json_agg(tg.grade_id) FILTER (WHERE tg.grade_id IS NOT NULL), '[]'::json) AS grade_ids
+                COALESCE(json_agg(DISTINCT tg.grade_id) FILTER (WHERE tg.grade_id IS NOT NULL), '[]'::json) AS grade_ids,
+                COALESCE(json_agg(DISTINCT tp.post_id) FILTER (WHERE tp.post_id IS NOT NULL), '[]'::json) AS post_ids
             FROM public.types_of_works t
             LEFT JOIN public.type_of_work_to_grade tg
                    ON tg.type_of_works_id = t.type_of_works_id
+            LEFT JOIN public.type_of_work_to_post tp
+                   ON tp.type_of_works_id = t.type_of_works_id
         """
         params = []
         if departmentId:
@@ -551,6 +556,11 @@ def create_work_type(
                     cur.execute(
                         "INSERT INTO public.type_of_work_to_grade (type_of_works_id, grade_id) VALUES (%s, %s)",
                         (tow_id, int(grade_id))
+                    )
+                for post_id in payload.allowedPositionIds:
+                    cur.execute(
+                        "INSERT INTO public.type_of_work_to_post (type_of_works_id, post_id) VALUES (%s, %s)",
+                        (tow_id, int(post_id))
                     )
 
         return {"id": str(tow_id)}
@@ -613,6 +623,17 @@ def update_work_type(
                             "INSERT INTO public.type_of_work_to_grade (type_of_works_id, grade_id) VALUES (%s, %s)",
                             (int(workTypeId), int(grade_id))
                         )
+                if payload.allowedPositionIds is not None:
+                    # Замена оси должностей целиком; пустой список = снять ограничение.
+                    cur.execute(
+                        "DELETE FROM public.type_of_work_to_post WHERE type_of_works_id = %s",
+                        (int(workTypeId),)
+                    )
+                    for post_id in payload.allowedPositionIds:
+                        cur.execute(
+                            "INSERT INTO public.type_of_work_to_post (type_of_works_id, post_id) VALUES (%s, %s)",
+                            (int(workTypeId), int(post_id))
+                        )
 
         return Response(status_code=204)
 
@@ -647,6 +668,10 @@ def delete_work_type(
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM public.type_of_work_to_grade WHERE type_of_works_id = %s",
+                    (int(workTypeId),)
+                )
+                cur.execute(
+                    "DELETE FROM public.type_of_work_to_post WHERE type_of_works_id = %s",
                     (int(workTypeId),)
                 )
                 cur.execute(

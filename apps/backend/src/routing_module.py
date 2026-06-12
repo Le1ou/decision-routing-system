@@ -18,11 +18,14 @@ routing_module.py — подсистема принятия решений и м
   придёт только после нового цикла назначение → возврат в `new`).
 
 «Свободный подходящий исполнитель»: активен, роль executor, его отдел = отделу заявки,
-грейд входит в матрицу вида работ, нет активной заявки (assigned/inProgress) и нет
-внутреннего делегирования, ждущего подтверждения руководителя (при отклонении такая
-заявка вернётся исполнителю), и прошёл кулдаун `empl_appl_delay` после последней
-завершённой заявки (кулдаун соблюдают все, в т.ч. критичные). «Минимально способный» —
-наименьший грейд; при равенстве — дольше всех простаивавший.
+грейд входит в матрицу вида работ (type_of_work_to_grade) И должность входит в матрицу
+должностей (type_of_work_to_post; ПУСТАЯ матрица должностей = любая должность —
+обратная совместимость), нет активной заявки (assigned/inProgress) и нет внутреннего
+делегирования, ждущего подтверждения руководителя (при отклонении такая заявка
+вернётся исполнителю), и прошёл кулдаун `empl_appl_delay` после последней завершённой
+заявки (кулдаун соблюдают все, в т.ч. критичные). «Минимально способный» — наименьший
+грейд; при равенстве — дольше всех простаивавший. Ручное назначение руководителем
+матрицы НЕ проверяет (как и раньше, §3.6).
 
 Запускается фоновым циклом (lifespan) ОТДЕЛЬНО от events.run_tick. Работает под системным
 соединением (DBController). Всё (назначение/вытеснение/журнал/уведомления) — в одной
@@ -64,6 +67,17 @@ def _allowed_grade_ids(cur, work_type_id):
     return [r["grade_id"] for r in rows]
 
 
+def _allowed_post_ids(cur, work_type_id):
+    """Допустимые должности вида работ. ПУСТОЙ список = ограничения по должности нет."""
+    if work_type_id is None:
+        return []
+    rows = cur.execute(
+        "SELECT post_id FROM public.type_of_work_to_post WHERE type_of_works_id = %s",
+        (work_type_id,),
+    ).fetchall()
+    return [r["post_id"] for r in rows]
+
+
 def _dept_delay_minutes(cur, dept_id):
     r = cur.execute(
         "SELECT empl_appl_delay FROM public.department WHERE department_id = %s", (dept_id,)
@@ -76,8 +90,13 @@ def _journal(cur, application_id, from_sid, to_sid, reason, at):
     record_status_change(cur, application_id, from_sid, to_sid, None, reason, at)
 
 
-def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, delay_minutes, now):
-    """Свободные подходящие исполнители, отсортированные «минимально способный» вперёд."""
+def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, allowed_posts,
+                     delay_minutes, now):
+    """Свободные подходящие исполнители, отсортированные «минимально способный» вперёд.
+
+    Допуск по ДВУМ осям: грейд сотрудника ∈ allowed_grades И (если allowed_posts не
+    пуст) его должность ∈ allowed_posts. Должность и грейд берутся из пары post_grade
+    сотрудника."""
     if not allowed_grades:
         return []
     rows = cur.execute(
@@ -96,6 +115,7 @@ def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, delay_minutes, 
           AND e.department_id = %(dept)s
           AND e.role_id = %(exec)s
           AND g.grade_id = ANY(%(allowed)s)
+          AND (%(posts)s::int[] = '{}' OR pg.post_post_id = ANY(%(posts)s))
           AND NOT EXISTS (
               SELECT 1 FROM public.employee_to_application eta2
               JOIN public.application a2 ON a2.application_id = eta2.application_id
@@ -110,7 +130,8 @@ def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, delay_minutes, 
                      OR (s2.name = 'delegated'
                          AND d2.delegated_from = d2.delegated_to)))
         """,
-        {"exec": exec_role_id, "dept": dept_id, "allowed": list(allowed_grades)},
+        {"exec": exec_role_id, "dept": dept_id, "allowed": list(allowed_grades),
+         "posts": list(allowed_posts or [])},
     ).fetchall()
 
     cutoff = now - timedelta(minutes=delay_minutes or 0)
@@ -122,8 +143,9 @@ def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, delay_minutes, 
     return free
 
 
-def _evictable(cur, exec_role_id, dept_id, allowed_grades):
-    """Подходящий исполнитель с активной НЕ критичной заявкой наименьшего приоритета."""
+def _evictable(cur, exec_role_id, dept_id, allowed_grades, allowed_posts):
+    """Подходящий исполнитель с активной НЕ критичной заявкой наименьшего приоритета.
+    «Подходящий» — по тем же двум осям, что и свободный кандидат (грейд + должность)."""
     if not allowed_grades:
         return None
     return cur.execute(
@@ -139,10 +161,12 @@ def _evictable(cur, exec_role_id, dept_id, allowed_grades):
         JOIN public.priority p ON p.priority_id = a.priority_id
         WHERE e.is_active = true AND e.department_id = %(dept)s AND e.role_id = %(exec)s
           AND g.grade_id = ANY(%(allowed)s) AND p.name <> 'critical'
+          AND (%(posts)s::int[] = '{}' OR pg.post_post_id = ANY(%(posts)s))
         ORDER BY a.priority_score ASC NULLS FIRST
         LIMIT 1
         """,
-        {"exec": exec_role_id, "dept": dept_id, "allowed": list(allowed_grades)},
+        {"exec": exec_role_id, "dept": dept_id, "allowed": list(allowed_grades),
+         "posts": list(allowed_posts or [])},
     ).fetchone()
 
 
@@ -208,9 +232,10 @@ def run_routing(db, now=None, only_application_id=None) -> dict:
                 if dept is None or wt is None:
                     continue
                 allowed = _allowed_grade_ids(cur, wt)
+                allowed_posts = _allowed_post_ids(cur, wt)   # пусто = любая должность
                 is_critical = (app["priority_name"] == "critical")
 
-                free = _free_candidates(cur, exec_role, dept, allowed,
+                free = _free_candidates(cur, exec_role, dept, allowed, allowed_posts,
                                         _dept_delay_minutes(cur, dept), now) if allowed else []
                 if free:
                     emp = free[0]["employee_id"]
@@ -221,7 +246,7 @@ def run_routing(db, now=None, only_application_id=None) -> dict:
 
                 if is_critical and allowed:
                     # Критичная: вытеснение наименее приоритетной НЕ критичной заявки.
-                    victim = _evictable(cur, exec_role, dept, allowed)
+                    victim = _evictable(cur, exec_role, dept, allowed, allowed_posts)
                     if victim:
                         emp = victim["employee_id"]
                         cur.execute(

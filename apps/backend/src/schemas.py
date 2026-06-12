@@ -144,6 +144,9 @@ class WorkTypeOut(BaseModel):
         validation_alias="complexity_value"
     )
     allowedGradeIds: ListOfStrings = Field(validation_alias="grade_ids")
+    # Допустимые должности (вторая ось матрицы допуска). ПУСТОЙ список = ограничения
+    # по должности нет (любая должность с подходящим грейдом).
+    allowedPositionIds: ListOfStrings = Field(default_factory=list, validation_alias="post_ids")
 
     @field_validator("complexity", mode="before")
     @classmethod
@@ -157,17 +160,22 @@ class CreateWorkTypePayload(BaseModel):
     departmentId: str
     complexity: Literal["easy", "medium", "hard", "critical"]
     allowedGradeIds: list[str] = Field(min_length=1)
+    # Необязательно (старый фронт не присылает): пустой список = любая должность.
+    allowedPositionIds: list[str] = Field(default_factory=list)
 
 class UpdateWorkTypePayload(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1)
     departmentId: Optional[str] = None
     complexity: Optional[Literal["easy", "medium", "hard", "critical"]] = None
     allowedGradeIds: Optional[list[str]] = None
+    # None = не менять; [] = снять ограничение по должности (любая должность).
+    allowedPositionIds: Optional[list[str]] = None
 
     @model_validator(mode="after")
     def at_least_one(self):
         if (self.name is None and self.departmentId is None
-                and self.complexity is None and self.allowedGradeIds is None):
+                and self.complexity is None and self.allowedGradeIds is None
+                and self.allowedPositionIds is None):
             raise ValueError("At least one field must be provided")
         if self.allowedGradeIds is not None and len(self.allowedGradeIds) < 1:
             raise ValueError("allowedGradeIds must contain at least one grade")
@@ -449,6 +457,30 @@ class ApplicationReportRowOut(BaseModel):
         return v.isoformat() if isinstance(v, datetime) else str(v)
 
     model_config = {"populate_by_name": True}
+
+# ── Application chat ──
+
+class ChatMessageOut(BaseModel):
+    id: CoercedStr            = Field(validation_alias="message_id")
+    applicationId: CoercedStr = Field(validation_alias="application_id")
+    authorId: Optional[CoercedStr] = Field(default=None, validation_alias="author_employee_id")
+    text: CoercedStr          = Field(validation_alias="text")
+    createdAt: str            = Field(validation_alias="created_at")
+    author: Optional[dict]    = Field(default=None)
+
+    @field_validator("createdAt", mode="before")
+    @classmethod
+    def fmt_dt(cls, v):
+        return v.isoformat() if isinstance(v, datetime) else str(v)
+
+    model_config = {"populate_by_name": True}
+
+class CreateChatMessagePayload(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+class ChatMessagesResponse(BaseModel):
+    items: list[ChatMessageOut]
+    unreadCount: int = Field(ge=0)
 
 # ─────────────────────────── Response wrappers ───────────────────────
 

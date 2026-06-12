@@ -55,6 +55,13 @@ BACKUP_ON_SHUTDOWN = _bool_setting("BACKUP_ON_SHUTDOWN",
                                    _startup_cfg.get("backup_on_shutdown"), True)
 RESTORE_FROM_BACKUP = _bool_setting("RESTORE_FROM_BACKUP",
                                     _startup_cfg.get("restore_from_backup"), False)
+# Профиль сидирования (когда seed_on_start включён):
+#   test — детерминированный набор для разработки и интеграционных тестов (по умолчанию);
+#   demo — «чистый запуск»: тот же базовый набор + реалистичный слой (доп. сотрудники,
+#          месяц истории заявок, журнал, уведомления). Тесты под demo НЕ запускать.
+# ENV-переопределение: SEED_PROFILE (пустая строка = «не задано»).
+SEED_PROFILE = ((os.environ.get("SEED_PROFILE") or "").strip().lower()
+                or str(_startup_cfg.get("seed_profile") or "test").strip().lower())
 
 # ──────────────────── Mock Active Directory ────────────────────
 # configData["MOCK_AD"] is ONE directory keyed by login. Each entry is an AD
@@ -150,6 +157,31 @@ if RESTORE_FROM_BACKUP:
 with DBController.pool.connection() as _conn:
     # Idempotent migrations so an already-created DB picks up the new contract columns
     # and tables BEFORE role grants and seed_database() (which reference them) run.
+    #
+    # Конвертация унаследованных naive-колонок: ранние версии sql_decision-routing.sql
+    # создавали `timestamp WITHOUT time zone`; init-SQL выполняется только при первом
+    # создании volume, поэтому такие БД живут до сих пор. psycopg отдаёт из них naive
+    # datetime, и фоновые подсистемы падают на `aware − naive` («can't subtract
+    # offset-naive and offset-aware datetimes» в events tick). Старый код всегда писал
+    # UTC, поэтому интерпретируем значения как UTC. Идемпотентно: после конвертации
+    # цикл не находит таких колонок.
+    _conn.execute("""
+        DO $$
+        DECLARE r RECORD;
+        BEGIN
+            FOR r IN (SELECT table_name, column_name
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND data_type = 'timestamp without time zone')
+            LOOP
+                EXECUTE format(
+                    'ALTER TABLE public.%I ALTER COLUMN %I TYPE timestamp with time zone '
+                    'USING %I AT TIME ZONE ''UTC''',
+                    r.table_name, r.column_name, r.column_name);
+                RAISE NOTICE 'migrated %.% to timestamptz', r.table_name, r.column_name;
+            END LOOP;
+        END $$;
+    """)
     _conn.execute("ALTER TABLE public.employee ADD COLUMN IF NOT EXISTS is_active boolean")
     _conn.execute("ALTER TABLE public.employee ADD COLUMN IF NOT EXISTS role_id integer")
     _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone")
@@ -175,6 +207,18 @@ with DBController.pool.connection() as _conn:
             id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
             type_of_works_id integer,
             grade_id integer,
+            PRIMARY KEY (id)
+        )
+    """)
+    # Вторая ось матрицы допуска вида работ — должности (post). Сотрудник подходит
+    # виду работ, если его грейд входит в type_of_work_to_grade И его должность входит
+    # в type_of_work_to_post; ПУСТОЙ список должностей = ограничения по должности нет
+    # (обратная совместимость со старым фронтом и существующими видами работ).
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS public.type_of_work_to_post (
+            id integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
+            type_of_works_id integer,
+            post_id integer,
             PRIMARY KEY (id)
         )
     """)
@@ -212,6 +256,28 @@ with DBController.pool.connection() as _conn:
             PRIMARY KEY (id)
         )
     """)
+    # Чат заявки: сообщения между автором, исполнителем и руководителем (см. chat_api).
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS public.application_message (
+            message_id          integer NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 ),
+            application_id      integer NOT NULL,
+            author_employee_id  integer,
+            text                text NOT NULL,
+            created_at          timestamp with time zone NOT NULL,
+            PRIMARY KEY (message_id)
+        )
+    """)
+    _conn.execute("CREATE INDEX IF NOT EXISTS ix_application_message_app "
+                  "ON public.application_message (application_id, message_id)")
+    # Маркер прочитанности чата на пользователя: одна строка (application_id, employee_id).
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS public.application_chat_read (
+            application_id integer NOT NULL,
+            employee_id    integer NOT NULL,
+            last_read_at   timestamp with time zone NOT NULL,
+            PRIMARY KEY (application_id, employee_id)
+        )
+    """)
 # Create the Postgres group roles that back the application's role model and the
 # technical permission marker roles. Both are derived from the AD role, not stored.
 DBController.setupRoleTableGrants()
@@ -221,12 +287,17 @@ if SEED_ON_START and _restored_from_backup:
     print("[startup] database restored from backup — seeding skipped "
           "(seed would overwrite the restored data).")
 if SEED_ON_START and not _restored_from_backup:
-    seed_database(DBController)
-    # In mock mode, drop in a few demo applications whose deadlines trigger the events
-    # subsystem (overdue / deadline-approaching notifications) for the IT manager so the
-    # behaviour is visible right after the project starts. Not seeded in AD mode.
-    if authObj.mode == "mock":
-        seed_demo_notifications(DBController)
+    if SEED_PROFILE == "demo":
+        # «Чистый запуск»: базовый сид + реалистичный слой (см. seed_demo.py).
+        from src.seed_demo import seed_database_demo
+        seed_database_demo(DBController)
+    else:
+        seed_database(DBController)
+        # In mock mode, drop in a few demo applications whose deadlines trigger the
+        # events subsystem (overdue / deadline-approaching notifications) for the IT
+        # manager so the behaviour is visible right after the project starts.
+        if authObj.mode == "mock":
+            seed_demo_notifications(DBController)
 else:
     # Релизный режим / восстановление из бэкапа: БД не пересевается. Каталог
     # пользователей восстанавливает onboarding-состояние (inSystem/employee_id/role)

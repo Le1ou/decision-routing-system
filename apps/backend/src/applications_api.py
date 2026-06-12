@@ -579,10 +579,13 @@ def get_application(
                             t.name,
                             t.department_id,
                             t.complexity_value,
-                            COALESCE(json_agg(tg.grade_id) FILTER (WHERE tg.grade_id IS NOT NULL), '[]'::json) AS grade_ids
+                            COALESCE(json_agg(DISTINCT tg.grade_id) FILTER (WHERE tg.grade_id IS NOT NULL), '[]'::json) AS grade_ids,
+                            COALESCE(json_agg(DISTINCT tp.post_id) FILTER (WHERE tp.post_id IS NOT NULL), '[]'::json) AS post_ids
                         FROM public.types_of_works t
                         LEFT JOIN public.type_of_work_to_grade tg
                                ON tg.type_of_works_id = t.type_of_works_id
+                        LEFT JOIN public.type_of_work_to_post tp
+                               ON tp.type_of_works_id = t.type_of_works_id
                         WHERE t.type_of_works_id = %s
                         GROUP BY t.type_of_works_id, t.name, t.department_id, t.complexity_value
                         """,

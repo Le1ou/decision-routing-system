@@ -27,7 +27,7 @@ Fill order (respecting every FK):
   → grade → post → post_grade
   → department
   → employee
-  → types_of_works → type_of_work_to_grade
+  → types_of_works → type_of_work_to_grade → type_of_work_to_post
   → delegated (application_id NULL)
   → application → employee_to_application
   → delegated (back-fill application_id)
@@ -229,14 +229,23 @@ def seed_database(db_operator) -> None:
             emp_ids[emp_key] = row[0]
         print(f"[seed] employee → {emp_ids}")
 
-        # ── 10. types_of_works + 11. type_of_work_to_grade ───────────────────
-        # Виды работ по отделам (docs/requirements-and-type-of-work.md). Допустимые
-        # грейды («позиции») выводятся из сложности вида работ.
+        # ── 10. types_of_works + 11. матрицы допуска (грейды + должности) ─────
+        # Виды работ по отделам (docs/requirements-and-type-of-work.md). Обе оси
+        # допуска выводятся из сложности вида работ: грейды (type_of_work_to_grade)
+        # и должности (type_of_work_to_post). Лёгкие/средние работы доступны всем
+        # исполнительским должностям (реальный отбор делает ось грейдов), сложные и
+        # критичные — только старшим должностям.
         grades_by_complexity = {
             "easy":     ["junior", "middle"],
             "medium":   ["middle", "senior"],
             "hard":     ["senior", "lead"],
             "critical": ["senior", "lead"],
+        }
+        posts_by_complexity = {
+            "easy":     ["Специалист", "Инженер", "Старший инженер"],
+            "medium":   ["Специалист", "Инженер", "Старший инженер"],
+            "hard":     ["Старший инженер", "Руководитель"],
+            "critical": ["Старший инженер", "Руководитель"],
         }
         tow_ids = {}
         work_types = (
@@ -288,8 +297,13 @@ def seed_database(db_operator) -> None:
                     "INSERT INTO public.type_of_work_to_grade (type_of_works_id, grade_id) VALUES (%s, %s)",
                     (tow_ids[tow_key], grade_ids[grade_key])
                 )
+            for post_name in posts_by_complexity[complexity]:
+                conn.execute(
+                    "INSERT INTO public.type_of_work_to_post (type_of_works_id, post_id) VALUES (%s, %s)",
+                    (tow_ids[tow_key], post_ids[post_name])
+                )
         print(f"[seed] types_of_works → {tow_ids}")
-        print("[seed] type_of_work_to_grade → done")
+        print("[seed] type_of_work_to_grade / _to_post → done")
 
         # ── 12. delegated (application_id NULL for now; back-filled after apps) ─
         # delegated_by / delegated_from / delegated_to are text columns, so
@@ -636,6 +650,23 @@ def seed_database(db_operator) -> None:
                  is_read, app_ids[app_key])
             )
         print("[seed] notification → done")
+
+        # ── 14b. application_message (демо-чат заявки) ────────────────────────
+        # Небольшая переписка автор ↔ исполнитель по назначенной ИТ-заявке, чтобы у
+        # фронта сразу было что показать. author2=Фёдоров (автор), executor1=Иванов.
+        chat = (
+            ("assigned_it", "author2",   "Иван, когда сможете подойти к рабочему месту Смирновой?", 95),
+            ("assigned_it", "executor1", "Здравствуйте! Подойду сегодня после обеда, ~14:00.",        80),
+            ("assigned_it", "author2",   "Отлично, спасибо. ПК и коробка с 1С уже на месте.",         70),
+            ("assigned_it", "executor1", "Принял, выезжаю.",                                          20),
+        )
+        for app_key, emp_key, text, minutes_ago in chat:
+            conn.execute(
+                "INSERT INTO public.application_message "
+                "(application_id, author_employee_id, text, created_at) VALUES (%s, %s, %s, %s)",
+                (app_ids[app_key], emp_ids[emp_key], text, now - timedelta(minutes=minutes_ago))
+            )
+        print("[seed] application_message → done")
 
         # ── 15. photo (вложения в S3) ─────────────────────────────────────────
         # Реальные изображения берём из apps/backend/tests/images_for_tests и

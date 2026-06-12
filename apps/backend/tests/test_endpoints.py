@@ -787,7 +787,12 @@ class TestPrioritySettings:
     def test_put_manager_200(self):
         r = put("/priority-settings", MANAGER, json=VALID_PRIORITY_BODY)
         assert r.status_code == 200
-        assert r.json() == VALID_PRIORITY_BODY
+        body = r.json()
+        # Эхо сохранённого + read-only блок urgent: фронт описывает ответ PUT тем же
+        # типом, что и GET (PrioritySettings с обязательным urgent).
+        for key, value in VALID_PRIORITY_BODY.items():
+            assert body[key] == value
+        assert {"thresholdHours", "bonus"} <= body["urgent"].keys()
 
     def test_put_executor_403(self):
         assert put("/priority-settings", EXECUTOR, json=VALID_PRIORITY_BODY).status_code == 403
@@ -932,6 +937,60 @@ class TestGrades:
 # ─────────────────────────────────────────────────────────────────────────────
 # PATCH /work-types/{id}
 # ─────────────────────────────────────────────────────────────────────────────
+
+class TestWorkTypePositions:
+    """Ось должностей у вида работ (allowedPositionIds): CRUD-контракт.
+    Пустой список = ограничения по должности нет (обратная совместимость)."""
+
+    def _positions(self):
+        return get("/positions", MANAGER).json()["items"]
+
+    def test_create_without_positions_yields_empty_list(self):
+        r = post("/work-types", MANAGER,
+                 json={"name": "Без должностей", "departmentId": str(DEP_IT),
+                       "complexity": "easy", "allowedGradeIds": GRADE_IDS})
+        assert r.status_code == 201, r.text
+        wt = next(w for w in get("/work-types", MANAGER).json()["items"] if w["id"] == r.json()["id"])
+        assert wt["allowedPositionIds"] == []
+
+    def test_create_update_clear_positions_roundtrip(self):
+        pos = self._positions()
+        engineer = next(p["id"] for p in pos if p["name"] == "Инженер")
+        senior   = next(p["id"] for p in pos if p["name"] == "Старший инженер")
+
+        r = post("/work-types", MANAGER,
+                 json={"name": "С должностями", "departmentId": str(DEP_IT),
+                       "complexity": "easy", "allowedGradeIds": GRADE_IDS,
+                       "allowedPositionIds": [engineer]})
+        assert r.status_code == 201, r.text
+        wt_id = r.json()["id"]
+
+        def _wt():
+            return next(w for w in get("/work-types", MANAGER).json()["items"] if w["id"] == wt_id)
+
+        assert _wt()["allowedPositionIds"] == [engineer]
+        # Замена списка целиком.
+        assert patch(f"/work-types/{wt_id}", MANAGER,
+                     json={"allowedPositionIds": [engineer, senior]}).status_code == 204
+        assert set(_wt()["allowedPositionIds"]) == {engineer, senior}
+        # Пустой список снимает ограничение.
+        assert patch(f"/work-types/{wt_id}", MANAGER,
+                     json={"allowedPositionIds": []}).status_code == 204
+        assert _wt()["allowedPositionIds"] == []
+        # Грейды при этом не тронуты.
+        assert set(_wt()["allowedGradeIds"]) == set(GRADE_IDS)
+
+    def test_detail_card_includes_positions(self):
+        pos = self._positions()
+        engineer = next(p["id"] for p in pos if p["name"] == "Инженер")
+        wt_id = post("/work-types", MANAGER,
+                     json={"name": "Для карточки", "departmentId": str(DEP_IT),
+                           "complexity": "easy", "allowedGradeIds": GRADE_IDS,
+                           "allowedPositionIds": [engineer]}).json()["id"]
+        app_id = _make_app(AUTHOR, workTypeId=wt_id)
+        wt = _detail(app_id, MANAGER)["workType"]
+        assert wt["allowedPositionIds"] == [engineer]
+
 
 class TestUpdateWorkType:
     @pytest.fixture(scope="class")
