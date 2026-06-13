@@ -13,6 +13,7 @@ import {
   applyApplicationFilters,
   sortApplications,
   type ApplicationFilter,
+  type ApplicationSortDirection,
   type ApplicationSortKey,
 } from "@shared/model/applicationRules";
 
@@ -32,6 +33,7 @@ export function ApplicationsPage() {
   const { departments, positions, workTypes, employees } = useReferenceData();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sortKey, setSortKey] = useState<ApplicationSortKey>("priority");
+  const [sortDirection, setSortDirection] = useState<ApplicationSortDirection>("default");
   const [filters, setFilters] = useState<ApplicationFilter>({});
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
@@ -63,8 +65,9 @@ export function ApplicationsPage() {
     return sortApplications(
       applyApplicationFilters(applicationItems, filters, currentUser, { getExecutorName }),
       sortKey,
+      sortDirection,
     );
-  }, [currentUser, employees, filters, applicationItems, sortKey]);
+  }, [currentUser, employees, filters, applicationItems, sortDirection, sortKey]);
 
   useEffect(() => {
     const applicationIdFromUrl = searchParams.get("application");
@@ -335,7 +338,14 @@ export function ApplicationsPage() {
             <option value="createdAt">Сортировать по дате создания</option>
             <option value="finishedAt">Сортировать по дате закрытия</option>
           </select>
-          <button type="button" aria-label="Направление сортировки">↕</button>
+          <button
+            type="button"
+            aria-label={sortDirection === "default" ? "Включить обратный порядок сортировки" : "Вернуть порядок сортировки"}
+            title={sortDirection === "default" ? "Обратный порядок" : "Порядок по умолчанию"}
+            onClick={() => setSortDirection((current) => (current === "default" ? "reverse" : "default"))}
+          >
+            {sortDirection === "default" ? "↓" : "↑"}
+          </button>
         </div>
 
         <div className="applications-filters" aria-label="Фильтры заявок">
