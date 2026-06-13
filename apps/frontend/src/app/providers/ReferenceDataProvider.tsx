@@ -66,7 +66,7 @@ export function ReferenceDataProvider({ children }: { children: ReactNode }) {
       setDepartments(departmentsResponse.items);
       setPositions(positionsResponse.items.map((position) => ({ ...position, gradeIds: position.gradeIds ?? [] })));
       setGrades(gradesResponse.items.map((grade) => ({ ...grade, name: getGradeLabel(grade) })));
-      setWorkTypes(workTypesResponse.items);
+      setWorkTypes(workTypesResponse.items.map((workType) => ({ ...workType, allowedPositionIds: workType.allowedPositionIds ?? [] })));
       setEmployees(employeesResponse.items.map(mapUser));
       setAdUsers(adUsersResponse.items.map(mapAdUser));
       setPrioritySettings(priorityResponse);

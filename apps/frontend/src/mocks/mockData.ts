@@ -99,18 +99,18 @@ export const mockUsers: User[] = [
 ];
 
 export const workTypes: WorkType[] = [
-  { id: "it-hardware-replace", name: "Замена оборудования", departmentId: "it", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "it-server-setup", name: "Настройка сервера", departmentId: "it", complexity: "hard", allowedGradeIds: ["senior", "lead"] },
-  { id: "it-other", name: "Прочее", departmentId: "it", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "oge-wiring", name: "Ремонт проводки", departmentId: "oge", complexity: "hard", allowedGradeIds: ["senior", "lead"] },
-  { id: "oge-other", name: "Прочее", departmentId: "oge", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "production-repair", name: "Заявка на ремонт оборудования", departmentId: "production", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "production-other", name: "Прочее", departmentId: "production", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "okk-other", name: "Прочее", departmentId: "okk", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "ogm-other", name: "Прочее", departmentId: "ogm", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "warehouse-inventory", name: "Инвентаризация", departmentId: "warehouse", complexity: "easy", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "warehouse-other", name: "Прочее", departmentId: "warehouse", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
-  { id: "supply-other", name: "Прочее", departmentId: "supply", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"] },
+  { id: "it-hardware-replace", name: "Замена оборудования", departmentId: "it", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "it-server-setup", name: "Настройка сервера", departmentId: "it", complexity: "hard", allowedGradeIds: ["senior", "lead"], allowedPositionIds: ["lead-engineer"] },
+  { id: "it-other", name: "Прочее", departmentId: "it", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "oge-wiring", name: "Ремонт проводки", departmentId: "oge", complexity: "hard", allowedGradeIds: ["senior", "lead"], allowedPositionIds: [] },
+  { id: "oge-other", name: "Прочее", departmentId: "oge", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "production-repair", name: "Заявка на ремонт оборудования", departmentId: "production", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "production-other", name: "Прочее", departmentId: "production", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "okk-other", name: "Прочее", departmentId: "okk", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "ogm-other", name: "Прочее", departmentId: "ogm", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "warehouse-inventory", name: "Инвентаризация", departmentId: "warehouse", complexity: "easy", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "warehouse-other", name: "Прочее", departmentId: "warehouse", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
+  { id: "supply-other", name: "Прочее", departmentId: "supply", complexity: "medium", allowedGradeIds: ["junior", "middle", "senior", "lead"], allowedPositionIds: [] },
 ];
 
 export const applications: Application[] = [

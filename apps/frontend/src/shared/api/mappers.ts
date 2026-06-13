@@ -1,11 +1,12 @@
 import type {
   AdUserDto,
   ApplicationDetailDto,
+  ChatMessageDto,
   CurrentUserDto,
   NotificationDto,
   UserDto,
 } from "./client";
-import type { AdUser, Application, Attachment, Delegation, Department, User, WorkType } from "@shared/model/domain";
+import type { AdUser, Application, Attachment, ChatMessage, Delegation, Department, User, WorkType } from "@shared/model/domain";
 import { getPrimaryRole, normalizeRoles } from "@shared/model/roles";
 
 export function mapCurrentUser(dto: CurrentUserDto): User {
@@ -109,6 +110,17 @@ export function mapNotification(dto: NotificationDto) {
   };
 }
 
+export function mapChatMessage(dto: ChatMessageDto): ChatMessage {
+  return {
+    id: dto.id,
+    applicationId: dto.applicationId,
+    authorId: dto.authorId ?? undefined,
+    text: dto.text,
+    createdAt: dto.createdAt,
+    author: dto.author ? mapUser(dto.author) : undefined,
+  };
+}
+
 function mapAttachment(raw: Record<string, unknown>, applicationId: string, index: number): Attachment {
   return {
     id: String(raw.id ?? raw.photo_id ?? raw.attachment_id ?? `${applicationId}-${index}`),
@@ -141,6 +153,7 @@ function mapWorkTypeRecord(raw: Record<string, unknown>): WorkType {
     departmentId: String(raw.departmentId ?? raw.department_id ?? ""),
     complexity: String(raw.complexity ?? "medium") as WorkType["complexity"],
     allowedGradeIds: Array.isArray(raw.allowedGradeIds) ? raw.allowedGradeIds.map(String) : [],
+    allowedPositionIds: Array.isArray(raw.allowedPositionIds) ? raw.allowedPositionIds.map(String) : [],
   };
 }
 
