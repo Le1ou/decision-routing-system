@@ -61,6 +61,21 @@ export type WorkTypeDto = {
   departmentId: string;
   complexity: Complexity;
   allowedGradeIds: string[];
+  allowedPositionIds?: string[];
+};
+
+export type ChatMessageDto = {
+  id: string;
+  applicationId: string;
+  authorId?: string | null;
+  text: string;
+  createdAt: string;
+  author?: Record<string, unknown> | null;
+};
+
+export type ChatMessagesResponseDto = {
+  items: ChatMessageDto[];
+  unreadCount: number;
 };
 
 export type UserDto = {
@@ -359,12 +374,12 @@ export const apiClient = {
     apiRequest<ListResponse<WorkTypeDto>>(withQuery("/work-types", params), credentials),
   createWorkType: (
     credentials: ApiCredentials,
-    payload: { name: string; departmentId: string; complexity: Complexity; allowedGradeIds: string[] },
+    payload: { name: string; departmentId: string; complexity: Complexity; allowedGradeIds: string[]; allowedPositionIds?: string[] },
   ) => jsonRequest<IdResponse>("/work-types", credentials, payload, { method: "POST" }),
   updateWorkType: (
     credentials: ApiCredentials,
     workTypeId: string,
-    payload: Partial<{ name: string; departmentId: string; complexity: Complexity; allowedGradeIds: string[] }>,
+    payload: Partial<{ name: string; departmentId: string; complexity: Complexity; allowedGradeIds: string[]; allowedPositionIds: string[] }>,
   ) => jsonRequest<void>(`/work-types/${workTypeId}`, credentials, payload, { method: "PATCH" }),
   deleteWorkType: (credentials: ApiCredentials, workTypeId: string) =>
     apiRequest<void>(`/work-types/${workTypeId}`, credentials, { method: "DELETE" }),
@@ -408,4 +423,10 @@ export const apiClient = {
     apiRequest<WorkTypesAnalyticsResponseDto>(withQuery("/analytics/work-types", params), credentials),
   getDepartmentsAnalytics: (credentials: ApiCredentials, params?: QueryParams) =>
     apiRequest<DepartmentsAnalyticsResponseDto>(withQuery("/analytics/departments", params), credentials),
+  getMessages: (credentials: ApiCredentials, applicationId: string, params?: { afterId?: string }) =>
+    apiRequest<ChatMessagesResponseDto>(withQuery(`/applications/${applicationId}/messages`, params), credentials),
+  sendMessage: (credentials: ApiCredentials, applicationId: string, text: string) =>
+    jsonRequest<IdResponse>(`/applications/${applicationId}/messages`, credentials, { text }, { method: "POST" }),
+  markChatRead: (credentials: ApiCredentials, applicationId: string) =>
+    apiRequest<void>(`/applications/${applicationId}/messages/read`, credentials, { method: "POST" }),
 };

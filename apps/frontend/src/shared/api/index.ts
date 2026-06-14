@@ -4,10 +4,12 @@ export type {
   ApplicationListItemDto,
   ApplicationReportResponseDto,
   ApplicationsAnalyticsResponseDto,
+  ChatMessagesResponseDto,
+  ChatMessageDto,
   CurrentUserDto,
   DepartmentsAnalyticsResponseDto,
   ExecutorsAnalyticsResponseDto,
   NotificationDto,
   WorkTypesAnalyticsResponseDto,
 } from "./client";
-export { mapAdUser, mapApplication, mapCurrentUser, mapNotification, mapUser } from "./mappers";
+export { mapAdUser, mapApplication, mapChatMessage, mapCurrentUser, mapNotification, mapUser } from "./mappers";

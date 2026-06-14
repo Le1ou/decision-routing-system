@@ -95,6 +95,16 @@ export type WorkType = {
   departmentId: string;
   complexity: Complexity;
   allowedGradeIds: string[];
+  allowedPositionIds: string[];
+};
+
+export type ChatMessage = {
+  id: string;
+  applicationId: string;
+  authorId?: string;
+  text: string;
+  createdAt: string;
+  author?: User;
 };
 
 export type Attachment = {

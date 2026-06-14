@@ -370,10 +370,150 @@
   font-size: 13px;
 }
 
+.application-chat {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.application-chat > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.application-chat h2 {
+  margin: 0;
+  color: #1f2a44;
+  font-size: 16px;
+}
+
+.application-chat header span,
+.application-chat__form span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.application-chat__messages {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.application-chat__message {
+  display: grid;
+  gap: 6px;
+  width: min(88%, 560px);
+  border: 1px solid #e1e6ef;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 10px 12px;
+}
+
+.application-chat__message--mine {
+  justify-self: end;
+  border-color: #b8cdf8;
+  background: #f4f8ff;
+}
+
+.application-chat__message header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.application-chat__message strong {
+  color: #1f2a44;
+  font-size: 13px;
+}
+
+.application-chat__message time {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.application-chat__message p {
+  margin: 0;
+  color: #263247;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.application-chat__empty,
+.application-chat__readonly,
+.application-chat__error {
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 12px;
+}
+
+.application-chat__empty,
+.application-chat__readonly {
+  background: #fbfcfe;
+  color: #667085;
+}
+
+.application-chat__error {
+  border: 1px solid #ffd2cc;
+  background: #fff7f5;
+  color: #b42318;
+}
+
+.application-chat__form {
+  display: grid;
+  gap: 8px;
+}
+
+.application-chat__form textarea {
+  min-height: 92px;
+  padding: 12px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.application-chat__form footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.application-chat__form button {
+  min-height: 36px;
+  border: 1px solid #1f6feb;
+  border-radius: 6px;
+  background: #1f6feb;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 0 14px;
+}
+
+.application-chat__form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .application-card__info {
+  position: sticky;
+  top: 78px;
   display: grid;
   align-content: start;
   gap: 14px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
 }
 
 .application-card__params {
@@ -449,6 +589,12 @@
 
   .application-card__main {
     grid-template-columns: 1fr;
+  }
+
+  .application-card__info {
+    position: static;
+    max-height: none;
+    overflow: visible;
   }
 }
 

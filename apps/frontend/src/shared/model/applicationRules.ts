@@ -8,6 +8,7 @@ const priorityOrder: Record<ApplicationPriority, number> = {
 };
 
 export type ApplicationSortKey = "priority" | "status" | "createdAt" | "finishedAt";
+export type ApplicationSortDirection = "default" | "reverse";
 
 export type ApplicationFilter = {
   executorQuery?: string;
@@ -103,20 +104,26 @@ function isAutoHiddenRejectedApplication(application: Application) {
   return Date.now() - updatedAt >= sevenDaysMs;
 }
 
-export function sortApplications(applications: Application[], sortKey: ApplicationSortKey) {
+export function sortApplications(
+  applications: Application[],
+  sortKey: ApplicationSortKey,
+  sortDirection: ApplicationSortDirection = "default",
+) {
   return [...applications].sort((left, right) => {
+    let result = 0;
+
     if (sortKey === "priority") {
-      return priorityOrder[right.priority] - priorityOrder[left.priority];
+      result = priorityOrder[right.priority] - priorityOrder[left.priority];
+    } else if (sortKey === "status") {
+      result = left.status.localeCompare(right.status);
+    } else {
+      const leftDate = sortKey === "finishedAt" ? left.finishedAt : left.createdAt;
+      const rightDate = sortKey === "finishedAt" ? right.finishedAt : right.createdAt;
+
+      result = new Date(rightDate ?? 0).getTime() - new Date(leftDate ?? 0).getTime();
     }
 
-    if (sortKey === "status") {
-      return left.status.localeCompare(right.status);
-    }
-
-    const leftDate = sortKey === "finishedAt" ? left.finishedAt : left.createdAt;
-    const rightDate = sortKey === "finishedAt" ? right.finishedAt : right.createdAt;
-
-    return new Date(rightDate ?? 0).getTime() - new Date(leftDate ?? 0).getTime();
+    return sortDirection === "reverse" ? -result : result;
   });
 }
 

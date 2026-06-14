@@ -1,24 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
 import { useReferenceData } from "@app/providers/ReferenceDataProvider";
+import { apiClient, ApiError, mapChatMessage } from "@shared/api";
 import { env } from "@shared/config/env";
 import { usePolling } from "@shared/hooks/usePolling";
-import type { Complexity, Application, ApplicationAction } from "@shared/model/domain";
+import type { Complexity, Application, ApplicationAction, ChatMessage } from "@shared/model/domain";
 import { actionLabels, priorityLabels, statusLabels } from "@shared/model/labels";
 import {
   applyApplicationFilters,
   sortApplications,
   type ApplicationFilter,
+  type ApplicationSortDirection,
   type ApplicationSortKey,
 } from "@shared/model/applicationRules";
 
 import "./ApplicationsPage.css";
 
 export function ApplicationsPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, credentials } = useAuth();
   const {
     applicationItems,
     applicationsTotal,
@@ -31,6 +33,7 @@ export function ApplicationsPage() {
   const { departments, positions, workTypes, employees } = useReferenceData();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sortKey, setSortKey] = useState<ApplicationSortKey>("priority");
+  const [sortDirection, setSortDirection] = useState<ApplicationSortDirection>("default");
   const [filters, setFilters] = useState<ApplicationFilter>({});
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
@@ -46,6 +49,11 @@ export function ApplicationsPage() {
     workTypeId: "",
   });
   const [actionError, setActionError] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [isChatLoading, setIsChatLoading] = useState(false);
 
   const visibleApplications = useMemo(() => {
     if (!currentUser) {
@@ -57,8 +65,9 @@ export function ApplicationsPage() {
     return sortApplications(
       applyApplicationFilters(applicationItems, filters, currentUser, { getExecutorName }),
       sortKey,
+      sortDirection,
     );
-  }, [currentUser, employees, filters, applicationItems, sortKey]);
+  }, [currentUser, employees, filters, applicationItems, sortDirection, sortKey]);
 
   useEffect(() => {
     const applicationIdFromUrl = searchParams.get("application");
@@ -82,6 +91,10 @@ export function ApplicationsPage() {
     setNotice("");
     setActionError("");
     setPendingAction(null);
+    setChatMessages([]);
+    setChatUnreadCount(0);
+    setChatDraft("");
+    setChatError("");
   }, [selectedApplicationId]);
 
   useEffect(() => {
@@ -99,6 +112,48 @@ export function ApplicationsPage() {
     env.pollIntervalMs,
     Boolean(currentUser && selectedApplicationId),
   );
+
+  const loadChatMessages = useCallback(async (applicationId: string, options: { afterId?: string; showLoading?: boolean } = {}) => {
+    if (!credentials) {
+      setChatMessages([]);
+      setChatUnreadCount(0);
+      return;
+    }
+
+    if (options.showLoading) {
+      setIsChatLoading(true);
+    }
+
+    try {
+      const response = await apiClient.getMessages(credentials, applicationId, { afterId: options.afterId });
+      const messages = response.items.map(mapChatMessage);
+
+      setChatUnreadCount(response.unreadCount);
+      setChatMessages((current) => {
+        if (!options.afterId) {
+          return messages;
+        }
+
+        const knownIds = new Set(current.map((message) => message.id));
+        const nextMessages = messages.filter((message) => !knownIds.has(message.id));
+
+        return nextMessages.length > 0 ? [...current, ...nextMessages] : current;
+      });
+
+      if (response.unreadCount > 0) {
+        await apiClient.markChatRead(credentials, applicationId);
+        setChatUnreadCount(0);
+      }
+    } catch {
+      if (!options.afterId) {
+        setChatError("Чат заявки недоступен.");
+      }
+    } finally {
+      if (options.showLoading) {
+        setIsChatLoading(false);
+      }
+    }
+  }, [credentials]);
 
   const selectedApplication = visibleApplications.find((application) => application.id === selectedApplicationId) ?? visibleApplications[0];
   const applicationActions = selectedApplication?.availableActions ?? [];
@@ -119,6 +174,10 @@ export function ApplicationsPage() {
   const delegatingExecutorJobTitle = positions.find((position) => position.id === delegatingExecutor?.positionId);
   const applicationAttachments = selectedApplication?.attachments ?? [];
   const applicationExtraNames = selectedApplication?.attachmentNames ?? [];
+  const lastChatMessageId = chatMessages.at(-1)?.id;
+  const canWriteChat = selectedApplication && currentUser
+    ? canCurrentUserWriteChat(selectedApplication, currentUser)
+    : false;
   const busyExecutorApplication = applicationItems.find(
     (application) =>
       application.id !== selectedApplication?.id &&
@@ -140,6 +199,22 @@ export function ApplicationsPage() {
     "reject",
     "cancel",
   ];
+
+  useEffect(() => {
+    if (selectedApplication?.id) {
+      void loadChatMessages(selectedApplication.id, { showLoading: true });
+    }
+  }, [loadChatMessages, selectedApplication?.id]);
+
+  usePolling(
+    async () => {
+      if (selectedApplication?.id) {
+        await loadChatMessages(selectedApplication.id, { afterId: lastChatMessageId });
+      }
+    },
+    Math.min(env.pollIntervalMs, 5000),
+    Boolean(currentUser && selectedApplication?.id),
+  );
 
   const handleApplicationAction = (action: ApplicationAction) => {
     if (!selectedApplication || !currentUser) {
@@ -207,6 +282,36 @@ export function ApplicationsPage() {
     }
   };
 
+  const sendChatMessage = async () => {
+    const text = chatDraft.trim();
+
+    if (!credentials || !selectedApplication || !text) {
+      return;
+    }
+
+    if (text.length > 2000) {
+      setChatError("Сообщение не должно быть длиннее 2000 символов.");
+      return;
+    }
+
+    try {
+      await apiClient.sendMessage(credentials, selectedApplication.id, text);
+      setChatDraft("");
+      setChatError("");
+      await loadChatMessages(selectedApplication.id);
+      await apiClient.markChatRead(credentials, selectedApplication.id);
+      setChatUnreadCount(0);
+    } catch (sendError) {
+      if (sendError instanceof ApiError && sendError.status === 409) {
+        setChatError("Заявка закрыта, чат доступен только для чтения.");
+      } else if (sendError instanceof ApiError && sendError.status === 403) {
+        setChatError("У вас нет прав писать в чат этой заявки.");
+      } else {
+        setChatError("Backend не отправил сообщение.");
+      }
+    }
+  };
+
   if (!currentUser) {
     return (
       <section className="applications-page applications-page--empty">
@@ -233,7 +338,14 @@ export function ApplicationsPage() {
             <option value="createdAt">Сортировать по дате создания</option>
             <option value="finishedAt">Сортировать по дате закрытия</option>
           </select>
-          <button type="button" aria-label="Направление сортировки">↕</button>
+          <button
+            type="button"
+            aria-label={sortDirection === "default" ? "Включить обратный порядок сортировки" : "Вернуть порядок сортировки"}
+            title={sortDirection === "default" ? "Обратный порядок" : "Порядок по умолчанию"}
+            onClick={() => setSortDirection((current) => (current === "default" ? "reverse" : "default"))}
+          >
+            {sortDirection === "default" ? "↓" : "↑"}
+          </button>
         </div>
 
         <div className="applications-filters" aria-label="Фильтры заявок">
@@ -415,6 +527,67 @@ export function ApplicationsPage() {
               ) : (
                 <p>Файлы не прикреплены</p>
               )}
+            </section>
+
+            <section className="application-chat" aria-label="Чат заявки">
+              <header>
+                <div>
+                  <h2>Чат заявки</h2>
+                  <span>{chatUnreadCount > 0 ? `${chatUnreadCount} непрочитанных` : "Сообщения по заявке"}</span>
+                </div>
+              </header>
+
+              <div className="application-chat__messages">
+                {isChatLoading ? (
+                  <div className="application-chat__empty">Загружаем чат...</div>
+                ) : chatMessages.length > 0 ? (
+                  chatMessages.map((message) => (
+                    <article
+                      className={message.authorId === currentUser.id ? "application-chat__message application-chat__message--mine" : "application-chat__message"}
+                      key={message.id}
+                    >
+                      <header>
+                        <strong>{message.author?.fullName ?? "Участник заявки"}</strong>
+                        <time>{formatDateTime(message.createdAt)}</time>
+                      </header>
+                      <p>{message.text}</p>
+                    </article>
+                  ))
+                ) : (
+                  <div className="application-chat__empty">В чате пока нет сообщений.</div>
+                )}
+              </div>
+
+              {selectedApplication.status === "completed" || selectedApplication.status === "rejected" ? (
+                <div className="application-chat__readonly">Заявка закрыта, чат доступен только для чтения.</div>
+              ) : canWriteChat ? (
+                <form
+                  className="application-chat__form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void sendChatMessage();
+                  }}
+                >
+                  <textarea
+                    value={chatDraft}
+                    onChange={(event) => {
+                      setChatDraft(event.target.value);
+                      setChatError("");
+                    }}
+                    maxLength={2000}
+                    placeholder="Напишите сообщение"
+                  />
+                  <footer>
+                    <span>{chatDraft.length}/2000</span>
+                    <button type="submit" disabled={!chatDraft.trim()}>
+                      Отправить
+                    </button>
+                  </footer>
+                </form>
+              ) : (
+                <div className="application-chat__readonly">История доступна только участникам заявки.</div>
+              )}
+              {chatError ? <div className="application-chat__error">{chatError}</div> : null}
             </section>
           </section>
 
@@ -786,4 +959,24 @@ function formatDateTime(value?: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function canCurrentUserWriteChat(application: Application, user: { id: string; role: string; departmentId: string }) {
+  if (application.status === "completed" || application.status === "rejected") {
+    return false;
+  }
+
+  if (application.authorId === user.id || application.executorId === user.id) {
+    return true;
+  }
+
+  if (user.role === "top-manager") {
+    return true;
+  }
+
+  return user.role === "manager" && (
+    application.departmentId === user.departmentId ||
+    application.delegatedToDepartmentId === user.departmentId ||
+    application.delegatedFromDepartmentId === user.departmentId
+  );
 }
