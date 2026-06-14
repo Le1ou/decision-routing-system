@@ -80,7 +80,7 @@ export function EmployeesPage() {
     const nextErrors: EmployeeErrors = {};
 
     if (!form.adUserId || !selectedAdUser) {
-      nextErrors.adUserId = "Выберите пользователя из AD.";
+      nextErrors.adUserId = "Выберите пользователя из корпоративного каталога.";
     }
 
     if (selectedAdUser && employees.some((employee) => employee.login === selectedAdUser.login)) {
@@ -108,10 +108,10 @@ export function EmployeesPage() {
       await refresh();
       setDepartmentId(selectedAdUser.departmentId);
       setActivityFilter("all");
-      setNotice(`Пользователь AD «${selectedAdUser.fullName}» добавлен в систему.`);
+      setNotice(`Сотрудник «${selectedAdUser.fullName}» добавлен в систему.`);
       setIsModalOpen(false);
     } catch {
-      setNotice("Backend не добавил сотрудника.");
+      setNotice("Не удалось добавить сотрудника.");
     }
   };
 
@@ -127,7 +127,7 @@ export function EmployeesPage() {
         `Сотрудник «${employee.fullName}» ${employee.isActive ? "исключен из распределения заявок" : "доступен для распределения заявок"}.`,
       );
     } catch {
-      setNotice("Backend не изменил активность сотрудника.");
+      setNotice("Не удалось изменить активность сотрудника.");
     }
   };
 
@@ -141,7 +141,7 @@ export function EmployeesPage() {
       await refresh();
       setNotice(`Сотрудник «${employee.fullName}» удален из системы.`);
     } catch {
-      setNotice("Backend не удалил сотрудника.");
+      setNotice("Не удалось удалить сотрудника.");
     }
   };
 
@@ -161,7 +161,7 @@ export function EmployeesPage() {
           : `Для отдела «${department.name}» подтверждение делегирования внутри отдела отключено.`,
       );
     } catch {
-      setNotice("Backend не обновил настройку делегирования.");
+      setNotice("Не удалось обновить настройку делегирования.");
     }
   };
 
@@ -170,7 +170,7 @@ export function EmployeesPage() {
       <header className="employees-page__header">
         <div>
           <h1>Управление сотрудниками</h1>
-          <p>Руководитель добавляет из AD сотрудников и настраивает их роль и участие в распределении заявок.</p>
+          <p>Руководитель добавляет сотрудников из корпоративного каталога и настраивает их роль и участие в распределении заявок.</p>
         </div>
       </header>
 
@@ -194,7 +194,7 @@ export function EmployeesPage() {
       <article className="employees-table">
         <header className="employees-table__toolbar">
           <label>
-            Отдел AD
+            Отдел
             <select value={activeDepartmentId} onChange={(event) => setDepartmentId(event.target.value)}>
               {availableDepartments.map((departmentItem) => (
                 <option value={departmentItem.id} key={departmentItem.id}>
@@ -233,8 +233,8 @@ export function EmployeesPage() {
 
         <div className="employees-table__grid" role="table" aria-label="Сотрудники">
           <div className="employees-table__row employees-table__row--head" role="row">
-            <span role="columnheader">ФИО из AD</span>
-            <span role="columnheader">Логин AD</span>
+            <span role="columnheader">ФИО</span>
+            <span role="columnheader">Логин</span>
             <span role="columnheader">Роль</span>
             <span role="columnheader">Должность</span>
             <span role="columnheader">Статус</span>
@@ -272,10 +272,10 @@ export function EmployeesPage() {
       </article>
 
       {isModalOpen ? (
-        <div className="employees-modal" role="dialog" aria-modal="true" aria-label="Добавление сотрудника из AD">
+        <div className="employees-modal" role="dialog" aria-modal="true" aria-label="Добавление сотрудника">
           <form className="employees-modal__panel" onSubmit={handleCreate} noValidate>
             <header>
-              <h2>Добавить сотрудника из AD</h2>
+              <h2>Добавить сотрудника</h2>
               <button type="button" onClick={() => setIsModalOpen(false)} aria-label="Закрыть">
                 ×
               </button>
@@ -284,7 +284,7 @@ export function EmployeesPage() {
             {availableAdUsers.length > 0 ? (
               <>
                 <label>
-                  Пользователь AD
+                  Пользователь
                   <select
                     value={form.adUserId}
                     onChange={(event) => {
@@ -301,9 +301,9 @@ export function EmployeesPage() {
                   {errors.adUserId ? <small>{errors.adUserId}</small> : null}
                 </label>
 
-                <div className="employees-ad-card" aria-label="Данные из AD">
+                <div className="employees-ad-card" aria-label="Данные сотрудника">
                   <div>
-                    <span>Отдел AD</span>
+                    <span>Отдел</span>
                     <strong>{getDepartmentName(departments, selectedAdUser?.departmentId)}</strong>
                   </div>
                   <div>
@@ -353,7 +353,7 @@ export function EmployeesPage() {
                 </label>
               </>
             ) : (
-              <div className="employees-table__empty">Все доступные пользователи AD уже добавлены в систему.</div>
+              <div className="employees-table__empty">Все доступные пользователи уже добавлены в систему.</div>
             )}
 
             <footer>

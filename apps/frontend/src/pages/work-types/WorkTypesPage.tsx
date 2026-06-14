@@ -7,13 +7,21 @@ import type { Complexity, WorkType } from "@shared/model/domain";
 import { Button } from "@shared/ui";
 
 import "./WorkTypesPage.css";
+import {
+  createDefaultMatrix,
+  getMatrixSelectionCount,
+  getPositionGradeSummary,
+  hydrateWorkTypeMatrix,
+  toWorkTypeAccessPayload,
+  toggleMatrixGrade,
+  type WorkTypeMatrix,
+} from "./workTypeMatrix";
 
 type WorkTypeForm = {
   name: string;
   departmentId: string;
   complexity: Complexity;
-  allowedGradeIds: string[];
-  allowedPositionIds: string[];
+  matrix: WorkTypeMatrix;
 };
 
 type WorkTypeErrors = Partial<Record<keyof WorkTypeForm, string>>;
@@ -22,7 +30,6 @@ const complexityLabels: Record<Complexity, string> = {
   easy: "Легкая",
   medium: "Средняя",
   hard: "Высокая",
-  critical: "Критичная",
 };
 
 export function WorkTypesPage() {
@@ -38,9 +45,9 @@ export function WorkTypesPage() {
     name: "",
     departmentId: initialDepartmentId,
     complexity: "medium",
-    allowedGradeIds: grades.map((grade) => grade.id),
-    allowedPositionIds: [],
+    matrix: createDefaultMatrix(positions, grades),
   });
+  const [expandedWorkTypeIds, setExpandedWorkTypeIds] = useState<string[]>([]);
   const [errors, setErrors] = useState<WorkTypeErrors>({});
   const [notice, setNotice] = useState("");
 
@@ -50,9 +57,9 @@ export function WorkTypesPage() {
   useEffect(() => {
     if (!departmentId && initialDepartmentId) {
       setDepartmentId(initialDepartmentId);
-      setForm((current) => ({ ...current, departmentId: initialDepartmentId, allowedGradeIds: grades.map((grade) => grade.id) }));
+      setForm((current) => ({ ...current, departmentId: initialDepartmentId, matrix: createDefaultMatrix(positions, grades) }));
     }
-  }, [departmentId, grades, initialDepartmentId]);
+  }, [departmentId, grades, initialDepartmentId, positions]);
 
   const visibleItems = useMemo(
     () => workTypes.filter((item) => item.departmentId === activeDepartmentId),
@@ -69,7 +76,7 @@ export function WorkTypesPage() {
   );
 
   const openCreateModal = () => {
-    setForm({ name: "", departmentId: activeDepartmentId, complexity: "medium", allowedGradeIds: grades.map((grade) => grade.id), allowedPositionIds: [] });
+    setForm({ name: "", departmentId: activeDepartmentId, complexity: "medium", matrix: createDefaultMatrix(positions, grades) });
     setErrors({});
     setIsModalOpen(true);
   };
@@ -89,8 +96,8 @@ export function WorkTypesPage() {
       nextErrors.name = "Такой вид работ уже есть в выбранном отделе.";
     }
 
-    if (form.allowedGradeIds.length === 0) {
-      nextErrors.complexity = "Выберите хотя бы одну допустимую позицию.";
+    if (getMatrixSelectionCount(form.matrix) === 0) {
+      nextErrors.complexity = "Выберите хотя бы одну должность и грейд.";
     }
 
     setErrors(nextErrors);
@@ -106,19 +113,21 @@ export function WorkTypesPage() {
     }
 
     try {
+      const accessPayload = toWorkTypeAccessPayload(form.matrix);
+
       await apiClient.createWorkType(credentials, {
         name: form.name.trim(),
         departmentId: form.departmentId,
         complexity: form.complexity,
-        allowedGradeIds: form.allowedGradeIds,
-        allowedPositionIds: form.allowedPositionIds,
+        allowedGradeIds: accessPayload.allowedGradeIds,
+        allowedPositionIds: accessPayload.allowedPositionIds,
       });
       await refresh();
       setDepartmentId(form.departmentId);
       setNotice(`Вид работ «${form.name.trim()}» добавлен.`);
       setIsModalOpen(false);
     } catch {
-      setNotice("Backend не создал вид работ.");
+      setNotice("Не удалось создать вид работ.");
     }
   };
 
@@ -132,7 +141,7 @@ export function WorkTypesPage() {
       await refresh();
       setNotice(`Вид работ «${item.name}» удален.`);
     } catch {
-      setNotice("Backend не удалил вид работ.");
+      setNotice("Не удалось удалить вид работ.");
     }
   };
 
@@ -146,17 +155,17 @@ export function WorkTypesPage() {
       await refresh();
       setNotice(`Для вида работ «${item.name}» обновлена сложность.`);
     } catch {
-      setNotice("Backend не обновил сложность вида работ.");
+      setNotice("Не удалось обновить сложность вида работ.");
     }
   };
 
-  const toggleWorkTypeGrade = async (item: WorkType, gradeId: string) => {
-    const nextGradeIds = item.allowedGradeIds.includes(gradeId)
-      ? item.allowedGradeIds.filter((id) => id !== gradeId)
-      : [...item.allowedGradeIds, gradeId];
+  const toggleWorkTypeMatrixGrade = async (item: WorkType, positionId: string, gradeId: string) => {
+    const matrix = hydrateWorkTypeMatrix(item, positions);
+    const nextMatrix = toggleMatrixGrade(matrix, positionId, gradeId);
+    const accessPayload = toWorkTypeAccessPayload(nextMatrix);
 
-    if (nextGradeIds.length === 0) {
-      setNotice("У вида работ должна остаться хотя бы одна допустимая позиция.");
+    if (accessPayload.allowedGradeIds.length === 0) {
+      setNotice("У вида работ должна остаться хотя бы одна допустимая должность и грейд.");
       return;
     }
 
@@ -165,29 +174,11 @@ export function WorkTypesPage() {
     }
 
     try {
-      await apiClient.updateWorkType(credentials, item.id, { allowedGradeIds: nextGradeIds });
+      await apiClient.updateWorkType(credentials, item.id, accessPayload);
       await refresh();
-      setNotice(`Матрица позиций для вида работ «${item.name}» обновлена.`);
+      setNotice(`Матрица допуска для вида работ «${item.name}» обновлена.`);
     } catch {
-      setNotice("Backend не обновил матрицу позиций.");
-    }
-  };
-
-  const toggleWorkTypePosition = async (item: WorkType, positionId: string) => {
-    const nextPositionIds = item.allowedPositionIds.includes(positionId)
-      ? item.allowedPositionIds.filter((id) => id !== positionId)
-      : [...item.allowedPositionIds, positionId];
-
-    if (!credentials) {
-      return;
-    }
-
-    try {
-      await apiClient.updateWorkType(credentials, item.id, { allowedPositionIds: nextPositionIds });
-      await refresh();
-      setNotice(`Матрица должностей для вида работ «${item.name}» обновлена.`);
-    } catch {
-      setNotice("Backend не обновил матрицу должностей.");
+      setNotice("Не удалось обновить матрицу допуска.");
     }
   };
 
@@ -242,14 +233,16 @@ export function WorkTypesPage() {
             <div className="work-types-table__row work-types-table__row--head" role="row">
               <span role="columnheader">Название</span>
               <span role="columnheader">Сложность</span>
-              <span role="columnheader">Грейды и должности</span>
+              <span role="columnheader">Должности и грейды</span>
               <span role="columnheader">Использование</span>
               <span role="columnheader">Действия</span>
             </div>
 
             {visibleItems.length > 0 ? (
               visibleItems.map((item) => {
-                const matrixWarning = getMatrixWarning(item.allowedGradeIds, item.allowedPositionIds, positions);
+                const matrix = hydrateWorkTypeMatrix(item, positions);
+                const matrixWarning = getMatrixWarning(matrix, positions);
+                const isExpanded = expandedWorkTypeIds.includes(item.id);
 
                 return (
                   <div className="work-types-table__row" role="row" key={item.id}>
@@ -269,39 +262,30 @@ export function WorkTypesPage() {
                       </select>
                     </span>
                     <span role="cell">
-                      <span className="work-types-matrix-group">
-                        <b>Грейды</b>
-                        <span className="work-types-grades">
-                          {grades.map((grade) => (
-                            <label key={grade.id}>
-                              <input
-                                type="checkbox"
-                                checked={item.allowedGradeIds.includes(grade.id)}
-                                onChange={() => void toggleWorkTypeGrade(item, grade.id)}
-                              />
-                              {grade.name}
-                            </label>
-                          ))}
-                        </span>
-                      </span>
-                      <span className="work-types-matrix-group">
-                        <b>Должности</b>
-                        <span className="work-types-grades">
-                          {positions.map((position) => (
-                            <label key={position.id}>
-                              <input
-                                type="checkbox"
-                                checked={item.allowedPositionIds.includes(position.id)}
-                                onChange={() => void toggleWorkTypePosition(item, position.id)}
-                              />
-                              {position.name}
-                            </label>
-                          ))}
-                        </span>
-                        <small className="work-types-positions">
-                          {getAllowedPositionNames(item.allowedPositionIds, positions)}
-                        </small>
-                      </span>
+                      <button
+                        className="work-types-matrix-toggle"
+                        type="button"
+                        onClick={() =>
+                          setExpandedWorkTypeIds((current) =>
+                            current.includes(item.id)
+                              ? current.filter((id) => id !== item.id)
+                              : [...current, item.id],
+                          )
+                        }
+                      >
+                        {isExpanded ? "Скрыть матрицу" : "Показать матрицу"}
+                      </button>
+                      <small className="work-types-positions">
+                        {getPositionGradeSummary(matrix, positions, grades)}
+                      </small>
+                      {isExpanded ? (
+                        <WorkTypeMatrixEditor
+                          grades={grades}
+                          matrix={matrix}
+                          positions={positions}
+                          onToggle={(positionId, gradeId) => void toggleWorkTypeMatrixGrade(item, positionId, gradeId)}
+                        />
+                      ) : null}
                       {matrixWarning ? <small className="work-types-warning">{matrixWarning}</small> : null}
                     </span>
                     <span role="cell">Доступен для новых заявок</span>
@@ -371,7 +355,6 @@ export function WorkTypesPage() {
                   setForm((current) => ({
                     ...current,
                     complexity,
-                    allowedGradeIds: form.allowedGradeIds.length > 0 ? form.allowedGradeIds : grades.map((grade) => grade.id),
                   }));
                 }}
               >
@@ -383,61 +366,27 @@ export function WorkTypesPage() {
               </select>
             </label>
 
-            <div className="work-types-matrix-preview" aria-label="Допустимые позиции">
-              <span>Допустимые позиции</span>
-              <div className="work-types-grade-checks">
-                {grades.map((grade) => (
-                  <label key={grade.id}>
-                    <input
-                      type="checkbox"
-                      checked={form.allowedGradeIds.includes(grade.id)}
-                      onChange={(event) => {
-                        setForm((current) => ({
-                          ...current,
-                          allowedGradeIds: event.target.checked
-                            ? [...current.allowedGradeIds, grade.id]
-                            : current.allowedGradeIds.filter((id) => id !== grade.id),
-                        }));
-                        setErrors((current) => ({ ...current, complexity: undefined }));
-                      }}
-                    />
-                    {grade.name}
-                  </label>
-                ))}
-              </div>
+            <div className="work-types-matrix-preview" aria-label="Допустимые должности и грейды">
+              <span>Допустимые должности и грейды</span>
+              <WorkTypeMatrixEditor
+                grades={grades}
+                matrix={form.matrix}
+                positions={positions}
+                onToggle={(positionId, gradeId) => {
+                  setForm((current) => ({
+                    ...current,
+                    matrix: toggleMatrixGrade(current.matrix, positionId, gradeId),
+                  }));
+                  setErrors((current) => ({ ...current, complexity: undefined }));
+                }}
+              />
               <small className="work-types-positions">
-                Грейды: {getAllowedGradeNames(form.allowedGradeIds, grades)}
+                {getPositionGradeSummary(form.matrix, positions, grades)}
               </small>
-              {errors.complexity ? <small>{errors.complexity}</small> : null}
-            </div>
-
-            <div className="work-types-matrix-preview" aria-label="Допустимые должности">
-              <span>Допустимые должности</span>
-              <div className="work-types-grade-checks">
-                {positions.map((position) => (
-                  <label key={position.id}>
-                    <input
-                      type="checkbox"
-                      checked={form.allowedPositionIds.includes(position.id)}
-                      onChange={(event) => {
-                        setForm((current) => ({
-                          ...current,
-                          allowedPositionIds: event.target.checked
-                            ? [...current.allowedPositionIds, position.id]
-                            : current.allowedPositionIds.filter((id) => id !== position.id),
-                        }));
-                      }}
-                    />
-                    {position.name}
-                  </label>
-                ))}
-              </div>
-              <small className="work-types-positions">
-                {getAllowedPositionNames(form.allowedPositionIds, positions)}
-              </small>
-              {getMatrixWarning(form.allowedGradeIds, form.allowedPositionIds, positions) ? (
-                <small className="work-types-warning">{getMatrixWarning(form.allowedGradeIds, form.allowedPositionIds, positions)}</small>
+              {getMatrixWarning(form.matrix, positions) ? (
+                <small className="work-types-warning">{getMatrixWarning(form.matrix, positions)}</small>
               ) : null}
+              {errors.complexity ? <small>{errors.complexity}</small> : null}
             </div>
 
             <footer>
@@ -453,35 +402,54 @@ export function WorkTypesPage() {
   );
 }
 
-function getAllowedGradeNames(allowedGradeIds: string[], grades: Array<{ id: string; name: string }>) {
-  const names = allowedGradeIds.map((gradeId) => grades.find((grade) => grade.id === gradeId)?.name ?? gradeId);
+function WorkTypeMatrixEditor({
+  grades,
+  matrix,
+  positions,
+  onToggle,
+}: {
+  grades: Array<{ id: string; name: string }>;
+  matrix: WorkTypeMatrix;
+  positions: Array<{ id: string; name: string; gradeIds: string[] }>;
+  onToggle: (positionId: string, gradeId: string) => void;
+}) {
+  return (
+    <div className="work-types-matrix-editor">
+      {positions.map((position) => {
+        const availableGradeIds = position.gradeIds.length > 0 ? position.gradeIds : grades.map((grade) => grade.id);
 
-  return names.length > 0 ? names.join(", ") : "нет выбранных грейдов";
+        return (
+          <details className="work-types-position-matrix" key={position.id}>
+            <summary>
+              <span>{position.name}</span>
+              <b>{matrix[position.id]?.length ?? 0}</b>
+            </summary>
+            <div className="work-types-grade-checks">
+              {grades.map((grade) => (
+                <label className={!availableGradeIds.includes(grade.id) ? "work-types-grade-checks__item--disabled" : ""} key={grade.id}>
+                  <input
+                    type="checkbox"
+                    checked={(matrix[position.id] ?? []).includes(grade.id)}
+                    disabled={!availableGradeIds.includes(grade.id)}
+                    onChange={() => onToggle(position.id, grade.id)}
+                  />
+                  {grade.name}
+                </label>
+              ))}
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  );
 }
 
-function getAllowedPositionNames(allowedPositionIds: string[], positions: Array<{ id: string; name: string }>) {
-  if (allowedPositionIds.length === 0) {
-    return "Любая должность";
-  }
+function getMatrixWarning(matrix: WorkTypeMatrix, positions: Array<{ id: string; gradeIds: string[] }>) {
+  const hasUnavailableGrade = positions.some((position) => {
+    const availableGradeIds = new Set(position.gradeIds);
 
-  const names = allowedPositionIds.map((positionId) => positions.find((position) => position.id === positionId)?.name ?? positionId);
+    return (matrix[position.id] ?? []).some((gradeId) => position.gradeIds.length > 0 && !availableGradeIds.has(gradeId));
+  });
 
-  return names.join(", ");
-}
-
-function getMatrixWarning(
-  allowedGradeIds: string[],
-  allowedPositionIds: string[],
-  positions: Array<{ id: string; gradeIds: string[] }>,
-) {
-  if (allowedGradeIds.length === 0 || allowedPositionIds.length === 0) {
-    return "";
-  }
-
-  const allowedGrades = new Set(allowedGradeIds);
-  const hasIntersection = positions
-    .filter((position) => allowedPositionIds.includes(position.id))
-    .some((position) => position.gradeIds.some((gradeId) => allowedGrades.has(gradeId)));
-
-  return hasIntersection ? "" : "У выбранных должностей нет выбранных грейдов: автоназначение может не найти исполнителя.";
+  return hasUnavailableGrade ? "Выбран грейд, которого нет у должности: автоназначение может не найти исполнителя." : "";
 }

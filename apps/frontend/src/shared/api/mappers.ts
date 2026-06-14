@@ -154,7 +154,19 @@ function mapWorkTypeRecord(raw: Record<string, unknown>): WorkType {
     complexity: String(raw.complexity ?? "medium") as WorkType["complexity"],
     allowedGradeIds: Array.isArray(raw.allowedGradeIds) ? raw.allowedGradeIds.map(String) : [],
     allowedPositionIds: Array.isArray(raw.allowedPositionIds) ? raw.allowedPositionIds.map(String) : [],
+    positionGradeMatrix: mapPositionGradeMatrix(raw.positionGradeMatrix),
   };
+}
+
+function mapPositionGradeMatrix(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return Object.entries(value).reduce<Record<string, string[]>>((matrix, [positionId, gradeIds]) => {
+    matrix[positionId] = Array.isArray(gradeIds) ? gradeIds.map(String) : [];
+    return matrix;
+  }, {});
 }
 
 function mapDepartmentRecord(raw: Record<string, unknown>): Department {
