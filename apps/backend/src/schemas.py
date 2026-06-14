@@ -13,7 +13,7 @@ from pydantic import BaseModel, BeforeValidator, Field, field_validator, model_v
 
 # ─────────────────────────── Enum constants ───────────────────────────
 
-ComplexityValues   = ["easy", "medium", "hard", "critical"]
+ComplexityValues   = ["easy", "medium", "hard"]
 StatusValues       = ["new", "assigned", "delegated", "inProgress", "rejected", "completed"]
 PriorityValues     = ["low", "medium", "high", "critical"]
 RoleValues         = ["author", "executor", "manager", "top-manager"]
@@ -140,7 +140,7 @@ class WorkTypeOut(BaseModel):
     id: CoercedStr           = Field(validation_alias="type_of_works_id")
     name: CoercedStr         = Field(validation_alias="name")
     departmentId: CoercedStr = Field(validation_alias="department_id")
-    complexity: Literal["easy", "medium", "hard", "critical"] = Field(
+    complexity: Literal["easy", "medium", "hard"] = Field(
         validation_alias="complexity_value"
     )
     allowedGradeIds: ListOfStrings = Field(validation_alias="grade_ids")
@@ -158,7 +158,7 @@ class WorkTypeOut(BaseModel):
 class CreateWorkTypePayload(BaseModel):
     name: str = Field(min_length=1)
     departmentId: str
-    complexity: Literal["easy", "medium", "hard", "critical"]
+    complexity: Literal["easy", "medium", "hard"]
     allowedGradeIds: list[str] = Field(min_length=1)
     # Необязательно (старый фронт не присылает): пустой список = любая должность.
     allowedPositionIds: list[str] = Field(default_factory=list)
@@ -166,7 +166,7 @@ class CreateWorkTypePayload(BaseModel):
 class UpdateWorkTypePayload(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1)
     departmentId: Optional[str] = None
-    complexity: Optional[Literal["easy", "medium", "hard", "critical"]] = None
+    complexity: Optional[Literal["easy", "medium", "hard"]] = None
     allowedGradeIds: Optional[list[str]] = None
     # None = не менять; [] = снять ограничение по должности (любая должность).
     allowedPositionIds: Optional[list[str]] = None
@@ -373,7 +373,7 @@ class ApplicationActionPayload(BaseModel):
     departmentId: Optional[str]= None
     workTypeId: Optional[str]  = None
     comment: Optional[str]     = None
-    complexity: Optional[Literal["easy", "medium", "hard", "critical"]] = None
+    complexity: Optional[Literal["easy", "medium", "hard"]] = None
     resultText: Optional[str]  = None
     description: Optional[str] = Field(default=None, max_length=1000)
 

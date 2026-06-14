@@ -1273,7 +1273,6 @@ components:
             - easy
             - medium
             - hard
-            - critical
           - type: 'null'
           title: Complexity
         resultText:
@@ -1742,7 +1741,6 @@ components:
           - easy
           - medium
           - hard
-          - critical
           title: Complexity
         allowedGradeIds:
           items:
@@ -2138,7 +2136,6 @@ components:
             - easy
             - medium
             - hard
-            - critical
           - type: 'null'
           title: Complexity
         allowedGradeIds:
@@ -2284,7 +2281,6 @@ components:
           - easy
           - medium
           - hard
-          - critical
           title: Complexity
         allowedGradeIds:
           items:

@@ -1211,7 +1211,7 @@ class TestApplicationDetailContent:
 
         wt = d["workType"]
         assert wt and wt["id"] == d["workTypeId"]
-        assert wt["complexity"] in ("easy", "medium", "hard", "critical")
+        assert wt["complexity"] in ("easy", "medium", "hard")
         assert isinstance(wt["allowedGradeIds"], list)
 
     def test_executor_absent_on_new_application(self):

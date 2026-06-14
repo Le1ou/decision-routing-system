@@ -22,9 +22,9 @@ analytics_module.py — подсистема аналитики (docs/backend-fu
 
 from psycopg.rows import dict_row
 
-_COMPLEXITY = {1: "easy", 2: "medium", 3: "hard", 4: "critical"}
+_COMPLEXITY = {1: "easy", 2: "medium", 3: "hard"}
 _PRIORITIES = ("low", "medium", "high", "critical")
-_COMPLEXITIES = ("easy", "medium", "hard", "critical")
+_COMPLEXITIES = ("easy", "medium", "hard")
 
 
 def _n(v):
