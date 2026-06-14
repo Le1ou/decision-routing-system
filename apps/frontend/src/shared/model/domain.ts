@@ -25,7 +25,7 @@ export type ApplicationAction =
   | "declineExternalDelegation"
   | "changeWorkType";
 
-export type Complexity = "easy" | "medium" | "hard" | "critical";
+export type Complexity = "easy" | "medium" | "hard";
 
 export type Department = {
   id: string;
@@ -96,6 +96,7 @@ export type WorkType = {
   complexity: Complexity;
   allowedGradeIds: string[];
   allowedPositionIds: string[];
+  positionGradeMatrix?: Record<string, string[]>;
 };
 
 export type ChatMessage = {

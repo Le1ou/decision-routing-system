@@ -71,7 +71,7 @@ export function ReferenceDataProvider({ children }: { children: ReactNode }) {
       setAdUsers(adUsersResponse.items.map(mapAdUser));
       setPrioritySettings(priorityResponse);
     } catch {
-      setError("Не удалось загрузить справочники backend.");
+      setError("Не удалось загрузить справочники.");
     } finally {
       setIsLoading(false);
     }

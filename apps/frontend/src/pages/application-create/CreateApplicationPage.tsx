@@ -129,7 +129,7 @@ export function CreateApplicationPage() {
 
       setCreatedApplicationId(applicationId);
     } catch {
-      setErrors((current) => ({ ...current, title: "Не удалось создать заявку на backend." }));
+      setErrors((current) => ({ ...current, title: "Не удалось создать заявку." }));
     } finally {
       setIsSubmitting(false);
     }

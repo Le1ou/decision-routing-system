@@ -62,6 +62,7 @@ export type WorkTypeDto = {
   complexity: Complexity;
   allowedGradeIds: string[];
   allowedPositionIds?: string[];
+  positionGradeMatrix?: Record<string, string[]>;
 };
 
 export type ChatMessageDto = {
@@ -374,12 +375,26 @@ export const apiClient = {
     apiRequest<ListResponse<WorkTypeDto>>(withQuery("/work-types", params), credentials),
   createWorkType: (
     credentials: ApiCredentials,
-    payload: { name: string; departmentId: string; complexity: Complexity; allowedGradeIds: string[]; allowedPositionIds?: string[] },
+    payload: {
+      name: string;
+      departmentId: string;
+      complexity: Complexity;
+      allowedGradeIds: string[];
+      allowedPositionIds?: string[];
+      positionGradeMatrix?: Record<string, string[]>;
+    },
   ) => jsonRequest<IdResponse>("/work-types", credentials, payload, { method: "POST" }),
   updateWorkType: (
     credentials: ApiCredentials,
     workTypeId: string,
-    payload: Partial<{ name: string; departmentId: string; complexity: Complexity; allowedGradeIds: string[]; allowedPositionIds: string[] }>,
+    payload: Partial<{
+      name: string;
+      departmentId: string;
+      complexity: Complexity;
+      allowedGradeIds: string[];
+      allowedPositionIds: string[];
+      positionGradeMatrix: Record<string, string[]>;
+    }>,
   ) => jsonRequest<void>(`/work-types/${workTypeId}`, credentials, payload, { method: "PATCH" }),
   deleteWorkType: (credentials: ApiCredentials, workTypeId: string) =>
     apiRequest<void>(`/work-types/${workTypeId}`, credentials, { method: "DELETE" }),

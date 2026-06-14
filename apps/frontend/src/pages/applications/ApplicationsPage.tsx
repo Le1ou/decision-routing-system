@@ -278,7 +278,7 @@ export function ApplicationsPage() {
       setActionError("");
       setPendingAction(null);
     } catch {
-      setActionError("Backend не применил действие. Проверьте обязательные поля и права пользователя.");
+      setActionError("Не удалось применить действие. Проверьте обязательные поля и права пользователя.");
     }
   };
 
@@ -307,7 +307,7 @@ export function ApplicationsPage() {
       } else if (sendError instanceof ApiError && sendError.status === 403) {
         setChatError("У вас нет прав писать в чат этой заявки.");
       } else {
-        setChatError("Backend не отправил сообщение.");
+        setChatError("Не удалось отправить сообщение.");
       }
     }
   };
@@ -472,15 +472,6 @@ export function ApplicationsPage() {
               readOnly
               aria-label="Описание заявки"
             />
-            <label className="application-card__comment">
-              <span>Комментарий исполнителя:</span>
-              <textarea
-                value={selectedApplication.executorComment ?? ""}
-                placeholder="Комментарий появится после назначения или выполнения работ"
-                readOnly
-                aria-label="Комментарий исполнителя"
-              />
-            </label>
             {selectedApplication.managerComment ? (
               <label className="application-card__comment">
                 <span>Комментарий руководителя:</span>
@@ -687,7 +678,7 @@ export function ApplicationsPage() {
                 </label>
                 {busyExecutorApplication ? (
                   <div className="application-modal__warning">
-                    Исполнитель уже занят заявкой ID {busyExecutorApplication.id}. При назначении backend вернет прежнюю активную заявку в статус «Новый».
+                    Исполнитель уже занят заявкой ID {busyExecutorApplication.id}. При назначении система вернет прежнюю активную заявку в статус «Новый».
                   </div>
                 ) : null}
               </>
@@ -730,7 +721,6 @@ export function ApplicationsPage() {
                     <option value="easy">Легкая</option>
                     <option value="medium">Средняя</option>
                     <option value="hard">Высокая</option>
-                    <option value="critical">Критичная</option>
                   </select>
                 </label>
               </section>
@@ -738,7 +728,7 @@ export function ApplicationsPage() {
 
             {pendingAction === "delegateInternal" ? (
               <label>
-                Новый вид работ, если требуется
+                Вид работ для переназначения
                 <select
                   value={actionForm.workTypeId}
                   onChange={(event) => {
@@ -844,14 +834,12 @@ const complexityOrder: Record<Complexity, number> = {
   easy: 1,
   medium: 2,
   hard: 3,
-  critical: 4,
 };
 
 const complexityLabels: Record<Complexity, string> = {
   easy: "Легкая",
   medium: "Средняя",
   hard: "Высокая",
-  critical: "Критичная",
 };
 
 function getActionValidationError(

@@ -226,11 +226,6 @@
   color: #8a5a00;
 }
 
-.work-types-complexity-select--critical {
-  background: #ffe8e5;
-  color: #b42318;
-}
-
 .work-types-grades {
   display: grid;
   gap: 6px;
@@ -309,6 +304,69 @@
   gap: 8px;
 }
 
+.work-types-table__row .work-types-matrix-toggle {
+  min-height: 32px;
+  border-color: #c8d0dc;
+  background: #ffffff;
+  color: #1f2a44;
+  font-size: 13px;
+}
+
+.work-types-matrix-editor {
+  display: grid;
+  max-height: 280px;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.work-types-position-matrix {
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.work-types-position-matrix summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 10px;
+  min-height: 38px;
+  align-items: center;
+  cursor: pointer;
+  padding: 8px 10px;
+}
+
+.work-types-position-matrix summary span {
+  min-width: 0;
+  overflow: hidden;
+  color: #1f2a44;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.work-types-position-matrix summary b {
+  display: grid;
+  min-height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: #eaf2ff;
+  color: #1f6feb;
+  font-size: 12px;
+}
+
+.work-types-position-matrix .work-types-grade-checks {
+  border-top: 1px solid #edf0f5;
+  padding: 10px;
+}
+
+.work-types-grade-checks__item--disabled {
+  color: #98a2b3;
+}
+
 .work-types-modal {
   position: fixed;
   inset: 0;
@@ -321,8 +379,10 @@
 
 .work-types-modal__panel {
   display: grid;
-  width: min(100%, 520px);
+  width: min(100%, 720px);
+  max-height: calc(100vh - 40px);
   gap: 16px;
+  overflow-y: auto;
   border: 1px solid #d8dee9;
   border-radius: 8px;
   background: #ffffff;

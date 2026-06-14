@@ -134,7 +134,7 @@ export function ReportsPage() {
       });
       setNotice("Предварительный отчет сформирован.");
     } catch {
-      setNotice("Backend не сформировал отчет.");
+      setNotice("Не удалось сформировать отчет.");
     } finally {
       setIsLoading(false);
     }
@@ -166,7 +166,7 @@ export function ReportsPage() {
       URL.revokeObjectURL(url);
       setNotice("XLSX-отчет скачан.");
     } catch {
-      setNotice("Backend не выгрузил XLSX.");
+      setNotice("Не удалось выгрузить XLSX.");
     }
   };
 
@@ -247,8 +247,8 @@ export function ReportsPage() {
       <article className="reports-table">
         <header>
           <div>
-            <h2>Предварительный просмотр</h2>
-            <span>{report ? "Актуален" : "Сформируйте отчет"}</span>
+            <h2>Отчет по заявкам</h2>
+            <span>{report ? "Готов к выгрузке" : "Сформируйте отчет"}</span>
           </div>
           <Button type="button" variant="secondary" onClick={() => void handleExport()} disabled={!report}>
             Выгрузить .xlsx
@@ -332,12 +332,11 @@ export function ReportsPage() {
         <AnalyticsTable
           title="Исполнители"
           emptyText="Нет данных по исполнителям."
-          columns={["Исполнитель", "Назначено", "Завершено", "В работе", "Реакция", "Занятость"]}
+          columns={["Исполнитель", "Назначено", "Завершено", "Реакция", "Нагрузка"]}
           rows={(analytics?.executors.executors ?? []).map((executor) => [
             executor.fullName,
             String(executor.assignedCount),
             String(executor.completedCount),
-            String(executor.inProgressCount),
             formatSeconds(executor.avgReactionTimeSeconds),
             formatPercent(executor.occupancyRatio),
           ])}
@@ -360,7 +359,7 @@ export function ReportsPage() {
         <AnalyticsTable
           title="Отделы"
           emptyText="Нет данных по отделам."
-          columns={["Отдел", "Сотрудники", "Заявки", "Завершено", "Реакция", "Занятость", "Делегирования"]}
+          columns={["Отдел", "Сотрудники", "Заявки", "Завершено", "Реакция", "Нагрузка", "Делегирования"]}
           rows={(analytics?.departments.departments ?? []).map((department) => [
             department.name,
             String(department.employeeCount),
@@ -462,10 +461,9 @@ function getFilenameFromContentDisposition(value: string | null) {
 
 const statusOrder: ApplicationStatus[] = ["new", "assigned", "inProgress", "delegated", "completed", "rejected"];
 const priorityOrder: ApplicationPriority[] = ["low", "medium", "high", "critical"];
-const complexityOrder: Complexity[] = ["easy", "medium", "hard", "critical"];
+const complexityOrder: Complexity[] = ["easy", "medium", "hard"];
 const complexityLabels: Record<Complexity, string> = {
   easy: "Легкая",
   medium: "Средняя",
   hard: "Высокая",
-  critical: "Критичная",
 };

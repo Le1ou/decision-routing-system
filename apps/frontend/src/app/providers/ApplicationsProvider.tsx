@@ -71,7 +71,7 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
       });
     } catch {
       if (options.reportError) {
-        setError("Не удалось загрузить заявки backend.");
+        setError("Не удалось загрузить заявки.");
       } else {
         console.warn("Не удалось обновить список заявок.");
       }
@@ -107,7 +107,7 @@ export function ApplicationsProvider({ children }: { children: ReactNode }) {
 
         setApplicationItems(details);
       } catch {
-        setError("Не удалось загрузить заявки backend.");
+        setError("Не удалось загрузить заявки.");
       } finally {
         setIsLoading(false);
       }

@@ -107,7 +107,7 @@ export function PrioritySettingsPage() {
       await refresh();
       setNotice("Настройки отдела сохранены.");
     } catch {
-      setNotice("Backend не сохранил настройки отдела.");
+      setNotice("Не удалось сохранить настройки отдела.");
     }
   };
 
@@ -140,7 +140,7 @@ export function PrioritySettingsPage() {
       setDraftSettings(null);
       setNotice("Коэффициенты сохранены.");
     } catch {
-      setNotice("Backend не сохранил коэффициенты.");
+      setNotice("Не удалось сохранить коэффициенты.");
     }
   };
 

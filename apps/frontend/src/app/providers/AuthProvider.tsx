@@ -58,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             throw new Error("Неверный логин или пароль.");
           }
 
-          throw new Error("Не удалось подключиться к backend.");
+          throw new Error("Не удалось подключиться к сервису.");
         }
       },
       logout: () => {
