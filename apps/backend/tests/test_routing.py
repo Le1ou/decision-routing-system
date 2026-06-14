@@ -346,7 +346,7 @@ def test_pending_internal_delegation_blocks_auto_assignment(sysdb):
         pending = _create_app()
         _assign(pending, EXEC1)
         r = _session.post(f"{BASE_URL}/applications/{pending}/actions", auth=EXEC1_AUTH,
-                          json={"action": "delegateInternal", "complexity": "critical"})
+                          json={"action": "delegateInternal", "complexity": "hard"})
         assert r.status_code == 204, r.text
         assert _app(pending)["status"] == "delegated"    # ждёт подтверждения
         _busy_executor(EXEC2)                            # второй исполнитель занят

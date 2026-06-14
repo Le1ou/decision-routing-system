@@ -121,7 +121,7 @@ def test_internal_delegation_with_confirmation_notifies_manager():
     app_id = _create_app(TOP_MANAGER, DEP_OGE, wts[0]["id"])
     assert _act(app_id, TOP_MANAGER, action="assignExecutor", executorId="4").status_code == 204
     # Assigned OGE executor re-addresses internally (complexity not below current).
-    assert _act(app_id, EXECUTOR_OGE, action="delegateInternal", complexity="critical").status_code == 204
+    assert _act(app_id, EXECUTOR_OGE, action="delegateInternal", complexity="hard").status_code == 204
 
     assert _app(app_id, TOP_MANAGER)["status"] == "delegated"      # ушло на подтверждение
     assert _has_notification_for_app(MGR_OGE, app_id), "OGE manager should be notified to confirm"

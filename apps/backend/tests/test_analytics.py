@@ -55,7 +55,7 @@ def test_applications_shape():
     for key in ("completionTimeSeconds", "timeToAssignSeconds", "timeWithoutExecutorSeconds"):
         assert set(data[key].keys()) == {"min", "avg", "max"}, key
     assert {"total", "confirmed", "declined", "pending", "decisionTimeSeconds"} <= data["delegations"].keys()
-    assert set(data["byComplexity"].keys()) == {"easy", "medium", "hard", "critical"}
+    assert set(data["byComplexity"].keys()) == {"easy", "medium", "hard"}
 
 
 def test_executors_shape():

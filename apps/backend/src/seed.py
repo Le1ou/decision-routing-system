@@ -57,8 +57,8 @@ def seed_database(db_operator) -> None:
 
     # Complexity is stored 1-based in types_of_works.complexity_value and
     # application.empl_assigned_complexity (matches main.py: complexity_int_to_str
-    # reads value-1, create/update store index+1). 1=easy 2=medium 3=hard 4=critical.
-    complexity_to_int = {"easy": 1, "medium": 2, "hard": 3, "critical": 4}
+    # reads value-1, create/update store index+1). 1=easy 2=medium 3=hard.
+    complexity_to_int = {"easy": 1, "medium": 2, "hard": 3}
 
     with db_operator.pool.connection() as conn:
 
@@ -84,10 +84,10 @@ def seed_database(db_operator) -> None:
         # ── 1. complexity_value ──────────────────────────────────────────────
         # 1-based to match main.py (complexity_int_to_str reads value-1; work-type
         # create/update store index+1). types_of_works.complexity_value is an FK to
-        # this table, so the ids here must cover 1..4. We override the identity to
-        # pin the ids: 1=easy 2=medium 3=hard 4=critical.
+        # this table, so the ids here must cover 1..3. We override the identity to
+        # pin the ids: 1=easy 2=medium 3=hard.
         complexity_ids = {}
-        for cid, name in ((1, "easy"), (2, "medium"), (3, "hard"), (4, "critical")):
+        for cid, name in ((1, "easy"), (2, "medium"), (3, "hard")):
             row = conn.execute(
                 "INSERT INTO public.complexity_value (complexity_value_id, name) "
                 "OVERRIDING SYSTEM VALUE VALUES (%s, %s) RETURNING complexity_value_id",
@@ -239,13 +239,11 @@ def seed_database(db_operator) -> None:
             "easy":     ["junior", "middle"],
             "medium":   ["middle", "senior"],
             "hard":     ["senior", "lead"],
-            "critical": ["senior", "lead"],
         }
         posts_by_complexity = {
             "easy":     ["Специалист", "Инженер", "Старший инженер"],
             "medium":   ["Специалист", "Инженер", "Старший инженер"],
             "hard":     ["Старший инженер", "Руководитель"],
-            "critical": ["Старший инженер", "Руководитель"],
         }
         tow_ids = {}
         work_types = (
@@ -256,10 +254,10 @@ def seed_database(db_operator) -> None:
             ("it_sw_install", "Установка ПО",                                "it",        "easy"),
             ("it_sw_setup",   "Настройка ПО",                                "it",        "medium"),
             ("oge_motor",     "Ремонт электродвигателей",                    "oge",       "hard"),
-            ("oge_short",     "Устранение замыканий",                        "oge",       "critical"),
+            ("oge_short",     "Устранение замыканий",                        "oge",       "hard"),
             ("oge_wiring",    "Ремонт проводки",                             "oge",       "medium"),
             ("oge_pipe",      "Ремонт трубопроводов",                        "oge",       "medium"),
-            ("oge_power",     "Устранение обесточивания",                    "oge",       "critical"),
+            ("oge_power",     "Устранение обесточивания",                    "oge",       "hard"),
             ("prod_repair",   "Заявка на ремонт оборудования",               "prod",      "medium"),
             ("prod_replace",  "Заявка на замену оборудования",               "prod",      "hard"),
             ("okk_check_in",  "Проверка/приёмка покупных деталей",           "okk",       "easy"),
@@ -269,7 +267,7 @@ def seed_database(db_operator) -> None:
             ("ogm_repair",    "Ремонтные работы",                            "ogm",       "medium"),
             ("ogm_parts",     "Замена комплектующих",                        "ogm",       "medium"),
             ("ogm_oil",       "Замена масла",                                "ogm",       "easy"),
-            ("ogm_emergency", "Аварийные работы",                            "ogm",       "critical"),
+            ("ogm_emergency", "Аварийные работы",                            "ogm",       "hard"),
             ("wh_invoice",    "Оформление товарных накладных",               "warehouse", "easy"),
             ("wh_ship",       "Отгрузка товара",                             "warehouse", "easy"),
             ("wh_inventory",  "Инвентаризация",                              "warehouse", "medium"),
@@ -481,7 +479,7 @@ def seed_database(db_operator) -> None:
             "prod", "prod_repair", "author1", "executor4",
             executor_at=now - timedelta(hours=6),
             work_at=now - timedelta(hours=4),
-            assigned_complexity="critical",
+            assigned_complexity="hard",
             created_offset_days=0,
             deadline_offset_days=1,
         )
