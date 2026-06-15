@@ -1,0 +1,170 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Python / Backend
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+        
+      - name: Install backend dependencies
+        run: |
+          pip install -r apps/backend/requirements.txt
+
+      - name: Check backend syntax
+        run: |
+          PYTHONPYCACHEPREFIX=/tmp/pycache python -m compileall apps/backend/src
+
+      # Node / Frontend
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: apps/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: apps/frontend
+        run: npm run build
+
+      # Docker Compose validation
+      - name: Validate Docker Compose config
+        run: |
+          docker compose \
+            --env-file .env.example \
+            -f infra/compose/docker-compose.local.yml \
+            config
+
+      - name: Validate production Docker Compose config
+        run: |
+          docker compose \
+            --env-file .env.example \
+            -f infra/compose/docker-compose.prod.yml \
+            config
+
+      # Docker build checks
+      - name: Build backend image
+        run: |
+          docker build -t decision-routing-backend ./apps/backend
+
+      - name: Build frontend image
+        run: |
+          docker build -t decision-routing-frontend ./apps/frontend
+
+      - name: Build production frontend image
+        run: |
+          docker build -f apps/frontend/Dockerfile.prod -t decision-routing-frontend-prod ./apps/frontend
+
+      # Тесты гоняются ТОЛЬКО под детерминированным профилем сидирования (test) и с
+      # выключенным фоновым циклом: config.json по умолчанию задаёт demo-профиль для
+      # «живого» запуска, а фоновый цикл со временем мутирует сид (вытеснения критичных
+      # заявок) и роняет сид-зависимые тесты. Переменные окружения шага перекрывают
+      # и .env.example, и config.json.
+      - name: Start compose
+        env:
+          SEED_PROFILE: test
+          EVENTS_ENABLED: "false"
+        run: docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml up -d --build
+
+      - name: Wait backend
+        run: |
+          for i in $(seq 1 60); do
+            if curl --silent --fail http://localhost:3000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "backend did not become healthy in time" >&2
+          docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml logs backend | tail -50
+          exit 1
+
+      - name: Run backend tests
+        run: |
+          docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml exec -T backend python -m pytest tests/
+
+      - name: Stop compose
+        if: always()
+        run: docker compose --env-file .env.example -f infra/compose/docker-compose.local.yml down -v
+
+  deploy:
+    needs: test
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+
+          script: |
+            set -eu
+            set -o pipefail 2>/dev/null || true
+
+            cd ~/decision-routing-system
+
+            # Удаляем локальные изменения
+            git reset --hard
+
+            # Удаляем неотслеживаемые файлы
+            git clean -fd
+
+            # Получаем последнюю версию
+            git fetch origin
+
+            # Переключаемся на develop
+            git checkout develop
+
+            # Полностью обновляем ветку
+            git reset --hard origin/develop
+
+            # Сначала собираем images, не останавливая текущий production stack.
+            # Docker Hub иногда даёт TLS timeout; retry снижает шанс ложного deploy fail.
+            for attempt in 1 2 3; do
+              if docker compose \
+                --env-file .env \
+                -f infra/compose/docker-compose.prod.yml \
+                build; then
+                break
+              fi
+
+              if [ "$attempt" = "3" ]; then
+                exit 1
+              fi
+
+              sleep $((attempt * 30))
+            done
+
+            # Останавливаем старый stack только после успешной сборки, чтобы изменения
+            # ports/container topology применялись без конфликтов и orphan-контейнеров.
+            docker compose \
+              --env-file .env \
+              -f infra/compose/docker-compose.prod.yml \
+              down --remove-orphans
+
+            # Запускаем production stack из уже собранных images.
+            docker compose \
+              --env-file .env \
+              -f infra/compose/docker-compose.prod.yml \
+              up -d --no-build
+
+            # Проверяем backend
+            sleep 15
+            curl --fail http://localhost:3000/health

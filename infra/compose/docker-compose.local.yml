@@ -1,0 +1,168 @@
+
+services:
+  db:
+    image: postgres:15
+    container_name: project_db
+
+    restart: always
+
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      
+    ports:
+      - "${DB_PORT}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../apps/backend/sql_decision-routing.sql:/docker-entrypoint-initdb.d/001_init.sql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: 
+      context: ../../apps/backend
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    container_name: project_backend
+    environment:
+      AUTH_MODE: ${AUTH_MODE:-mock}
+      # Режим запуска (см. apps/backend/config.json → "startup"). Пустые значения
+      # берутся из config.json. SEED_ON_START=false — релизный режим без пересева БД;
+      # BACKUP_ON_SHUTDOWN=false — выключить дамп БД в S3 при остановке.
+      SEED_ON_START: ${SEED_ON_START:-}
+      # Профиль сидирования: test (детерминированный, для разработки/тестов) или
+      # demo (реалистичный «чистый запуск»). Тесты гонять только под test.
+      SEED_PROFILE: ${SEED_PROFILE:-}
+      BACKUP_ON_SHUTDOWN: ${BACKUP_ON_SHUTDOWN:-}
+      # Однократно: true = восстановить БД из backups/db/latest.dump на старте.
+      RESTORE_FROM_BACKUP: ${RESTORE_FROM_BACKUP:-}
+      # false = выключить фоновый цикл событий/маршрутизации (детерминированные тесты;
+      # см. apps/backend/src/main.py). Пусто — берётся из config.json → events.enabled.
+      EVENTS_ENABLED: ${EVENTS_ENABLED:-}
+      # Active Directory connection (only used when AUTH_MODE=ad). Empty values
+      # fall back to the AD_auth block in apps/backend/config.json.
+      AD_SERVER: ${AD_SERVER:-}
+      AD_DOMAIN: ${AD_DOMAIN:-}
+      AD_USE_SSL: ${AD_USE_SSL:-}
+      AD_PORT: ${AD_PORT:-}
+      # Optional AD group → role mapping (group_role_map lives in config.json).
+      AD_ROLE_SOURCE: ${AD_ROLE_SOURCE:-}
+      AD_SEARCH_BASE: ${AD_SEARCH_BASE:-}
+      # Service account for AD lookups from background jobs (email mode "ad").
+      AD_BIND_USER: ${AD_BIND_USER:-}
+      AD_BIND_PASSWORD: ${AD_BIND_PASSWORD:-}
+      # Email copies of notifications (см. apps/backend/config.json → "email").
+      # Empty values fall back to config.json.
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-}
+      EMAIL_MODE: ${EMAIL_MODE:-}
+      EMAIL_ORG_DOMAIN: ${EMAIL_ORG_DOMAIN:-}
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-}
+      SMTP_SSL: ${SMTP_SSL:-}
+      SMTP_TIMEOUT: ${SMTP_TIMEOUT:-}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      # Set to "true" for self-hosted S3 (MinIO). See docs/s3-integration.md.
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Self-hosted S3-compatible storage (no account / card required) ──────────
+  # Starts together with the rest of the stack (`make up`). The backend uses it
+  # when the S3_* variables in .env point here (the .env.example defaults do).
+  # See docs/s3-integration.md.
+  minio:
+    image: minio/minio:latest
+    container_name: project_minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot helper that creates the bucket, then exits.
+  createbuckets:
+    image: minio/mc:latest
+    container_name: project_minio_createbuckets
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 '${S3_ACCESS_KEY_ID:-minioadmin}' '${S3_SECRET_ACCESS_KEY:-minioadmin}' &&
+      mc mb --ignore-existing local/'${S3_BUCKET_NAME:-decision-routing}' &&
+      echo 'bucket ${S3_BUCKET_NAME:-decision-routing} ready';
+      "
+
+  frontend:
+    build:
+      context: ../../apps/frontend
+
+    container_name: project_frontend
+
+    #env_file:
+      #- ../../.env
+
+    environment:
+      VITE_API_URL: ${VITE_API_URL}
+
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+
+    ports:
+      - "5173:5173"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    volumes:
+      - ../../apps/frontend:/app
+      - /app/node_modules
+
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5173').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  minio_data:

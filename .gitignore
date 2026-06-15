@@ -138,6 +138,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
+# Vite dependency cache
+.vite/
+
 # Python
 __pycache__/
 *.pyc
@@ -157,3 +160,8 @@ env/
 # IDE
 .vscode/
 .idea/
+
+# Local planning notes
+skills.md
+plan.md
+backend-notes.md

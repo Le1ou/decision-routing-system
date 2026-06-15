@@ -1,0 +1,330 @@
+.app-shell {
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+.app-shell__header {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-bottom: 1px solid #d7dde8;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 8px 22px;
+  box-shadow: 0 4px 18px rgba(34, 45, 72, 0.05);
+}
+
+.app-shell__home-link {
+  display: inline-flex;
+  flex: 1;
+  min-width: 160px;
+  align-items: center;
+  gap: 10px;
+  color: #1f2a44;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.app-shell__home-link img {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  box-shadow: 0 8px 18px rgba(31, 111, 235, 0.18);
+}
+
+.app-shell__home-link span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.app-shell__home-link strong {
+  overflow: hidden;
+  color: #15243b;
+  font-size: 15px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell__home-link small {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.app-shell__notifications-wrap {
+  position: relative;
+}
+
+.app-shell__back {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d7dde8;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #263247;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 0 12px;
+}
+
+.app-shell__notifications {
+  display: inline-flex;
+  position: relative;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #d7dde8;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #263247;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 7px 12px;
+}
+
+.app-shell__notification-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #2f80ed;
+}
+
+.app-shell__notifications b {
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e74c3c;
+  color: #ffffff;
+  font-size: 11px;
+}
+
+.app-shell__notifications-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 30;
+  width: min(380px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 22px 58px rgba(15, 23, 42, 0.18);
+}
+
+.app-shell__notifications-panel header {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #edf0f5;
+  padding: 12px 14px;
+}
+
+.app-shell__notifications-panel h2 {
+  margin: 0;
+  color: #1f2a44;
+  font-size: 17px;
+}
+
+.app-shell__notifications-panel header span {
+  display: inline-block;
+  margin-top: 3px;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.app-shell__notifications-panel header button {
+  min-height: 32px;
+  border: 1px solid #c8d0dc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2a44;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+.app-shell__notifications-panel header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.app-shell__notifications-list {
+  display: grid;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.app-shell__notification-item {
+  display: grid;
+  gap: 6px;
+  border-bottom: 1px solid #edf0f5;
+  color: #344054;
+  padding: 12px 14px;
+}
+
+.app-shell__notification-item--unread {
+  background: #f4f8ff;
+  box-shadow: inset 3px 0 0 #1f6feb;
+}
+
+.app-shell__notification-item span {
+  color: #1f2a44;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.app-shell__notification-item time {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.app-shell__notifications-empty {
+  color: #667085;
+  padding: 18px 14px;
+}
+
+.app-shell__profile {
+  display: inline-flex;
+  min-width: 175px;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #222b3d;
+  padding: 3px 14px 3px 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.app-shell__avatar {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 38%, #707070 0 22%, transparent 23%),
+    radial-gradient(circle at 50% 82%, #707070 0 37%, transparent 38%),
+    #d9d9d9;
+}
+
+.app-shell__logout {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #1f2937;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2937;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 0 14px;
+}
+
+.app-shell__content {
+  min-width: 0;
+  min-height: calc(100vh - 58px);
+  background: #f5f7fb;
+}
+
+@media (max-width: 640px) {
+  .app-shell__header {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .app-shell__home-link {
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  .app-shell__home-link small {
+    display: none;
+  }
+
+  .app-shell__back {
+    width: 38px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .app-shell__back::before {
+    content: "‹";
+    font-size: 26px;
+    line-height: 1;
+  }
+
+  .app-shell__profile {
+    min-width: auto;
+    width: 38px;
+    justify-content: center;
+    padding-right: 8px;
+    font-size: 15px;
+  }
+
+  .app-shell__profile strong {
+    display: none;
+  }
+
+  .app-shell__notifications {
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    gap: 0;
+    font-size: 0;
+    padding: 0;
+  }
+
+  .app-shell__notification-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .app-shell__notifications b {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 20px;
+    height: 20px;
+    border: 2px solid #ffffff;
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .app-shell__notifications-panel {
+    position: fixed;
+    top: 62px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+
+  .app-shell__logout {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+}
