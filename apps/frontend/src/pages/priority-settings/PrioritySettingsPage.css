@@ -198,6 +198,10 @@
 
 .priority-preview {
   display: grid;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  position: sticky;
+  top: 18px;
   overflow: hidden;
 }
 
@@ -284,6 +288,12 @@
   .priority-page__header,
   .priority-layout {
     grid-template-columns: 1fr;
+  }
+
+  .priority-preview {
+    grid-column: auto;
+    grid-row: auto;
+    position: static;
   }
 
   .priority-page__header {

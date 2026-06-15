@@ -22,7 +22,7 @@ export function PrioritySettingsPage() {
     [currentUser, departments],
   );
   const availableDepartmentIds = useMemo(() => new Set(availableDepartments.map((department) => department.id)), [availableDepartments]);
-  const sampleApplications = applicationItems.filter((application) => {
+  const previewApplications = applicationItems.filter((application) => {
     const author = employees.find((user) => user.id === application.authorId);
 
     return availableDepartmentIds.has(author?.departmentId ?? application.departmentId);
@@ -38,7 +38,7 @@ export function PrioritySettingsPage() {
   };
   const [draftSettings, setDraftSettings] = useState<PrioritySettings | null>(null);
   const [departmentDrafts, setDepartmentDrafts] = useState<Record<string, { employeeApplicationDelayMinutes: number; deadlineNotificationRatio: number }>>({});
-  const [sampleApplicationId, setSampleApplicationId] = useState("");
+  const [previewApplicationId, setPreviewApplicationId] = useState("");
   const [notice, setNotice] = useState("");
   const displayedSettings = draftSettings ?? activeSettings;
 
@@ -56,10 +56,10 @@ export function PrioritySettingsPage() {
     );
   }, [availableDepartments]);
 
-  const sampleApplication = sampleApplications.find((application) => application.id === sampleApplicationId) ?? sampleApplications[0];
+  const previewApplication = previewApplications.find((application) => application.id === previewApplicationId) ?? previewApplications[0];
   const preview = useMemo(
-    () => (sampleApplication ? calculatePriorityPreview(sampleApplication, displayedSettings, employees) : null),
-    [displayedSettings, employees, sampleApplication],
+    () => (previewApplication ? calculatePriorityPreview(previewApplication, displayedSettings, employees) : null),
+    [displayedSettings, employees, previewApplication],
   );
   const hasChanges = Boolean(draftSettings) && JSON.stringify(draftSettings) !== JSON.stringify(activeSettings);
 
@@ -204,7 +204,7 @@ export function PrioritySettingsPage() {
             <label className="priority-setting priority-setting--deadline">
               <span>
                 <strong>Срок исполнения</strong>
-                <small>Чем меньше времени осталось до дедлайна, тем ближе фактор срока к 1 и тем сильнее он поднимает итоговый приоритет.</small>
+                <small>Чем меньше времени осталось до срока исполнения, тем ближе фактор срока к 1 и тем сильнее он поднимает итоговый приоритет.</small>
               </span>
               <input
                 type="range"
@@ -240,7 +240,7 @@ export function PrioritySettingsPage() {
         <article className="priority-settings priority-department-settings">
           <header>
             <h2>Настройки отдела</h2>
-            <span>Кулдаун назначения и момент уведомления о приближении дедлайна.</span>
+            <span>Пауза перед новым назначением и момент уведомления о приближении срока исполнения.</span>
           </header>
 
           <div className="priority-department-settings__list">
@@ -260,7 +260,7 @@ export function PrioritySettingsPage() {
                     <small>Обычный руководитель меняет только свой отдел, топ-менеджер — любой.</small>
                   </span>
                   <label>
-                    Кулдаун, минут
+                    Пауза, минут
                     <input
                       type="number"
                       min="0"
@@ -270,7 +270,7 @@ export function PrioritySettingsPage() {
                     />
                   </label>
                   <label>
-                    Порог дедлайна
+                    Порог уведомления
                     <input
                       type="number"
                       min="0"
@@ -298,9 +298,9 @@ export function PrioritySettingsPage() {
           <header>
             <h2>Предварительный расчет</h2>
             <label>
-              Тестовая заявка
-              <select value={sampleApplication?.id ?? ""} onChange={(event) => setSampleApplicationId(event.target.value)}>
-                {sampleApplications.map((application) => (
+              Заявка для расчета
+              <select value={previewApplication?.id ?? ""} onChange={(event) => setPreviewApplicationId(event.target.value)}>
+                {previewApplications.map((application) => (
                   <option value={application.id} key={application.id}>
                     ID {application.id} · {application.title}
                   </option>
