@@ -256,13 +256,14 @@
 .application-card__main {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(420px, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 22px;
   margin-top: 22px;
 }
 
 .application-card__workarea {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 14px;
   border: 1px solid #d8dee9;
@@ -272,19 +273,30 @@
   box-shadow: 0 12px 30px rgba(39, 52, 83, 0.06);
 }
 
+.application-card__workarea > * {
+  min-width: 0;
+}
+
 .application-card__section-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
-  justify-content: space-between;
+  min-width: 0;
   gap: 18px;
   color: #1f2a44;
   font-size: 16px;
 }
 
 .application-card__section-header span {
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
   color: #667085;
   font-size: 13px;
   font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: right;
+  white-space: normal;
 }
 
 .application-card__workarea > textarea {
@@ -354,6 +366,7 @@
 .application-card__attachments ul {
   display: flex;
   flex-wrap: wrap;
+  min-width: 0;
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -361,13 +374,20 @@
 }
 
 .application-card__attachments li {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid #d8dee9;
   border-radius: 999px;
   background: #ffffff;
   color: #42526b;
   font-size: 13px;
   font-weight: 700;
+  overflow-wrap: anywhere;
   padding: 6px 10px;
+}
+
+.application-card__attachments a {
+  overflow-wrap: anywhere;
 }
 
 .application-card__attachments p {
@@ -516,6 +536,7 @@
   position: sticky;
   top: 78px;
   display: grid;
+  min-width: 0;
   align-content: start;
   gap: 14px;
   max-height: calc(100vh - 96px);
@@ -524,6 +545,7 @@
 
 .application-card__params {
   display: grid;
+  min-width: 0;
   gap: 8px;
   border: 1px solid #d8dee9;
   border-radius: 10px;
@@ -536,7 +558,8 @@
 
 .application-card__params label {
   display: grid;
-  grid-template-columns: 96px 1fr;
+  grid-template-columns: 96px minmax(0, 1fr);
+  min-width: 0;
   align-items: center;
   gap: 8px;
 }
@@ -550,6 +573,7 @@
 }
 
 .application-info-box {
+  min-width: 0;
   border: 1px solid #d1d8e3;
   border-radius: 6px;
   overflow: hidden;
@@ -573,6 +597,7 @@
   margin: 0;
   color: #667085;
   line-height: 1.28;
+  overflow-wrap: anywhere;
   padding: 2px 10px;
 }
 
