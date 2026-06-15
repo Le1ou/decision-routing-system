@@ -279,6 +279,16 @@ def seed_database(db_operator) -> None:
             ("sup_tender",    "Создание заявок на тендер",                   "supply",    "hard"),
             ("sup_contract",  "Подготовка договоров",                        "supply",    "medium"),
             ("sup_replace",   "Замена позиции в поставке",                   "supply",    "easy"),
+            # «Прочее» — обязательный вид работ у КАЖДОГО отдела (см. ensure_other_work_type
+            # для отделов вне сидирования). Это обычный вид работ: матрица грейдов/должностей
+            # настраивается как у остальных. Сложность намеренно разная по отделам.
+            ("it_other",        "Прочее", "it",        "easy"),
+            ("oge_other",       "Прочее", "oge",       "medium"),
+            ("prod_other",      "Прочее", "prod",      "hard"),
+            ("okk_other",       "Прочее", "okk",       "easy"),
+            ("ogm_other",       "Прочее", "ogm",       "medium"),
+            ("wh_other",        "Прочее", "warehouse", "hard"),
+            ("sup_other",       "Прочее", "supply",    "easy"),
         )
         for tow_key, name, dep_key, complexity in work_types:
             row = conn.execute(
@@ -789,3 +799,49 @@ def _print_summary(app_ids, emp_ids, dep_ids, tow_ids, pg_ids):
     print(f"  Positions   : {len(pg_ids)}   → {list(pg_ids.values())}")
     print(f"  Applications: {len(app_ids)} → {list(app_ids.values())}")
     print("─────────────────────────────────────────────────────────────\n")
+
+
+def ensure_other_work_type(db_operator) -> None:
+    """Гарантировать у КАЖДОГО отдела вид работ «Прочее» (идемпотентно).
+
+    Запускается на старте после сидирования (и в релизном режиме без пересева). Для
+    отделов, у которых «Прочее» уже есть (сид расставляет их сам — с разной сложностью),
+    ничего не делает. Для остальных (например, отдел, заведённый вне сидирования) создаёт
+    «Прочее» сложности easy с матрицей допуска по умолчанию: все грейды, любая должность
+    (пустая матрица должностей). Дальше его можно настраивать как обычный вид работ.
+    """
+    with db_operator.pool.connection() as conn:
+        easy = conn.execute(
+            "SELECT complexity_value_id FROM public.complexity_value WHERE name = 'easy' LIMIT 1"
+        ).fetchone()
+        if not easy:
+            return
+        easy_id = easy[0]
+        grade_ids = [r[0] for r in conn.execute("SELECT grade_id FROM public.grade").fetchall()]
+        depts = conn.execute(
+            """
+            SELECT d.department_id
+            FROM public.department d
+            WHERE NOT EXISTS (
+                SELECT 1 FROM public.types_of_works t
+                WHERE t.department_id = d.department_id AND t.name = 'Прочее')
+            """
+        ).fetchall()
+        created = 0
+        for (dep_id,) in depts:
+            tow_id = conn.execute(
+                """
+                INSERT INTO public.types_of_works (name, complexity_value, department_id)
+                VALUES ('Прочее', %s, %s) RETURNING type_of_works_id
+                """,
+                (easy_id, dep_id),
+            ).fetchone()[0]
+            for gid in grade_ids:
+                conn.execute(
+                    "INSERT INTO public.type_of_work_to_grade (type_of_works_id, grade_id) VALUES (%s, %s)",
+                    (tow_id, gid),
+                )
+            # Должности не ограничиваем (пустая матрица type_of_work_to_post = любая должность).
+            created += 1
+        if created:
+            print(f"[seed] ensure_other_work_type → создано «Прочее» для {created} отдел(ов)")

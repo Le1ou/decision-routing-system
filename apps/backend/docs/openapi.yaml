@@ -1,0 +1,2331 @@
+openapi: 3.1.0
+info:
+  title: Decision Routing System API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /auth/me:
+    get:
+      tags:
+      - Auth
+      summary: Получить текущего пользователя
+      description: Возвращает пользователя, найденного через Basic Auth/Active Directory,
+        его роль, отдел, должность и права frontend.
+      operationId: get_current_user_auth_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+      security:
+      - HTTPBasic: []
+  /applications:
+    get:
+      tags:
+      - Applications
+      summary: Получить список заявок
+      description: Без query-параметров backend возвращает список заявок по умолчанию
+        для текущего пользователя. Видимость заявок определяется ролью пользователя
+        на backend.
+      operationId: list_applications_applications_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: priority
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Priority
+      - name: createdByMe
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Createdbyme
+      - name: assignedToMe
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Assignedtome
+      - name: delegatedToMyDepartment
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Delegatedtomydepartment
+      - name: executorName
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Executorname
+      - name: applicationId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Applicationid
+      - name: sortBy
+        in: query
+        required: false
+        schema:
+          type: string
+          default: priority
+          title: Sortby
+      - name: sortDirection
+        in: query
+        required: false
+        schema:
+          type: string
+          default: desc
+          title: Sortdirection
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: pageSize
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 50
+          title: Pagesize
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Applications
+      summary: Создать заявку
+      description: Создает заявку от имени текущего пользователя. Приоритет и статус
+        рассчитывает backend. Вложения загружаются отдельным запросом, если frontend
+        реально отправляет файлы.
+      operationId: create_application_applications_post
+      security:
+      - HTTPBasic: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApplicationPayload'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /applications/{applicationId}:
+    get:
+      tags:
+      - Applications
+      summary: Получить карточку заявки
+      operationId: get_application_applications__applicationId__get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationDetailResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /applications/{applicationId}/actions:
+    post:
+      tags:
+      - Applications
+      summary: Выполнить действие над заявкой
+      description: Единая точка для действий из карточки заявки. Backend проверяет
+        роль пользователя, текущий статус заявки и обязательность полей для конкретного
+        action.
+      operationId: application_action_applications__applicationId__actions_post
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationActionPayload'
+            examples:
+              assignExecutor:
+                summary: assignExecutor
+                value:
+                  action: assignExecutor
+                  executorId: '2'
+                  comment: Назначено вручную руководителем.
+              delegateExternal:
+                summary: delegateExternal
+                value:
+                  action: delegateExternal
+                  departmentId: oge
+                  comment: Работы относятся к ОГЭ.
+              complete:
+                summary: complete
+                value:
+                  action: complete
+                  resultText: Работы выполнены, доступ проверен.
+              changeWorkType:
+                summary: changeWorkType
+                value:
+                  action: changeWorkType
+                  workTypeId: '3'
+              cancel:
+                summary: cancel
+                value:
+                  action: cancel
+                  comment: Заявка создана ошибочно.
+              archive:
+                summary: archive
+                value:
+                  action: archive
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /applications/{applicationId}/attachments:
+    post:
+      tags:
+      - Applications
+      summary: Загрузить вложения к заявке
+      description: Frontend отправляет файлы на backend через multipart/form-data.
+        Backend проверяет права, загружает файлы в S3 и сохраняет метаданные вложений
+        в БД. Frontend не работает с S3 напрямую.
+      operationId: upload_attachments_applications__applicationId__attachments_post
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_attachments_applications__applicationId__attachments_post'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentUploadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /departments:
+    get:
+      tags:
+      - Directories
+      summary: Получить отделы
+      operationId: get_departments_departments_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentListResponse'
+      security:
+      - HTTPBasic: []
+  /employees:
+    get:
+      tags:
+      - Directories
+      summary: Получить сотрудников, подключенных к системе
+      description: Обычный руководитель получает сотрудников только своего отдела.
+        top-manager может получать сотрудников всех отделов и фильтровать по departmentId.
+      operationId: get_employees_employees_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: departmentId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Departmentid
+      - name: isActive
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Isactive
+      - name: role
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Role
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Directories
+      summary: Добавить AD-пользователя в систему
+      description: Не создает человека в AD. Backend создает локальную запись участия
+        в системе для уже существующего AD-пользователя. Роль выбирает руководитель,
+        должность приходит из AD. Обычный руководитель может добавлять сотрудников
+        только в свой отдел, top-manager — в любой.
+      operationId: add_employee_employees_post
+      security:
+      - HTTPBasic: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmployeePayload'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /employees/{employeeId}:
+    patch:
+      tags:
+      - Directories
+      summary: Изменить роль сотрудника или участие в распределении
+      description: Обычный руководитель может менять только сотрудников своего отдела,
+        top-manager — любого отдела.
+      operationId: update_employee_employees__employeeId__patch
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: employeeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Employeeid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEmployeePayload'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Directories
+      summary: Удалить сотрудника из системы
+      description: Удаляет локальную запись участия сотрудника в системе, не удаляя
+        пользователя из AD. Обычный руководитель может удалять только сотрудников
+        своего отдела, top-manager — любого отдела.
+      operationId: delete_employee_employees__employeeId__delete
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: employeeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Employeeid
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /departments/{departmentId}/delegation-settings:
+    patch:
+      tags:
+      - Directories
+      summary: Изменить подтверждение делегирования внутри отдела
+      description: Обычный руководитель меняет только свой отдел, top-manager — любой.
+      operationId: update_department_delegation_settings_departments__departmentId__delegation_settings_patch
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: departmentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Departmentid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepartmentDelegationSettingsPayload'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /departments/{departmentId}:
+    patch:
+      tags:
+      - Directories
+      summary: Изменить настройки отдела (кулдаун назначения, порог уведомления о
+        дедлайне)
+      description: Меняет empl_appl_delay (минуты) и/или deadline_notification (0..1).
+        Обычный руководитель — только свой отдел, top-manager — любой.
+      operationId: update_department_departments__departmentId__patch
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: departmentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Departmentid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepartmentPayload'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /positions:
+    get:
+      tags:
+      - Directories
+      summary: Получить должности
+      description: 'Должность сотрудника приходит из AD и не редактируется руководителем
+        вручную. Соответствует таблице post. gradeIds — грейды должности (матрица
+        post_grade): пересечение с allowedGradeIds вида работ даёт должности, которым
+        доступен вид работ.'
+      operationId: get_positions_positions_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PositionListResponse'
+      security:
+      - HTTPBasic: []
+  /grades:
+    get:
+      tags:
+      - Directories
+      summary: Получить грейды
+      description: Грейды используются только в матрице допустимости вида работ и
+        не являются должностью сотрудника. Соответствует таблице grade.
+      operationId: get_grades_grades_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GradeListResponse'
+      security:
+      - HTTPBasic: []
+  /ad/users:
+    get:
+      tags:
+      - Directories
+      summary: Найти пользователей AD для добавления в систему
+      description: Кандидаты из AD для добавления в систему. Требует право canManageEmployees
+        (руководитель/top-manager) — рядовым пользователям каталог AD не отдаётся.
+      operationId: get_ad_users_ad_users_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: query
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Query
+      - name: departmentId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Departmentid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdUserListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /work-types:
+    get:
+      tags:
+      - Directories
+      summary: Получить виды работ
+      description: Все авторизованные пользователи видят виды работ всех отделов и
+        могут фильтровать их по departmentId.
+      operationId: get_work_types_all_work_types_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: departmentId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Departmentid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkTypeListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Directories
+      summary: Создать вид работ
+      description: Обычный руководитель создает виды работ только для своего отдела,
+        top-manager — для любого.
+      operationId: create_work_type_work_types_post
+      security:
+      - HTTPBasic: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkTypePayload'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /work-types/{workTypeId}:
+    patch:
+      tags:
+      - Directories
+      summary: Изменить вид работ, сложность или допустимые грейды
+      description: Обычный руководитель может менять виды работ только своего отдела,
+        top-manager — любого.
+      operationId: update_work_type_work_types__workTypeId__patch
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: workTypeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Worktypeid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkTypePayload'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Directories
+      summary: Удалить вид работ
+      description: Обычный руководитель может удалять виды работ только своего отдела,
+        top-manager — любого.
+      operationId: delete_work_type_work_types__workTypeId__delete
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: workTypeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Worktypeid
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /priority-settings:
+    get:
+      tags:
+      - Priority
+      summary: Получить коэффициенты расчета приоритета
+      description: Обычный руководитель получает настройки только своего отдела в
+        режиме чтения. top-manager получает все отделы и может редактировать. Дополнительно
+        отдаёт read-only параметры срочности (urgent) для предпросмотра на фронте.
+      operationId: get_priority_settings_priority_settings_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrioritySettingsResponse'
+      security:
+      - HTTPBasic: []
+    put:
+      tags:
+      - Priority
+      summary: Сохранить коэффициенты расчета приоритета
+      description: Доступно только top-manager. Ответ повторяет сохранённое и, как
+        и GET, содержит read-only блок urgent (тип фронта един для GET и PUT).
+      operationId: update_priority_settings_priority_settings_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrioritySettingsModel'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrioritySettingsResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBasic: []
+  /notifications:
+    get:
+      tags:
+      - Notifications
+      summary: Получить уведомления текущего пользователя
+      description: 'Текущий контракт рассчитан на pull-модель: backend создает уведомления
+        при событиях системы, frontend периодически запрашивает список или обновляет
+        его после действий пользователя.'
+      operationId: get_notifications_notifications_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: unreadOnly
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Unreadonly
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationsResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /notifications/{notificationId}/read:
+    post:
+      tags:
+      - Notifications
+      summary: Отметить уведомление прочитанным
+      operationId: mark_notification_read_notifications__notificationId__read_post
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: notificationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Notificationid
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /notifications/read-all:
+    post:
+      tags:
+      - Notifications
+      summary: Отметить все уведомления текущего пользователя прочитанными
+      operationId: mark_all_notifications_read_notifications_read_all_post
+      responses:
+        '204':
+          description: Successful Response
+      security:
+      - HTTPBasic: []
+  /reports/applications:
+    get:
+      tags:
+      - Reports
+      summary: Сформировать предварительный отчет по заявкам
+      description: Возвращает JSON-данные для предпросмотра отчета. Фильтры передаются
+        query-параметрами, потому что формирование отчета не меняет состояние backend.
+      operationId: report_applications_reports_applications_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      - name: finishedFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finishedfrom
+      - name: finishedTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finishedto
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: executorId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Executorid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationReportResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /reports/applications.xls:
+    get:
+      tags:
+      - Reports
+      summary: Скачать Excel-отчет по заявкам
+      description: 'Возвращает готовый Excel-файл (xlsx) по тем же фильтрам, что и
+        предпросмотр отчета. Генерация файла выполняется на backend; имя и тип файла
+        — в заголовках ответа (Content-Disposition: applications.xlsx). Путь сохранён
+        как .xls для совместимости.'
+      operationId: report_applications_xls_reports_applications_xls_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      - name: finishedFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finishedfrom
+      - name: finishedTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finishedto
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: executorId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Executorid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /analytics/applications:
+    get:
+      tags:
+      - Analytics
+      summary: Аналитика по заявкам
+      operationId: analytics_applications_analytics_applications_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /analytics/executors:
+    get:
+      tags:
+      - Analytics
+      summary: Аналитика по исполнителям
+      operationId: analytics_executors_analytics_executors_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /analytics/work-types:
+    get:
+      tags:
+      - Analytics
+      summary: Аналитика по видам работ
+      operationId: analytics_work_types_analytics_work_types_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /analytics/departments:
+    get:
+      tags:
+      - Analytics
+      summary: Аналитика по отделам
+      operationId: analytics_departments_analytics_departments_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: createdFrom
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdfrom
+      - name: createdTo
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdto
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /applications/{applicationId}/messages:
+    get:
+      tags:
+      - Chat
+      summary: Получить сообщения чата заявки
+      description: Сообщения чата заявки + число непрочитанных для текущего пользователя.
+        afterId — вернуть только сообщения с message_id больше указанного (инкрементальная
+        дозагрузка для опроса). Читать может любой, кто видит карточку.
+      operationId: get_messages_applications__applicationId__messages_get
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      - name: afterId
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          title: Afterid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessagesResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Chat
+      summary: Отправить сообщение в чат заявки
+      description: Писать могут автор, назначенный исполнитель и руководитель-в-scope.
+        После завершения/отклонения заявки чат read-only (409).
+      operationId: post_message_applications__applicationId__messages_post
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChatMessagePayload'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /applications/{applicationId}/messages/read:
+    post:
+      tags:
+      - Chat
+      summary: Отметить чат заявки прочитанным
+      description: Двигает маркер прочитанности текущего пользователя на текущий момент.
+      operationId: mark_chat_read_applications__applicationId__messages_read_post
+      security:
+      - HTTPBasic: []
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Applicationid
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AdUserListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/AdUserOut'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: AdUserListResponse
+    AdUserOut:
+      properties:
+        adUserId:
+          type: string
+          title: Aduserid
+        login:
+          type: string
+          title: Login
+        fullName:
+          type: string
+          title: Fullname
+        departmentId:
+          type: string
+          title: Departmentid
+        postName:
+          type: string
+          title: Postname
+      type: object
+      required:
+      - adUserId
+      - login
+      - fullName
+      - departmentId
+      - postName
+      title: AdUserOut
+    ApplicationActionPayload:
+      properties:
+        action:
+          type: string
+          title: Action
+        executorId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Executorid
+        departmentId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Departmentid
+        workTypeId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Worktypeid
+        comment:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Comment
+        complexity:
+          anyOf:
+          - type: string
+            enum:
+            - easy
+            - medium
+            - hard
+          - type: 'null'
+          title: Complexity
+        resultText:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resulttext
+        description:
+          anyOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+          title: Description
+      type: object
+      required:
+      - action
+      title: ApplicationActionPayload
+    ApplicationDetailOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          type: string
+          title: Status
+        priority:
+          type: string
+          title: Priority
+        createdAt:
+          type: string
+          title: Createdat
+        finishedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finishedat
+        description:
+          type: string
+          title: Description
+        departmentId:
+          type: string
+          title: Departmentid
+        workTypeId:
+          type: string
+          title: Worktypeid
+        authorId:
+          type: string
+          title: Authorid
+        isUnfinished:
+          type: boolean
+          title: Isunfinished
+        deadlineAt:
+          type: string
+          title: Deadlineat
+        updatedAt:
+          type: string
+          title: Updatedat
+        executorId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Executorid
+        previousExecutorId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Previousexecutorid
+        managerComment:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Managercomment
+        resultText:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resulttext
+        archivedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Archivedat
+        delegationId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Delegationid
+        delegatedFromDepartmentId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Delegatedfromdepartmentid
+        delegatedToDepartmentId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Delegatedtodepartmentid
+        assignedComplexity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assignedcomplexity
+        assignedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assignedat
+        startedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Startedat
+        closedById:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Closedbyid
+        availableActions:
+          items:
+            type: string
+          type: array
+          title: Availableactions
+        attachments:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Attachments
+        delegation:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Delegation
+        workType:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Worktype
+        author:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Author
+        executor:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Executor
+        previousExecutor:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Previousexecutor
+        delegatedByEmployee:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Delegatedbyemployee
+        department:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Department
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - priority
+      - createdAt
+      - description
+      - departmentId
+      - workTypeId
+      - authorId
+      - isUnfinished
+      - deadlineAt
+      - updatedAt
+      title: ApplicationDetailOut
+    ApplicationDetailResponse:
+      properties:
+        application:
+          $ref: '#/components/schemas/ApplicationDetailOut'
+      type: object
+      required:
+      - application
+      title: ApplicationDetailResponse
+    ApplicationListItemOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          type: string
+          title: Status
+        priority:
+          type: string
+          title: Priority
+        createdAt:
+          type: string
+          title: Createdat
+        finishedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finishedat
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - priority
+      - createdAt
+      title: ApplicationListItemOut
+    ApplicationListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ApplicationListItemOut'
+          type: array
+          title: Items
+        pagination:
+          $ref: '#/components/schemas/PaginationOut'
+      type: object
+      required:
+      - items
+      - pagination
+      title: ApplicationListResponse
+    ApplicationReportResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ApplicationReportRowOut'
+          type: array
+          title: Items
+        summary:
+          $ref: '#/components/schemas/ReportSummaryOut'
+      type: object
+      required:
+      - items
+      - summary
+      title: ApplicationReportResponse
+    ApplicationReportRowOut:
+      properties:
+        applicationId:
+          type: string
+          title: Applicationid
+        name:
+          type: string
+          title: Name
+        status:
+          type: string
+          title: Status
+        priority:
+          type: string
+          title: Priority
+        createdAt:
+          type: string
+          title: Createdat
+        executorId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Executorid
+        executorName:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Executorname
+        departmentName:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Departmentname
+        workTypeName:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Worktypename
+        startedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Startedat
+        finishedAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finishedat
+      type: object
+      required:
+      - applicationId
+      - name
+      - status
+      - priority
+      - createdAt
+      title: ApplicationReportRowOut
+    AttachmentUploadResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/IdResponse'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: AttachmentUploadResponse
+    Body_upload_attachments_applications__applicationId__attachments_post:
+      properties:
+        files:
+          items:
+            type: string
+            contentMediaType: application/octet-stream
+          type: array
+          title: Files
+      type: object
+      required:
+      - files
+      title: Body_upload_attachments_applications__applicationId__attachments_post
+    ChatMessageOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        applicationId:
+          type: string
+          title: Applicationid
+        authorId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorid
+        text:
+          type: string
+          title: Text
+        createdAt:
+          type: string
+          title: Createdat
+        author:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Author
+      type: object
+      required:
+      - id
+      - applicationId
+      - text
+      - createdAt
+      title: ChatMessageOut
+    ChatMessagesResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ChatMessageOut'
+          type: array
+          title: Items
+        unreadCount:
+          type: integer
+          minimum: 0.0
+          title: Unreadcount
+      type: object
+      required:
+      - items
+      - unreadCount
+      title: ChatMessagesResponse
+    CreateApplicationPayload:
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: Name
+        departmentId:
+          type: string
+          title: Departmentid
+        workTypeId:
+          type: string
+          title: Worktypeid
+        deadlineAt:
+          type: string
+          format: date-time
+          title: Deadlineat
+        description:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Description
+      type: object
+      required:
+      - name
+      - departmentId
+      - workTypeId
+      - deadlineAt
+      - description
+      title: CreateApplicationPayload
+      example:
+        deadlineAt: '2026-06-15T12:00:00Z'
+        departmentId: '1'
+        description: Необходимо настроить новый сервер отдела.
+        name: Настройка сервера
+        workTypeId: '2'
+    CreateChatMessagePayload:
+      properties:
+        text:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Text
+      type: object
+      required:
+      - text
+      title: CreateChatMessagePayload
+    CreateEmployeePayload:
+      properties:
+        adUserId:
+          type: string
+          title: Aduserid
+        role:
+          type: string
+          enum:
+          - author
+          - executor
+          - manager
+          - top-manager
+          title: Role
+        isActive:
+          type: boolean
+          title: Isactive
+      type: object
+      required:
+      - adUserId
+      - role
+      - isActive
+      title: CreateEmployeePayload
+    CreateWorkTypePayload:
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: Name
+        departmentId:
+          type: string
+          title: Departmentid
+        complexity:
+          type: string
+          enum:
+          - easy
+          - medium
+          - hard
+          title: Complexity
+        allowedGradeIds:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          title: Allowedgradeids
+        allowedPositionIds:
+          items:
+            type: string
+          type: array
+          title: Allowedpositionids
+      type: object
+      required:
+      - name
+      - departmentId
+      - complexity
+      - allowedGradeIds
+      title: CreateWorkTypePayload
+    CurrentUserOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        login:
+          type: string
+          title: Login
+        fullName:
+          type: string
+          title: Fullname
+        roles:
+          items:
+            type: string
+          type: array
+          title: Roles
+        departmentId:
+          type: string
+          title: Departmentid
+        postName:
+          type: string
+          title: Postname
+        positionId:
+          type: string
+          title: Positionid
+        isActive:
+          type: boolean
+          title: Isactive
+      type: object
+      required:
+      - id
+      - login
+      - fullName
+      - roles
+      - departmentId
+      - postName
+      - positionId
+      - isActive
+      title: CurrentUserOut
+      description: Authenticated user (/auth/me). Carries the full set of system roles.
+    CurrentUserResponse:
+      properties:
+        user:
+          $ref: '#/components/schemas/CurrentUserOut'
+        permissions:
+          $ref: '#/components/schemas/UserPermissionsOut'
+      type: object
+      required:
+      - user
+      - permissions
+      title: CurrentUserResponse
+    DepartmentListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/DepartmentOut'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: DepartmentListResponse
+    DepartmentOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        value:
+          type: number
+          title: Value
+        delegatedToSameDepartment:
+          type: boolean
+          title: Delegatedtosamedepartment
+        employeeApplicationDelayMinutes:
+          type: integer
+          title: Employeeapplicationdelayminutes
+        deadlineNotificationRatio:
+          type: number
+          title: Deadlinenotificationratio
+      type: object
+      required:
+      - id
+      - name
+      - value
+      - delegatedToSameDepartment
+      - employeeApplicationDelayMinutes
+      - deadlineNotificationRatio
+      title: DepartmentOut
+    EmployeeListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/UserOut'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: EmployeeListResponse
+    GradeListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/GradeOut'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: GradeListResponse
+    GradeOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - id
+      - name
+      title: GradeOut
+      description: A grade used only in the work-type allowed-grades matrix.
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    IdResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+      type: object
+      required:
+      - id
+      title: IdResponse
+    NotificationOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        text:
+          type: string
+          title: Text
+        applicationId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Applicationid
+        createdAt:
+          type: string
+          title: Createdat
+        isRead:
+          type: boolean
+          title: Isread
+      type: object
+      required:
+      - id
+      - text
+      - createdAt
+      - isRead
+      title: NotificationOut
+    NotificationsResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/NotificationOut'
+          type: array
+          title: Items
+        unreadCount:
+          type: integer
+          minimum: 0.0
+          title: Unreadcount
+      type: object
+      required:
+      - items
+      - unreadCount
+      title: NotificationsResponse
+    PaginationOut:
+      properties:
+        page:
+          type: integer
+          minimum: 1.0
+          title: Page
+        pageSize:
+          type: integer
+          minimum: 1.0
+          title: Pagesize
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+      type: object
+      required:
+      - page
+      - pageSize
+      - total
+      title: PaginationOut
+    PositionListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/PositionOut'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: PositionListResponse
+    PositionOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        gradeIds:
+          items:
+            type: string
+          type: array
+          title: Gradeids
+      type: object
+      required:
+      - id
+      - name
+      title: PositionOut
+      description: 'A job title (должность) coming from AD; maps to the `post` table.
+
+
+        gradeIds — грейды, доступные этой должности (матрица post_grade). Пересечение
+        с
+
+        workType.allowedGradeIds даёт должности, которые могут приступать к виду работ.'
+    PrioritySettingsModel:
+      properties:
+        department:
+          additionalProperties:
+            type: number
+          type: object
+          title: Department
+        managerAuthor:
+          additionalProperties:
+            type: number
+          type: object
+          title: Managerauthor
+        deadline:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Deadline
+      type: object
+      required:
+      - department
+      - managerAuthor
+      - deadline
+      title: PrioritySettingsModel
+    PrioritySettingsResponse:
+      properties:
+        department:
+          additionalProperties:
+            type: number
+          type: object
+          title: Department
+        managerAuthor:
+          additionalProperties:
+            type: number
+          type: object
+          title: Managerauthor
+        deadline:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Deadline
+        urgent:
+          $ref: '#/components/schemas/UrgentSettingsOut'
+      type: object
+      required:
+      - department
+      - managerAuthor
+      - deadline
+      - urgent
+      title: PrioritySettingsResponse
+    ReportSummaryOut:
+      properties:
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+        completed:
+          type: integer
+          minimum: 0.0
+          title: Completed
+        inProgressOrAssigned:
+          type: integer
+          minimum: 0.0
+          title: Inprogressorassigned
+      type: object
+      required:
+      - total
+      - completed
+      - inProgressOrAssigned
+      title: ReportSummaryOut
+    UpdateDepartmentDelegationSettingsPayload:
+      properties:
+        delegatedToSameDepartment:
+          type: boolean
+          title: Delegatedtosamedepartment
+      type: object
+      required:
+      - delegatedToSameDepartment
+      title: UpdateDepartmentDelegationSettingsPayload
+    UpdateDepartmentPayload:
+      properties:
+        employeeApplicationDelayMinutes:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Employeeapplicationdelayminutes
+        deadlineNotificationRatio:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Deadlinenotificationratio
+      type: object
+      title: UpdateDepartmentPayload
+    UpdateEmployeePayload:
+      properties:
+        role:
+          anyOf:
+          - type: string
+            enum:
+            - author
+            - executor
+            - manager
+            - top-manager
+          - type: 'null'
+          title: Role
+        isActive:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Isactive
+      type: object
+      title: UpdateEmployeePayload
+    UpdateWorkTypePayload:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            minLength: 1
+          - type: 'null'
+          title: Name
+        departmentId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Departmentid
+        complexity:
+          anyOf:
+          - type: string
+            enum:
+            - easy
+            - medium
+            - hard
+          - type: 'null'
+          title: Complexity
+        allowedGradeIds:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Allowedgradeids
+        allowedPositionIds:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Allowedpositionids
+      type: object
+      title: UpdateWorkTypePayload
+    UrgentSettingsOut:
+      properties:
+        thresholdHours:
+          type: number
+          title: Thresholdhours
+        bonus:
+          type: number
+          title: Bonus
+      type: object
+      required:
+      - thresholdHours
+      - bonus
+      title: UrgentSettingsOut
+      description: Параметры бонуса срочности (read-only, из config.json → priority).
+    UserOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        login:
+          type: string
+          title: Login
+        fullName:
+          type: string
+          title: Fullname
+        role:
+          type: string
+          title: Role
+        departmentId:
+          type: string
+          title: Departmentid
+        postName:
+          type: string
+          title: Postname
+        positionId:
+          type: string
+          title: Positionid
+        isActive:
+          type: boolean
+          title: Isactive
+      type: object
+      required:
+      - id
+      - login
+      - fullName
+      - role
+      - departmentId
+      - postName
+      - positionId
+      - isActive
+      title: UserOut
+      description: Directory employee. Per the contract this carries a single `role`.
+    UserPermissionsOut:
+      properties:
+        canManageEmployees:
+          type: boolean
+          title: Canmanageemployees
+        canManageWorkTypes:
+          type: boolean
+          title: Canmanageworktypes
+        canManagePrioritySettings:
+          type: boolean
+          title: Canmanageprioritysettings
+        canViewReports:
+          type: boolean
+          title: Canviewreports
+      type: object
+      required:
+      - canManageEmployees
+      - canManageWorkTypes
+      - canManagePrioritySettings
+      - canViewReports
+      title: UserPermissionsOut
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WorkTypeListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/WorkTypeOut'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: WorkTypeListResponse
+    WorkTypeOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        departmentId:
+          type: string
+          title: Departmentid
+        complexity:
+          type: string
+          enum:
+          - easy
+          - medium
+          - hard
+          title: Complexity
+        allowedGradeIds:
+          items:
+            type: string
+          type: array
+          title: Allowedgradeids
+        allowedPositionIds:
+          items:
+            type: string
+          type: array
+          title: Allowedpositionids
+      type: object
+      required:
+      - id
+      - name
+      - departmentId
+      - complexity
+      - allowedGradeIds
+      title: WorkTypeOut
+  securitySchemes:
+    HTTPBasic:
+      type: http
+      scheme: basic
+tags:
+- name: Auth
+  description: Текущий пользователь
+- name: Applications
+  description: Производственные заявки
+- name: Directories
+  description: Отделы, сотрудники, должности и виды работ
+- name: Priority
+  description: Настройки расчета приоритета
+- name: Notifications
+  description: Уведомления текущего пользователя
+- name: Reports
+  description: Отчеты и XLS-выгрузка
+- name: Analytics
+  description: Статистика по заявкам, исполнителям, видам работ и отделам
+- name: Chat
+  description: Чат заявки между автором, исполнителем и руководителем

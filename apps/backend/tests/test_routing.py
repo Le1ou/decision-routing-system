@@ -23,6 +23,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:3000")
 MANAGER = ("orlova_m", "Manager!1")
 DEP_IT = 1
 WT_IT_EASY = 1     # допускает middle
+WT_IT_MEDIUM = 2   # it_fix: допускает middle И senior
 WT_IT_HARD = 3     # требует senior/lead — middle не подходит
 EXEC1, EXEC2 = 2, 3   # ivanov, petrov (оба middle, ИТ)
 
@@ -500,5 +501,84 @@ def test_cooldown_blocks_recently_finished(sysdb):
             assert _app(app)["status"] == "new"  # emp2 на кулдауне, emp3 занят → ждёт
         finally:
             _set_dept_delay(sysdb, DEP_IT, 30)   # вернуть как в seed
+    finally:
+        _reactivate_executors(sysdb, others)
+
+
+# ── Перераспределение на более высокий грейд при росте сложности (§ задача 3) ────
+
+def _set_executor_senior(sysdb, emp_id):
+    """Сделать исполнителя senior, сохранив должность, допустимую для medium-видов работ
+    («Старший инженер»). Возвращает прежний post_grade_id для восстановления."""
+    with sysdb.pool.connection() as c:
+        old = c.execute("SELECT post_grade_id FROM public.employee WHERE employee_id=%s",
+                        (emp_id,)).fetchone()[0]
+        pg = c.execute(
+            "SELECT pg.post_grade_id FROM public.post_grade pg "
+            "JOIN public.grade g ON g.grade_id=pg.grade_grade_id "
+            "JOIN public.post p ON p.post_id=pg.post_post_id "
+            "WHERE g.name='senior' AND p.name='Старший инженер' LIMIT 1").fetchone()[0]
+        c.execute("UPDATE public.employee SET post_grade_id=%s WHERE employee_id=%s", (pg, emp_id))
+    return old
+
+
+def test_internal_delegation_complexity_increase_reroutes_to_higher_grade(sysdb):
+    """Если при внутреннем делегировании исполнитель ПОВЫШАЕТ сложность, при возврате в
+    `new` заявка должна уйти исполнителю строго более высокого грейда (а не «минимально
+    способному»): ivanov(middle) делегирует → заявку берёт petrov(senior)."""
+    _set_internal_confirmation(False)        # ИТ: делегирование без подтверждения → сразу new
+    _free_executor(sysdb, EXEC1)
+    _free_executor(sysdb, EXEC2)
+    others = _deactivate_other_it_executors(sysdb)
+    old_pg = _set_executor_senior(sysdb, EXEC2)   # petrov → senior; ivanov остаётся middle
+    try:
+        app = _create_app(DEP_IT, WT_IT_MEDIUM)
+        _assign(app, EXEC1)                       # ivanov (middle) — текущий исполнитель
+        r = _session.post(f"{BASE_URL}/applications/{app}/actions", auth=EXEC1_AUTH,
+                          json={"action": "delegateInternal", "complexity": "hard"})
+        assert r.status_code == 204, r.text
+        assert _app(app)["status"] == "new"
+        with sysdb.pool.connection() as c:
+            floor = c.execute("SELECT min_grade_exclusive_id FROM public.application "
+                              "WHERE application_id=%s", (int(app),)).fetchone()[0]
+        assert floor is not None                  # граница грейда выставлена
+
+        _demote_other_new_apps(sysdb, app)
+        _set_priority_score(sysdb, app, 9.0)
+        routing_module.run_routing(sysdb)
+
+        a = _app(app)
+        assert a["status"] == "assigned"
+        assert a["executorId"] == str(EXEC2), "заявка должна уйти исполнителю выше грейдом"
+        with sysdb.pool.connection() as c:
+            floor2 = c.execute("SELECT min_grade_exclusive_id FROM public.application "
+                               "WHERE application_id=%s", (int(app),)).fetchone()[0]
+        assert floor2 is None                     # граница сброшена при назначении
+    finally:
+        with sysdb.pool.connection() as c:
+            c.execute("UPDATE public.employee SET post_grade_id=%s WHERE employee_id=%s",
+                      (old_pg, EXEC2))
+        _reactivate_executors(sysdb, others)
+
+
+def test_internal_delegation_no_higher_grade_stays_new(sysdb):
+    """Сложность повышена, но в отделе нет исполнителя выше грейдом прежнего (оба middle) →
+    заявка не назначается, остаётся в `new` (далее — эскалация руководителю)."""
+    _set_internal_confirmation(False)
+    _free_executor(sysdb, EXEC1)
+    _free_executor(sysdb, EXEC2)
+    others = _deactivate_other_it_executors(sysdb)   # оба оставшихся исполнителя — middle
+    try:
+        app = _create_app(DEP_IT, WT_IT_MEDIUM)
+        _assign(app, EXEC1)
+        r = _session.post(f"{BASE_URL}/applications/{app}/actions", auth=EXEC1_AUTH,
+                          json={"action": "delegateInternal", "complexity": "hard"})
+        assert r.status_code == 204, r.text
+
+        _demote_other_new_apps(sysdb, app)
+        _set_priority_score(sysdb, app, 9.0)
+        routing_module.run_routing(sysdb)
+
+        assert _app(app)["status"] == "new"          # выше грейдом некому → ждёт
     finally:
         _reactivate_executors(sysdb, others)

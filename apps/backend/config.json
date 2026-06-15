@@ -15,7 +15,10 @@
     "restore_from_backup": false
   },
   "applications": {
-    "rejected_visible_days": 7
+    "rejected_visible_days": 7,
+    "attach_max_files": 5,
+    "attach_max_file_mb": 10,
+    "attach_max_total_mb": 30
   },
   "priority": {
     "urgent_deadline_threshold_hours": 24,

@@ -35,6 +35,13 @@ REJECTED_VISIBLE_DAYS = int(
     (configData.get("applications") or {}).get("rejected_visible_days", 7)
 )
 
+# Серверные лимиты загрузки вложений (раньше эти ограничения были только на фронте и
+# обходились прямым запросом к API). Настраиваются в config.json → applications.
+_attach_cfg = configData.get("applications") or {}
+ATTACH_MAX_FILES       = int(_attach_cfg.get("attach_max_files", 5))
+ATTACH_MAX_FILE_BYTES  = int(_attach_cfg.get("attach_max_file_mb", 10)) * 1024 * 1024
+ATTACH_MAX_TOTAL_BYTES = int(_attach_cfg.get("attach_max_total_mb", 30)) * 1024 * 1024
+
 # ─────────────────────────── Business logic helpers ──────────────────
 
 def _available_actions(app_row: dict, user_role: str, *,
@@ -746,9 +753,11 @@ def application_action(
                             (now, int(applicationId))
                         )
                     set_status("assigned")
+                    # Ручное назначение — переопределение руководителя: сбрасываем границу
+                    # грейда для перераспределения (если она была выставлена делегированием).
                     cur.execute(
                         "UPDATE public.application SET executor_at = %s, is_unfinished = false, "
-                        "updated_at = %s WHERE application_id = %s",
+                        "min_grade_exclusive_id = NULL, updated_at = %s WHERE application_id = %s",
                         (now, now, int(applicationId))
                     )
                     exec_role = cur.execute(
@@ -904,6 +913,29 @@ def application_action(
                             (int(payload.workTypeId), int(applicationId))
                         )
 
+                    # Если сложность ВОЗРОСЛА — при перераспределении заявку должен получить
+                    # исполнитель строго более высокого грейда, чем у текущего (прежнего).
+                    # Сохраняем grade_id прежнего исполнителя как исключающую границу; иначе
+                    # сбрасываем (обычное перераспределение). Граница «потребляется» при
+                    # следующем назначении (авто/ручном).
+                    grade_floor = None
+                    if cur_idx is not None and new_value > cur_idx:
+                        g = cur.execute(
+                            """
+                            SELECT g.grade_id
+                            FROM public.employee e
+                            JOIN public.post_grade pg ON pg.post_grade_id = e.post_grade_id
+                            JOIN public.grade g ON g.grade_id = pg.grade_grade_id
+                            WHERE e.employee_id = %s
+                            """,
+                            (emp_id,),
+                        ).fetchone()
+                        grade_floor = g["grade_id"] if g else None
+                    cur.execute(
+                        "UPDATE public.application SET min_grade_exclusive_id = %s WHERE application_id = %s",
+                        (grade_floor, int(applicationId))
+                    )
+
                     dep_row = cur.execute(
                         "SELECT delegated_to_same_dep FROM public.department WHERE department_id = %s",
                         (app_row["department_id"],)
@@ -993,8 +1025,13 @@ def application_action(
                     is_internal = bool(deleg and deleg.get("delegated_from") == deleg.get("delegated_to"))
                     if is_internal:
                         # Manager refused the internal re-addressing → the executor keeps
-                        # it. Restore the working status (inProgress if work had started).
+                        # it. Restore the working status (inProgress if work had started)
+                        # и сбрасываем границу грейда (перераспределения не будет).
                         set_status("inProgress" if app_row.get("work_at") else "assigned")
+                        cur.execute(
+                            "UPDATE public.application SET min_grade_exclusive_id = NULL WHERE application_id = %s",
+                            (int(applicationId),)
+                        )
                     else:
                         set_status("new")
                     cur.execute(
@@ -1036,19 +1073,14 @@ def application_action(
                     )
 
                 # Persist a free-text comment to the actor's column (overwrite).
-                # Managers/top-managers write manager_comment; executors write
-                # executor_comment. (`complete` carries its note in resultText.)
-                if payload.comment:
-                    if user_role in ("manager", "top-manager"):
-                        cur.execute(
-                            "UPDATE public.application SET manager_comment = %s, updated_at = %s WHERE application_id = %s",
-                            (payload.comment, now, int(applicationId))
-                        )
-                    elif user_role == "executor":
-                        cur.execute(
-                            "UPDATE public.application SET executor_comment = %s, updated_at = %s WHERE application_id = %s",
-                            (payload.comment, now, int(applicationId))
-                        )
+                # Только руководитель/топ-менеджер пишет manager_comment. Комментарий
+                # исполнителя больше не сохраняется (executor_comment выведен из контракта);
+                # свою заметку исполнитель оставляет в resultText при `complete`.
+                if payload.comment and user_role in ("manager", "top-manager"):
+                    cur.execute(
+                        "UPDATE public.application SET manager_comment = %s, updated_at = %s WHERE application_id = %s",
+                        (payload.comment, now, int(applicationId))
+                    )
 
         # Transaction committed — fire management-event notifications (best-effort,
         # via the system connection; never breaks the already-applied action).
@@ -1119,10 +1151,33 @@ async def upload_attachments(
                     raise HTTPException(status_code=403,
                                         detail="Not permitted to attach files to this application")
 
+                # Серверная валидация лимитов загрузки (раньше только на фронте — обходились
+                # прямым запросом к API). Сначала читаем и проверяем ВСЕ файлы и только потом
+                # грузим в S3, чтобы при превышении лимита не оставить частичную загрузку.
+                if len(files) > ATTACH_MAX_FILES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Можно загрузить не более {ATTACH_MAX_FILES} файлов за один запрос")
+
+                prepared = []   # (filename, content_type, content)
+                total = 0
                 for f in files:
                     content = await f.read()
-                    filename     = f.filename or "upload"
-                    content_type = f.content_type or "application/octet-stream"
+                    if len(content) > ATTACH_MAX_FILE_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"Файл «{f.filename or 'без имени'}» превышает лимит "
+                                   f"{ATTACH_MAX_FILE_BYTES // (1024 * 1024)} МБ на файл")
+                    total += len(content)
+                    if total > ATTACH_MAX_TOTAL_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"Суммарный размер вложений превышает лимит "
+                                   f"{ATTACH_MAX_TOTAL_BYTES // (1024 * 1024)} МБ за один запрос")
+                    prepared.append((f.filename or "upload",
+                                     f.content_type or "application/octet-stream", content))
+
+                for filename, content_type, content in prepared:
                     s3_key = f"applications/{applicationId}/{uuid.uuid4()}-{filename}"
 
                     s3.put_object(
