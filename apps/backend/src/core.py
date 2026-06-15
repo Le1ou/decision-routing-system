@@ -22,7 +22,7 @@ from src import backup_module
 from src.application_module import (
     ActiveDirectoryAuth, PgDbOperator, configData,
 )
-from src.seed import seed_database, seed_demo_notifications
+from src.seed import ensure_other_work_type, seed_database, seed_demo_notifications
 
 
 def _bool_setting(env_name: str, cfg_value, default: bool) -> bool:
@@ -232,6 +232,12 @@ with DBController.pool.connection() as _conn:
     # application could not be auto-assigned (нет свободных подходящих исполнителей;
     # для критичной — и некого вытеснять); сбрасывается при назначении.
     _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS escalation_notified boolean")
+    # Нижняя граница грейда для перераспределения (исключающая): если при внутреннем
+    # делегировании исполнитель ПОВЫСИЛ сложность заявки, при возврате в `new` маршрутизация
+    # обязана отдать её исполнителю строго БОЛЕЕ высокого грейда, чем у прежнего (хранится
+    # grade_id прежнего исполнителя). NULL = обычное перераспределение. Сбрасывается при
+    # назначении (авто и ручном).
+    _conn.execute("ALTER TABLE public.application ADD COLUMN IF NOT EXISTS min_grade_exclusive_id integer")
     # Status-transition journal — written by the management subsystem on every
     # status change; the analytics subsystem reads it.
     _conn.execute("""
@@ -305,6 +311,10 @@ else:
     # логин ↔ employee_id и не могли бы войти после рестарта.
     _applied = backup_module.load_directory_snapshot(_ad_directory())
     print(f"[startup] seeding skipped; directory snapshot applied to {_applied} login(s).")
+# Гарантируем у каждого отдела вид работ «Прочее» (идемпотентно). Под профилем сидирования
+# отделы уже получают «Прочее» в seed_database; здесь добиваем отделы, заведённые вне сида,
+# и релизный режим без пересева.
+ensure_other_work_type(DBController)
 # Pre-create a Postgres login role for every onboarded user that has a known
 # password. In mock mode that's everyone; in AD mode (where AD owns the password)
 # entries may have none — those roles are created lazily on first login instead.

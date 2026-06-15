@@ -17,6 +17,12 @@ routing_module.py — подсистема принятия решений и м
   сбрасывается при назначении (вручную флаг не сбрасывается — повторное уведомление
   придёт только после нового цикла назначение → возврат в `new`).
 
+Если заявка вернулась в `new` после внутреннего делегирования с ПОВЫШЕНИЕМ сложности
+(application.min_grade_exclusive_id задан = grade_id прежнего исполнителя), кандидатами
+(и жертвами вытеснения) считаются только исполнители СТРОГО более высокого грейда —
+чтобы заявку, которую прежний не вытянул, взял более способный. Если таких нет — обычная
+эскалация руководителю. Граница сбрасывается при назначении (авто/ручном).
+
 «Свободный подходящий исполнитель»: активен, роль executor, его отдел = отделу заявки,
 грейд входит в матрицу вида работ (type_of_work_to_grade) И должность входит в матрицу
 должностей (type_of_work_to_post; ПУСТАЯ матрица должностей = любая должность —
@@ -91,12 +97,16 @@ def _journal(cur, application_id, from_sid, to_sid, reason, at):
 
 
 def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, allowed_posts,
-                     delay_minutes, now):
+                     delay_minutes, now, min_grade_exclusive=None):
     """Свободные подходящие исполнители, отсортированные «минимально способный» вперёд.
 
     Допуск по ДВУМ осям: грейд сотрудника ∈ allowed_grades И (если allowed_posts не
     пуст) его должность ∈ allowed_posts. Должность и грейд берутся из пары post_grade
-    сотрудника."""
+    сотрудника.
+
+    `min_grade_exclusive` (необязательно) — заявка после внутреннего делегирования с
+    повышением сложности: годятся только исполнители СТРОГО более высокого грейда
+    (grade_id > min_grade_exclusive), чем у прежнего исполнителя."""
     if not allowed_grades:
         return []
     rows = cur.execute(
@@ -115,6 +125,7 @@ def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, allowed_posts,
           AND e.department_id = %(dept)s
           AND e.role_id = %(exec)s
           AND g.grade_id = ANY(%(allowed)s)
+          AND (%(min_grade)s::int IS NULL OR g.grade_id > %(min_grade)s)
           AND (%(posts)s::int[] = '{}' OR pg.post_post_id = ANY(%(posts)s))
           AND NOT EXISTS (
               SELECT 1 FROM public.employee_to_application eta2
@@ -131,7 +142,7 @@ def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, allowed_posts,
                          AND d2.delegated_from = d2.delegated_to)))
         """,
         {"exec": exec_role_id, "dept": dept_id, "allowed": list(allowed_grades),
-         "posts": list(allowed_posts or [])},
+         "posts": list(allowed_posts or []), "min_grade": min_grade_exclusive},
     ).fetchall()
 
     cutoff = now - timedelta(minutes=delay_minutes or 0)
@@ -143,9 +154,11 @@ def _free_candidates(cur, exec_role_id, dept_id, allowed_grades, allowed_posts,
     return free
 
 
-def _evictable(cur, exec_role_id, dept_id, allowed_grades, allowed_posts):
+def _evictable(cur, exec_role_id, dept_id, allowed_grades, allowed_posts,
+               min_grade_exclusive=None):
     """Подходящий исполнитель с активной НЕ критичной заявкой наименьшего приоритета.
-    «Подходящий» — по тем же двум осям, что и свободный кандидат (грейд + должность)."""
+    «Подходящий» — по тем же двум осям, что и свободный кандидат (грейд + должность);
+    при заданном `min_grade_exclusive` — только строго более высокий грейд."""
     if not allowed_grades:
         return None
     return cur.execute(
@@ -161,19 +174,21 @@ def _evictable(cur, exec_role_id, dept_id, allowed_grades, allowed_posts):
         JOIN public.priority p ON p.priority_id = a.priority_id
         WHERE e.is_active = true AND e.department_id = %(dept)s AND e.role_id = %(exec)s
           AND g.grade_id = ANY(%(allowed)s) AND p.name <> 'critical'
+          AND (%(min_grade)s::int IS NULL OR g.grade_id > %(min_grade)s)
           AND (%(posts)s::int[] = '{}' OR pg.post_post_id = ANY(%(posts)s))
         ORDER BY a.priority_score ASC NULLS FIRST
         LIMIT 1
         """,
         {"exec": exec_role_id, "dept": dept_id, "allowed": list(allowed_grades),
-         "posts": list(allowed_posts or [])},
+         "posts": list(allowed_posts or []), "min_grade": min_grade_exclusive},
     ).fetchone()
 
 
 def _assign(cur, exec_role_id, application_id, from_sid, assigned_sid, employee_id, now, reason):
     cur.execute(
         "UPDATE public.application SET status_id = %s, executor_at = %s, updated_at = %s, "
-        "is_unfinished = false, escalation_notified = false WHERE application_id = %s",
+        "is_unfinished = false, escalation_notified = false, min_grade_exclusive_id = NULL "
+        "WHERE application_id = %s",
         (assigned_sid, now, now, int(application_id)),
     )
     cur.execute(
@@ -215,7 +230,8 @@ def run_routing(db, now=None, only_application_id=None) -> dict:
             apps = cur.execute(
                 f"""
                 SELECT a.application_id, a.name, a.department_id, a.types_of_works,
-                       a.priority_score, a.escalation_notified, p.name AS priority_name
+                       a.priority_score, a.escalation_notified, a.min_grade_exclusive_id,
+                       p.name AS priority_name
                 FROM public.application a
                 JOIN public.status s ON s.status_id = a.status_id AND s.name = 'new'
                 LEFT JOIN public.priority p ON p.priority_id = a.priority_id
@@ -234,9 +250,13 @@ def run_routing(db, now=None, only_application_id=None) -> dict:
                 allowed = _allowed_grade_ids(cur, wt)
                 allowed_posts = _allowed_post_ids(cur, wt)   # пусто = любая должность
                 is_critical = (app["priority_name"] == "critical")
+                # Граница грейда после внутреннего делегирования с повышением сложности:
+                # отдать заявку только исполнителю строго более высокого грейда.
+                min_grade = app["min_grade_exclusive_id"]
 
                 free = _free_candidates(cur, exec_role, dept, allowed, allowed_posts,
-                                        _dept_delay_minutes(cur, dept), now) if allowed else []
+                                        _dept_delay_minutes(cur, dept), now,
+                                        min_grade_exclusive=min_grade) if allowed else []
                 if free:
                     emp = free[0]["employee_id"]
                     _assign(cur, exec_role, app_id, new_sid, assigned_sid, emp, now, "auto_assign")
@@ -246,7 +266,8 @@ def run_routing(db, now=None, only_application_id=None) -> dict:
 
                 if is_critical and allowed:
                     # Критичная: вытеснение наименее приоритетной НЕ критичной заявки.
-                    victim = _evictable(cur, exec_role, dept, allowed, allowed_posts)
+                    victim = _evictable(cur, exec_role, dept, allowed, allowed_posts,
+                                        min_grade_exclusive=min_grade)
                     if victim:
                         emp = victim["employee_id"]
                         cur.execute(

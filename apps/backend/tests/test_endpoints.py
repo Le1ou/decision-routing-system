@@ -684,6 +684,14 @@ class TestGetWorkTypes:
     def test_no_auth_401(self):
         assert get("/work-types").status_code == 401
 
+    def test_every_department_has_other_work_type(self):
+        # «Прочее» гарантируется у каждого отдела (сид + идемпотентный ensure на старте).
+        depts = {d["id"] for d in get("/departments", MANAGER).json()["items"]}
+        assert depts
+        items = get("/work-types", MANAGER).json()["items"]
+        with_other = {w["departmentId"] for w in items if w["name"] == "Прочее"}
+        assert depts <= with_other, f"отделы без «Прочее»: {depts - with_other}"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /work-types
@@ -1235,11 +1243,14 @@ class TestActionComments:
         assert d["managerComment"] == "Назначил вручную"
         assert d.get("executorComment") is None
 
-    def test_executor_comment_persisted_on_reject(self):
+    def test_executor_comment_no_longer_persisted_on_reject(self):
+        # Комментарий исполнителя выведен из контракта: действие проходит, но executorComment
+        # больше не сохраняется и не отдаётся в карточке (остаются managerComment / resultText).
         app_id = _create_assigned("2")
         assert _act(app_id, EXECUTOR, action="reject", comment="Не моя зона").status_code == 204
         d = _detail(app_id, MANAGER)
-        assert d["executorComment"] == "Не моя зона"
+        assert "executorComment" not in d
+        assert d["status"] == "new"
 
     def test_result_text_persisted_on_complete(self):
         app_id = _create_assigned("2")
@@ -1275,7 +1286,7 @@ class TestDelegateInternal:
         assert d["previousExecutorId"] == "2"
         assert d["previousExecutor"]["id"] == "2"
         assert d["previousExecutor"]["fullName"]
-        assert d["executorComment"] == "Слишком сложно"   # executor action comment
+        assert "executorComment" not in d   # комментарий исполнителя выведен из контракта
 
     def test_complexity_cannot_be_lowered_400(self):
         _set_internal_confirmation(DEP_IT, False)
@@ -1522,6 +1533,37 @@ class TestAttachmentContent:
         r = post("/applications/999999/attachments", MANAGER,
                  files={"files": ("a.txt", b"x", "text/plain")})
         assert r.status_code == 404
+
+    # ── Серверные лимиты загрузки (раньше были только на фронте) ────────────────
+    def test_too_many_files_413(self):
+        app_id = int(_make_app(AUTHOR))
+        files = [("files", (f"f{i}.txt", b"x", "text/plain")) for i in range(6)]
+        r = post(f"/applications/{app_id}/attachments", AUTHOR, files=files)
+        assert r.status_code == 413, r.text
+        assert _detail(app_id, AUTHOR)["attachments"] == []   # частичной загрузки нет
+
+    def test_single_file_over_10mb_413(self):
+        app_id = int(_make_app(AUTHOR))
+        big = b"x" * (10 * 1024 * 1024 + 1)
+        r = post(f"/applications/{app_id}/attachments", AUTHOR,
+                 files={"files": ("big.bin", big, "application/octet-stream")})
+        assert r.status_code == 413, r.text
+        assert _detail(app_id, AUTHOR)["attachments"] == []
+
+    def test_total_over_30mb_413(self):
+        app_id = int(_make_app(AUTHOR))
+        chunk = b"x" * (9 * 1024 * 1024)   # 9 МБ × 4 = 36 МБ > 30 МБ (каждый < 10 МБ)
+        files = [("files", (f"f{i}.bin", chunk, "application/octet-stream")) for i in range(4)]
+        r = post(f"/applications/{app_id}/attachments", AUTHOR, files=files)
+        assert r.status_code == 413, r.text
+        assert _detail(app_id, AUTHOR)["attachments"] == []
+
+    def test_five_files_within_limits_201(self):
+        app_id = int(_make_app(AUTHOR))
+        files = [("files", (f"f{i}.txt", b"hello", "text/plain")) for i in range(5)]
+        r = post(f"/applications/{app_id}/attachments", AUTHOR, files=files)
+        assert r.status_code == 201, r.text
+        assert len(r.json()["items"]) == 5
 
 
 # ─────────────────────────────────────────────────────────────────────────────

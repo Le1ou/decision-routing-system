@@ -297,7 +297,9 @@ class ApplicationDetailOut(ApplicationListItemOut):
     updatedAt: str                = Field(validation_alias="updated_at")
     executorId: Optional[CoercedStr]  = Field(default=None, validation_alias="executor_id")
     previousExecutorId: Optional[CoercedStr] = Field(default=None, validation_alias="previous_executor_id")
-    executorComment: Optional[str]   = Field(default=None, validation_alias="executor_comment")
+    # executorComment удалён из контракта (комментарий исполнителя больше не нужен —
+    # остаются комментарий руководителя и финальный resultText). Колонка
+    # application.executor_comment сохранена в БД для исторических данных.
     managerComment: Optional[str]    = Field(default=None, validation_alias="manager_comment")
     resultText: Optional[str]        = Field(default=None, validation_alias="result_text")
     archivedAt: Optional[str]        = Field(default=None, validation_alias="archived_at")
