@@ -164,7 +164,12 @@ def _evictable(cur, exec_role_id, dept_id, allowed_grades, allowed_posts,
     return cur.execute(
         """
         SELECT e.employee_id, a.application_id AS victim_app, a.status_id AS victim_status_id,
-               a.name AS victim_name, a.priority_score
+               a.name AS victim_name, a.priority_score,
+               (SELECT auth.employee_id
+                  FROM public.employee_to_application auth
+                  JOIN public.role ar ON ar.role_id = auth.role_id AND ar.name = 'author'
+                 WHERE auth.application_id = a.application_id
+                 LIMIT 1) AS victim_author_id
         FROM public.employee e
         JOIN public.post_grade pg ON pg.post_grade_id = e.post_grade_id
         JOIN public.grade g ON g.grade_id = pg.grade_grade_id
@@ -260,7 +265,9 @@ def run_routing(db, now=None, only_application_id=None) -> dict:
                 if free:
                     emp = free[0]["employee_id"]
                     _assign(cur, exec_role, app_id, new_sid, assigned_sid, emp, now, "auto_assign")
-                    notify(cur, f"Вам назначена заявка: «{app['name']}».", emp, app_id, now)
+                    msg = (f"Вам назначена критичная заявка: «{app['name']}»." if is_critical
+                           else f"Вам назначена заявка: «{app['name']}».")
+                    notify(cur, msg, emp, app_id, now)
                     assigned += 1
                     continue
 
@@ -281,6 +288,14 @@ def run_routing(db, now=None, only_application_id=None) -> dict:
                         notify(cur, f"Вам назначена критичная заявка: «{app['name']}».", emp, app_id, now)
                         notify(cur, f"Заявка «{victim['victim_name']}» снята с вас под критичную и "
                                     f"возвращена в «Новый».", emp, victim["victim_app"], now)
+                        # Автор вытесненной заявки: его заявка временно вернулась в очередь
+                        # и будет переназначена при освобождении исполнителя.
+                        author_id = victim["victim_author_id"]
+                        if author_id is not None and author_id != emp:
+                            notify(cur, f"Заявка «{victim['victim_name']}» временно возвращена в "
+                                        f"«Новый» из-за поступившей критичной заявки и будет "
+                                        f"переназначена при освобождении исполнителя.",
+                                   author_id, victim["victim_app"], now)
                         for mid in dept_manager_ids(cur, dept):
                             notify(cur, f"Критичная заявка «{app['name']}» вытеснила заявку "
                                         f"«{victim['victim_name']}».", mid, app_id, now)

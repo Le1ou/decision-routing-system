@@ -165,3 +165,9 @@ env/
 skills.md
 plan.md
 backend-notes.md
+
+# Presentation files (slide decks and their working artifacts)
+*.pptx
+*.ppt
+~$*.pptx
+.pptx_work/
