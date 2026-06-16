@@ -183,6 +183,40 @@ def test_critical_evicts_lowest_priority(sysdb):
         _reactivate_executors(sysdb, others)
 
 
+def test_critical_evict_notifies_victim_author(sysdb):
+    """Автор вытесненной критичной заявкой заявки получает уведомление о её
+    возврате в «Новый» (см. ветку вытеснения в run_routing)."""
+    _free_executor(sysdb, EXEC1)
+    _free_executor(sysdb, EXEC2)
+    others = _deactivate_other_it_executors(sysdb)
+    try:
+        app_hi = _busy_executor(EXEC1)
+        app_lo = _busy_executor(EXEC2)          # эта заявка будет вытеснена
+        _set_priority_score(sysdb, app_hi, 0.7)
+        _set_priority_score(sysdb, app_lo, 0.1)
+
+        crit = _create_app(DEP_IT, WT_IT_EASY)
+        _demote_other_new_apps(sysdb, crit)
+        _set_critical(sysdb, crit)
+
+        routing_module.run_routing(sysdb)
+
+        assert _app(app_lo)["status"] == "new"   # заявка вытеснена в «Новый»
+
+        with sysdb.pool.connection() as c:
+            author_notifs = c.execute(
+                "SELECT COUNT(*) FROM public.notification n "
+                "JOIN public.employee_to_application eta "
+                "  ON eta.application_id = n.application_id AND eta.employee_id = n.employee_id "
+                "JOIN public.role r ON r.role_id = eta.role_id AND r.name = 'author' "
+                "WHERE n.application_id = %s",
+                (int(app_lo),),
+            ).fetchone()[0]
+        assert author_notifs >= 1                 # автор вытесненной заявки уведомлён
+    finally:
+        _reactivate_executors(sysdb, others)
+
+
 def test_critical_on_create_is_routed_immediately(sysdb):
     """Критичная при создании заявка распределяется СРАЗУ (без вызова run_routing и без
     ожидания фонового тика) — через немедленный триггер в create_application."""
