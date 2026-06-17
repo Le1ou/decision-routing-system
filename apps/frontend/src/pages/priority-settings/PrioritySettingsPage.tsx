@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { useApplicationsStore } from "@app/providers/ApplicationsProvider";
 import { useAuth } from "@app/providers/AuthProvider";
@@ -27,34 +27,26 @@ export function PrioritySettingsPage() {
 
     return availableDepartmentIds.has(author?.departmentId ?? application.departmentId);
   });
-  const activeSettings = prioritySettings ?? {
+  const fallbackSettings: PrioritySettings = {
     department: Object.fromEntries(departments.map((department) => [department.id, department.value])),
     deadline: 0,
     managerAuthor: Object.fromEntries(departments.map((department) => [department.id, 0])),
+    urgentBonus: 0.5,
     urgent: {
       thresholdHours: 24,
       bonus: 0.5,
     },
   };
+  const activeSettings = prioritySettings
+    ? {
+      ...prioritySettings,
+      urgentBonus: prioritySettings.urgentBonus ?? prioritySettings.urgent.bonus,
+    }
+    : fallbackSettings;
   const [draftSettings, setDraftSettings] = useState<PrioritySettings | null>(null);
-  const [departmentDrafts, setDepartmentDrafts] = useState<Record<string, { employeeApplicationDelayMinutes: number; deadlineNotificationRatio: number }>>({});
   const [previewApplicationId, setPreviewApplicationId] = useState("");
   const [notice, setNotice] = useState("");
   const displayedSettings = draftSettings ?? activeSettings;
-
-  useEffect(() => {
-    setDepartmentDrafts(
-      Object.fromEntries(
-        availableDepartments.map((department) => [
-          department.id,
-          {
-            employeeApplicationDelayMinutes: department.employeeApplicationDelayMinutes,
-            deadlineNotificationRatio: department.deadlineNotificationRatio,
-          },
-        ]),
-      ),
-    );
-  }, [availableDepartments]);
 
   const previewApplication = previewApplications.find((application) => application.id === previewApplicationId) ?? previewApplications[0];
   const preview = useMemo(
@@ -77,44 +69,24 @@ export function PrioritySettingsPage() {
     setNotice("");
   };
 
-  const updateDepartmentDraft = (
-    departmentId: string,
-    key: "employeeApplicationDelayMinutes" | "deadlineNotificationRatio",
-    value: number,
-  ) => {
-    const nextValue = key === "deadlineNotificationRatio"
-      ? Math.min(1, Math.max(0, value))
-      : Math.max(0, Math.round(value));
-
-    setDepartmentDrafts((current) => ({
-      ...current,
-      [departmentId]: {
-        employeeApplicationDelayMinutes: current[departmentId]?.employeeApplicationDelayMinutes ?? 0,
-        deadlineNotificationRatio: current[departmentId]?.deadlineNotificationRatio ?? 0,
-        [key]: nextValue,
-      },
-    }));
-    setNotice("");
-  };
-
-  const saveDepartmentSettings = async (departmentId: string) => {
-    if (!credentials || !departmentDrafts[departmentId]) {
-      return;
-    }
-
-    try {
-      await apiClient.updateDepartmentSettings(credentials, departmentId, departmentDrafts[departmentId]);
-      await refresh();
-      setNotice("Настройки отдела сохранены.");
-    } catch {
-      setNotice("Не удалось сохранить настройки отдела.");
-    }
-  };
-
   const updateDeadlineSetting = (value: number) => {
     const nextValue = Math.min(1, Math.max(0, value));
 
     setDraftSettings((current) => ({ ...(current ?? activeSettings), deadline: nextValue }));
+    setNotice("");
+  };
+
+  const updateUrgencySetting = (value: number) => {
+    const nextValue = Math.min(1, Math.max(0, value));
+
+    setDraftSettings((current) => ({
+      ...(current ?? activeSettings),
+      urgentBonus: nextValue,
+      urgent: {
+        ...(current ?? activeSettings).urgent,
+        bonus: nextValue,
+      },
+    }));
     setNotice("");
   };
 
@@ -125,7 +97,8 @@ export function PrioritySettingsPage() {
 
     const totalWeight = Object.values(draftSettings.department).reduce((sum, value) => sum + value, 0) +
       Object.values(draftSettings.managerAuthor).reduce((sum, value) => sum + value, 0) +
-      draftSettings.deadline;
+      draftSettings.deadline +
+      draftSettings.urgentBonus;
 
     if (totalWeight <= 0) {
       setNotice("Хотя бы один коэффициент должен быть больше 0.");
@@ -164,20 +137,20 @@ export function PrioritySettingsPage() {
         <article className="priority-settings">
           <header>
             <h2>Коэффициенты</h2>
-            <span>Формула: приоритет = коэффициент отдела автора * коэффициент срока исполнения + коэффициент руководителя-автора + бонус срочности</span>
+            <span>Формула: приоритет = K отдела автора * K срока исполнения + K руководителя-автора + K срочности</span>
           </header>
 
           <div className="priority-settings__list">
             <div className="priority-setting priority-setting--head" role="row">
               <span>Отдел</span>
-              <span>Коэффициент отдела</span>
-              <span>Коэффициент руководителя отдела</span>
+              <span>K отдела</span>
+              <span>K руководителя отдела</span>
             </div>
             {availableDepartments.map((department) => (
               <div className="priority-setting priority-setting--department" key={department.id}>
                 <span>
                   <strong>{department.name}</strong>
-                  <small>Коэффициенты применяются к заявкам авторов из этого отдела.</small>
+                  <small>K применяются к заявкам авторов из этого отдела.</small>
                 </span>
                 <input
                   type="number"
@@ -186,7 +159,7 @@ export function PrioritySettingsPage() {
                   step="0.05"
                   value={displayedSettings.department[department.id] ?? 0}
                   onChange={(event) => updateDepartmentSetting(department.id, "department", Number(event.target.value))}
-                  aria-label={`Коэффициент отдела ${department.name}`}
+                  aria-label={`K отдела ${department.name}`}
                   disabled={!canEdit}
                 />
                 <input
@@ -196,7 +169,7 @@ export function PrioritySettingsPage() {
                   step="0.05"
                   value={displayedSettings.managerAuthor[department.id] ?? 0}
                   onChange={(event) => updateDepartmentSetting(department.id, "managerAuthor", Number(event.target.value))}
-                  aria-label={`Коэффициент руководителя отдела ${department.name}`}
+                  aria-label={`K руководителя отдела ${department.name}`}
                   disabled={!canEdit}
                 />
               </div>
@@ -222,7 +195,32 @@ export function PrioritySettingsPage() {
                 step="0.05"
                 value={displayedSettings.deadline}
                 onChange={(event) => updateDeadlineSetting(Number(event.target.value))}
-                aria-label="Коэффициент срока исполнения"
+                aria-label="K срока исполнения"
+                disabled={!canEdit}
+              />
+            </label>
+            <label className="priority-setting priority-setting--urgent">
+              <span>
+                <strong>K срочности</strong>
+                <small>Добавляется к приоритету, если срок исполнения заявки попадает в порог срочности.</small>
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={displayedSettings.urgentBonus}
+                onChange={(event) => updateUrgencySetting(Number(event.target.value))}
+                disabled={!canEdit}
+              />
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                value={displayedSettings.urgentBonus}
+                onChange={(event) => updateUrgencySetting(Number(event.target.value))}
+                aria-label="K срочности"
                 disabled={!canEdit}
               />
             </label>
@@ -235,63 +233,6 @@ export function PrioritySettingsPage() {
               Подтвердить
             </Button>
           </footer>
-        </article>
-
-        <article className="priority-settings priority-department-settings">
-          <header>
-            <h2>Настройки отдела</h2>
-            <span>Пауза перед новым назначением и момент уведомления о приближении срока исполнения.</span>
-          </header>
-
-          <div className="priority-department-settings__list">
-            {availableDepartments.map((department) => {
-              const draft = departmentDrafts[department.id] ?? {
-                employeeApplicationDelayMinutes: department.employeeApplicationDelayMinutes,
-                deadlineNotificationRatio: department.deadlineNotificationRatio,
-              };
-              const hasDepartmentChanges =
-                draft.employeeApplicationDelayMinutes !== department.employeeApplicationDelayMinutes ||
-                draft.deadlineNotificationRatio !== department.deadlineNotificationRatio;
-
-              return (
-                <div className="priority-department-setting" key={department.id}>
-                  <span>
-                    <strong>{department.name}</strong>
-                    <small>Обычный руководитель меняет только свой отдел, топ-менеджер — любой.</small>
-                  </span>
-                  <label>
-                    Пауза, минут
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={draft.employeeApplicationDelayMinutes}
-                      onChange={(event) => updateDepartmentDraft(department.id, "employeeApplicationDelayMinutes", Number(event.target.value))}
-                    />
-                  </label>
-                  <label>
-                    Порог уведомления
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={draft.deadlineNotificationRatio}
-                      onChange={(event) => updateDepartmentDraft(department.id, "deadlineNotificationRatio", Number(event.target.value))}
-                    />
-                  </label>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => void saveDepartmentSettings(department.id)}
-                    disabled={!hasDepartmentChanges}
-                  >
-                    Сохранить
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
         </article>
 
         <aside className="priority-preview">
@@ -340,7 +281,7 @@ function calculatePriorityPreview(application: Application, settings: PrioritySe
   const departmentId = author?.departmentId ?? application.departmentId;
   const isManagerAuthor = author?.role === "manager" || author?.role === "top-manager";
   const deadlinePressure = getDeadlinePressure(application.createdAt, application.deadlineAt);
-  const urgentBonus = getUrgentBonus(application.createdAt, application.deadlineAt, settings.urgent);
+  const urgentBonus = getUrgencyCoeff(application.createdAt, application.deadlineAt, settings.urgent, settings.urgentBonus);
   const factorValues = {
     department: settings.department[departmentId] ?? 0,
     deadline: deadlinePressure * settings.deadline,
@@ -358,7 +299,7 @@ function calculatePriorityPreview(application: Application, settings: PrioritySe
       { label: "Отдел", value: factorValues.department },
       { label: "Срок", value: factorValues.deadline },
       { label: "Автор-руководитель", value: factorValues.managerAuthor },
-      { label: "Бонус срочности", value: factorValues.urgent },
+      { label: "K срочности", value: factorValues.urgent },
     ],
   };
 }
@@ -375,7 +316,7 @@ function getDeadlinePressure(createdAt: string, deadlineAt: string) {
   return clamp((now - created) / (deadline - created), 0, 1);
 }
 
-function getUrgentBonus(createdAt: string, deadlineAt: string, urgent: PrioritySettings["urgent"]) {
+function getUrgencyCoeff(createdAt: string, deadlineAt: string, urgent: PrioritySettings["urgent"], urgentBonus: number) {
   const created = new Date(createdAt).getTime();
   const deadline = new Date(deadlineAt).getTime();
   const thresholdMs = urgent.thresholdHours * 60 * 60 * 1000;
@@ -384,7 +325,7 @@ function getUrgentBonus(createdAt: string, deadlineAt: string, urgent: PriorityS
     return 0;
   }
 
-  return urgent.bonus;
+  return urgentBonus;
 }
 
 function getPriorityByScore(score: number): ApplicationPriority {
