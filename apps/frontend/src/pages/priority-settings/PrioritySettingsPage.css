@@ -81,51 +81,6 @@
   display: grid;
 }
 
-.priority-department-settings {
-  grid-column: 1;
-}
-
-.priority-department-settings__list {
-  display: grid;
-}
-
-.priority-department-setting {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) 140px 140px auto;
-  gap: 14px;
-  align-items: end;
-  border-bottom: 1px solid #edf0f5;
-  padding: 16px 18px;
-}
-
-.priority-department-setting > span,
-.priority-department-setting label {
-  display: grid;
-  gap: 6px;
-}
-
-.priority-department-setting strong {
-  color: #1f2a44;
-}
-
-.priority-department-setting small,
-.priority-department-setting label {
-  color: #667085;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.priority-department-setting input {
-  width: 100%;
-  min-height: 38px;
-  border: 1px solid #c8d0dc;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #1f2a44;
-  padding: 0 10px;
-}
-
 .priority-settings__actions {
   display: flex;
   justify-content: flex-end;
@@ -156,7 +111,8 @@
   grid-template-columns: minmax(220px, 1fr) 120px 170px;
 }
 
-.priority-setting--deadline {
+.priority-setting--deadline,
+.priority-setting--urgent {
   background: #fbfcfe;
 }
 
@@ -199,7 +155,6 @@
 .priority-preview {
   display: grid;
   grid-column: 2;
-  grid-row: 1 / span 2;
   position: sticky;
   top: 18px;
   overflow: hidden;
@@ -311,8 +266,4 @@
     gap: 10px;
   }
 
-  .priority-department-setting {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
 }
