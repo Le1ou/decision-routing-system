@@ -6,13 +6,20 @@
   },
   "events": {
     "enabled": true,
-    "tick_seconds": 30
+    "tick_seconds": 5
   },
   "startup": {
     "seed_on_start": true,
     "seed_profile": "demo",
     "backup_on_shutdown": true,
     "restore_from_backup": false
+  },
+  "worktime": {
+    "start": "09:00",
+    "end": "19:00",
+    "saturday_working": false,
+    "sunday_working": false,
+    "timezone_offset_hours": 3
   },
   "applications": {
     "rejected_visible_days": 7,

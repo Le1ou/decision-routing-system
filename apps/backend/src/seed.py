@@ -613,60 +613,80 @@ def seed_database(db_operator) -> None:
         print(f"[seed] delegated back-filled → {app_ids['delegated_1']}, {app_ids['delegated_2']}")
 
         # ── 14. notification (multiple per employee now allowed) ──────────────
+        # minutes_ago: датируем каждое уведомление моментом соответствующего события
+        # заявки (назначение/завершение/делегирование), а не «5 минут назад» скопом —
+        # иначе на открытии все уведомления выглядят свежей лавиной с одной меткой.
         notifications = (
-            # employee_key,  text,                                                          app_key,          is_read
+            # employee_key,  text,                                                       app_key,          is_read, minutes_ago
             ("executor1",
              "Вам назначена новая заявка: «Установить рабочую станцию в бухгалтерии».",
-             "assigned_it",      False),
+             "assigned_it",      False,   120),
             ("executor3",
              "Вам назначена новая заявка: «Плановый осмотр серверной комнаты».",
-             "assigned_oge",     False),
+             "assigned_oge",     False,   300),
             ("manager",
              "Заявка «Развёртывание GitLab на внутреннем сервере» выполнена.",
-             "completed_2",      True),
+             "completed_2",      True,  10080),
             ("author2",
              "Заявка «Установить игровую мышь на рабочий ПК» отклонена.",
-             "rejected_1",       True),
+             "rejected_1",       True,   1440),
             ("executor4",
              "Вам назначена заявка: «Аварийный ремонт гидравлического пресса».",
-             "in_progress_prod", False),
+             "in_progress_prod", False,   360),
             ("executor2",
              "Вам назначена заявка: «Настройка сервера для отдела разработки».",
-             "in_progress_net",  True),
+             "in_progress_net",  True,   1440),
             ("author1",
              "Заявка «Устранение обесточивания склада» передана в ОГЭ.",
-             "delegated_1",      False),
+             "delegated_1",      False,  2880),
             # second notification for executor1 — несколько уведомлений на сотрудника
             ("executor1",
              "Заявка «Замена жёсткого диска на SSD» отмечена выполненной.",
-             "completed_1",      True),
+             "completed_1",      True,   4320),
             ("manager",
              "Ваша заявка «Закупка и установка лицензий ПО» создана и ожидает распределения.",
-             "orlova_new",       False),
+             "orlova_new",       False,    60),
             ("author2",
              "Заявка «Замена комплектующих конвейера» передана в ОГМ.",
-             "delegated_2",      False),
+             "delegated_2",      False,  1440),
         )
-        for emp_key, text, app_key, is_read in notifications:
+        for emp_key, text, app_key, is_read, minutes_ago in notifications:
             conn.execute(
                 """
                 INSERT INTO public.notification
                     (text, created_at, employee_id, is_read, application_id)
                 VALUES (%s, %s, %s, %s, %s)
                 """,
-                (text, now - timedelta(minutes=5), emp_ids[emp_key],
+                (text, now - timedelta(minutes=minutes_ago), emp_ids[emp_key],
                  is_read, app_ids[app_key])
             )
         print("[seed] notification → done")
 
-        # ── 14b. application_message (демо-чат заявки) ────────────────────────
-        # Небольшая переписка автор ↔ исполнитель по назначенной ИТ-заявке, чтобы у
-        # фронта сразу было что показать. author2=Фёдоров (автор), executor1=Иванов.
+        # ── 14b. application_message (демо-чат заявок) ────────────────────────
+        # Небольшие переписки автор ↔ исполнитель по нескольким заявкам, чтобы у
+        # фронта сразу было что показать. minutes_ago — насколько давно отправлено;
+        # значения подобраны логично: ПОСЛЕ назначения исполнителя (executor_at) и по
+        # возрастанию времени (убыванию minutes_ago) внутри каждой заявки.
+        #   assigned_it     — author2=Фёдоров, executor1=Иванов (executor_at = 2 ч назад)
+        #   in_progress_net — author2=Фёдоров, executor2=Петров (executor_at = 1 д, work_at = 3 ч)
+        #   assigned_oge    — author1,          executor3        (executor_at = 5 ч назад)
+        # Каждый диалог — ПЛОТНЫЙ кластер (реплики в пределах ~20 минут): иначе под
+        # demo-профилем перенос в рабочее окно мог раскидать ответы по разным дням и
+        # переписка читалась нелогично («ответ на следующий день»).
         chat = (
-            ("assigned_it", "author2",   "Иван, когда сможете подойти к рабочему месту Смирновой?", 95),
-            ("assigned_it", "executor1", "Здравствуйте! Подойду сегодня после обеда, ~14:00.",        80),
-            ("assigned_it", "author2",   "Отлично, спасибо. ПК и коробка с 1С уже на месте.",         70),
-            ("assigned_it", "executor1", "Принял, выезжаю.",                                          20),
+            ("assigned_it", "author2",   "Иван, когда сможете подойти к рабочему месту Смирновой?", 70),
+            ("assigned_it", "executor1", "Здравствуйте! Подойду в течение часа.",                    63),
+            ("assigned_it", "author2",   "Отлично, спасибо. ПК и коробка с 1С уже на месте.",         56),
+            ("assigned_it", "executor1", "Принял, выезжаю.",                                          50),
+
+            ("in_progress_net", "author2",   "Подскажите, на каком этапе настройка сервера?",        44),
+            ("in_progress_net", "executor2", "Доступ получил, разворачиваю окружение.",               38),
+            ("in_progress_net", "author2",   "Нужна ли учётка для отдела разработки?",                32),
+            ("in_progress_net", "executor2", "Да, заведите, пожалуйста. Уже приступаю к настройке.",  26),
+
+            ("assigned_oge", "author1",   "Когда сможете подойти к участку сборки по проводке?",      40),
+            ("assigned_oge", "executor3", "Здравствуйте! Буду на участке в течение часа.",            33),
+            ("assigned_oge", "author1",   "Хорошо, мастер вас встретит.",                             27),
         )
         for app_key, emp_key, text, minutes_ago in chat:
             conn.execute(
