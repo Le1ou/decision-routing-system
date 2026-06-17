@@ -10,7 +10,7 @@ priority_module.py — расчёт приоритета заявки (см. doc
     из БД и настроек, вызывают формулу и сохраняют результат. Сбор данных отделён от самой
     формулы, поэтому правки формулы не затрагивают обвязку и наоборот.
 
-Текущая формула:  П = k_отдела · k_времени + k_руководителя + бонус_срочности , clamp[0,1].
+Текущая формула:  П = k_отдела · k_времени + k_руководителя + k_срочности , clamp[0,1].
 Тяжёлые зависимости (config, БД-настройки) импортируются лениво внутри функций обвязки,
 чтобы чистую формулу можно было импортировать и тестировать без остального backend.
 """
@@ -25,7 +25,6 @@ DEFAULT_LEVEL = "low"
 # Значения по умолчанию для коэффициентов/срочности, если не заданы в настройках/конфиге.
 DEFAULT_COEFF = 0.2
 DEFAULT_URGENT_THRESHOLD_HOURS = 24
-DEFAULT_URGENT_BONUS = 0.5
 
 
 def _clamp01(x: float) -> float:
@@ -62,7 +61,7 @@ def compute_priority_score(*, department_coeff, deadline_weight, created_at, dea
                            urgent_threshold_hours=None, urgent_bonus=0.0) -> float:
     """ЧИСТАЯ формула приоритета (единственная точка, которую меняют при смене формулы):
 
-        П = k_отдела · k_времени + k_руководителя + бонус_срочности ,  зажато в [0,1]
+        П = k_отдела · k_времени + k_руководителя + k_срочности ,  зажато в [0,1]
 
     Все входные данные передаются явно — функция не обращается к БД/конфигу и легко
     тестируется и подменяется.
@@ -82,12 +81,11 @@ def _load_settings(db) -> dict:
 
 
 def _load_urgent_cfg() -> dict:
-    """Параметры бонуса срочности из config.json -> блок "priority"."""
+    """Порог срочности из config.json -> блок "priority"."""
     from src.application_module import configData
     cfg = (configData.get("priority") or {})
     return {
         "threshold_hours": cfg.get("urgent_deadline_threshold_hours", DEFAULT_URGENT_THRESHOLD_HOURS),
-        "bonus": cfg.get("urgent_deadline_bonus", DEFAULT_URGENT_BONUS),
     }
 
 
@@ -147,7 +145,7 @@ def recompute_and_store(db, cur, application_id, now=None, settings=None, urgent
         manager_author_coeff=mgr_coeff,
         is_manager_author=is_manager_author,
         urgent_threshold_hours=urgent_cfg["threshold_hours"],
-        urgent_bonus=urgent_cfg["bonus"],
+        urgent_bonus=settings["urgentBonus"],
     )
     level = score_to_level(score)
 

@@ -28,9 +28,9 @@ def get_priority_settings(userData=Depends(authObj.authenticate)):
         login = userData[0]
         settings = ps_store.load_effective(db)
 
-        # Read-only параметры бонуса срочности (config.json → priority).
+        # Порог срочности остаётся в config.json, а K срочности администрируется.
         _urgent = priority_module._load_urgent_cfg()
-        urgent = {"thresholdHours": _urgent["threshold_hours"], "bonus": _urgent["bonus"]}
+        urgent = {"thresholdHours": _urgent["threshold_hours"], "bonus": settings["urgentBonus"]}
 
         if _is_top_manager(login):
             return {**settings, "urgent": urgent}
@@ -42,6 +42,7 @@ def get_priority_settings(userData=Depends(authObj.authenticate)):
             "department":    {own_key: settings["department"].get(own_key, ps_store.DEFAULT_COEFF)} if own_key else {},
             "managerAuthor": {own_key: settings["managerAuthor"].get(own_key, ps_store.DEFAULT_COEFF)} if own_key else {},
             "deadline":      settings["deadline"],
+            "urgentBonus":   settings["urgentBonus"],
             "urgent":        urgent,
         }
     except HTTPException:
@@ -63,7 +64,13 @@ def update_priority_settings(
         db = get_db_user(userData)
         login = userData[0]
         require_top_manager(login)   # only a top-manager may persist settings
-        ps_store.save(db, dict(payload.department), dict(payload.managerAuthor), payload.deadline)
+        ps_store.save(
+            db,
+            dict(payload.department),
+            dict(payload.managerAuthor),
+            payload.deadline,
+            payload.urgentBonus,
+        )
         # Echo back what was saved; the merged per-department defaults are applied on
         # read (GET /priority-settings). urgent добавлен и сюда: фронт описывает ответ
         # PUT тем же типом, что и GET (PrioritySettings с обязательным urgent).
@@ -72,8 +79,9 @@ def update_priority_settings(
             "department":    dict(payload.department),
             "managerAuthor": dict(payload.managerAuthor),
             "deadline":      payload.deadline,
+            "urgentBonus":   payload.urgentBonus,
             "urgent":        {"thresholdHours": _urgent["threshold_hours"],
-                              "bonus": _urgent["bonus"]},
+                              "bonus": payload.urgentBonus},
         }
     except HTTPException:
         raise

@@ -2,8 +2,9 @@
 priority_settings_store.py — персистентное хранилище коэффициентов расчёта приоритета.
 
 Заменяет прежний in-memory dict в main.py (терялся при рестарте). Контракт ответа
-API не меняется: {"department": {dep_id: коэф}, "managerAuthor": {dep_id: коэф},
-"deadline": число}. Данные лежат в одной строке таблицы public.priority_settings (id=1).
+API: {"department": {dep_id: коэф}, "managerAuthor": {dep_id: коэф},
+"deadline": число, "urgentBonus": число}. Данные лежат в одной строке таблицы
+public.priority_settings (id=1).
 
 Запись выполняется только в PUT /priority-settings (top-manager). Чтение НЕ пишет в БД:
 если строки ещё нет или для отдела не задан коэффициент — подставляется значение по
@@ -16,6 +17,7 @@ DEFAULT_COEFF = 0.2
 # Вес фактора срока по умолчанию = 1.0: время до дедлайна считается «в полную силу»
 # (k_времени = deadlinePressure · deadline, deadlinePressure ∈ [0,1]).
 DEFAULT_DEADLINE = 1.0
+DEFAULT_URGENT_BONUS = 0.5
 
 
 def _load_row(db):
@@ -31,6 +33,11 @@ def load_effective(db) -> dict:
     department = dict(row["department"]) if row and row.get("department") else {}
     manager_author = dict(row["manager_author"]) if row and row.get("manager_author") else {}
     deadline = float(row["deadline"]) if row and row.get("deadline") is not None else DEFAULT_DEADLINE
+    urgent_bonus = (
+        float(row["urgent_bonus"])
+        if row and row.get("urgent_bonus") is not None
+        else DEFAULT_URGENT_BONUS
+    )
 
     deps = db.getAllRowsFromTable("department") or []
     for d in deps:
@@ -40,22 +47,28 @@ def load_effective(db) -> dict:
         department.setdefault(dep_id, dep_default)
         manager_author.setdefault(dep_id, DEFAULT_COEFF)
 
-    return {"department": department, "managerAuthor": manager_author, "deadline": deadline}
+    return {
+        "department": department,
+        "managerAuthor": manager_author,
+        "deadline": deadline,
+        "urgentBonus": urgent_bonus,
+    }
 
 
-def save(db, department: dict, manager_author: dict, deadline: float) -> None:
+def save(db, department: dict, manager_author: dict, deadline: float, urgent_bonus: float) -> None:
     """UPSERT строки настроек (id=1). Вызывается только top-manager через PUT."""
     department = {str(k): float(v) for k, v in (department or {}).items()}
     manager_author = {str(k): float(v) for k, v in (manager_author or {}).items()}
     with db.pool.connection() as conn:
         conn.execute(
             """
-            INSERT INTO public.priority_settings (id, department, manager_author, deadline)
-            VALUES (1, %s, %s, %s)
+            INSERT INTO public.priority_settings (id, department, manager_author, deadline, urgent_bonus)
+            VALUES (1, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE
                 SET department = EXCLUDED.department,
                     manager_author = EXCLUDED.manager_author,
-                    deadline = EXCLUDED.deadline
+                    deadline = EXCLUDED.deadline,
+                    urgent_bonus = EXCLUDED.urgent_bonus
             """,
-            (Json(department), Json(manager_author), float(deadline)),
+            (Json(department), Json(manager_author), float(deadline), float(urgent_bonus)),
         )

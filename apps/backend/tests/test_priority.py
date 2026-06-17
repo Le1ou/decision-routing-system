@@ -45,14 +45,14 @@ def test_far_deadline_just_created_is_low():
     assert pm.score_to_level(score) == "low"
 
 
-def test_urgent_bonus_applied():
+def test_urgency_coeff_applied():
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     score = pm.compute_priority_score(
         department_coeff=0.2, deadline_weight=0.2,
         created_at=now, deadline=now + timedelta(hours=12), now=now,
         urgent_threshold_hours=24, urgent_bonus=0.5,
     )
-    assert score == pytest.approx(0.5)          # k_времени=0 + бонус срочности 0.5
+    assert score == pytest.approx(0.5)          # k_времени=0 + K срочности 0.5
     assert pm.score_to_level(score) == "medium"
 
 

@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS public.priority_settings
     department     jsonb NOT NULL DEFAULT '{}'::jsonb,
     manager_author jsonb NOT NULL DEFAULT '{}'::jsonb,
     deadline       real  NOT NULL DEFAULT 0.2,
+    urgent_bonus   real  NOT NULL DEFAULT 0.5,
     PRIMARY KEY (id)
 );
 
