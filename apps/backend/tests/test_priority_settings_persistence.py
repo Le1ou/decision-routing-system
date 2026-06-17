@@ -36,6 +36,7 @@ def test_put_then_get_reflects_saved_values():
         "department":    {"1": 0.55, "2": 0.45},
         "managerAuthor": {"1": 0.35, "2": 0.25},
         "deadline":      0.65,
+        "urgentBonus":   0.4,
     }
     assert _put(TOP_MANAGER, body).status_code == 200
 
@@ -45,6 +46,8 @@ def test_put_then_get_reflects_saved_values():
     assert data["department"]["2"] == 0.45
     assert data["managerAuthor"]["1"] == 0.35
     assert data["deadline"] == 0.65
+    assert data["urgentBonus"] == 0.4
+    assert data["urgent"]["bonus"] == 0.4
     # …и для незаданного отдела k_отдела по умолчанию = важность отдела (department.value),
     # а managerAuthor по умолчанию = 0.2.
     deps = _session.get(f"{BASE_URL}/departments", auth=TOP_MANAGER).json()["items"]
@@ -55,10 +58,11 @@ def test_put_then_get_reflects_saved_values():
 
 def test_get_shape_is_stable():
     data = _get(TOP_MANAGER).json()
-    assert set(data.keys()) == {"department", "managerAuthor", "deadline", "urgent"}
+    assert set(data.keys()) == {"department", "managerAuthor", "deadline", "urgentBonus", "urgent"}
     assert isinstance(data["department"], dict)
     assert isinstance(data["managerAuthor"], dict)
     assert isinstance(data["deadline"], (int, float))
+    assert isinstance(data["urgentBonus"], (int, float))
     # read-only параметры срочности для предпросмотра на фронте
     assert set(data["urgent"].keys()) == {"thresholdHours", "bonus"}
     assert isinstance(data["urgent"]["thresholdHours"], (int, float))

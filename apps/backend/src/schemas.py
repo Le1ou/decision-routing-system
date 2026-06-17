@@ -389,6 +389,8 @@ class PrioritySettingsModel(BaseModel):
     managerAuthor: dict[str, float]
     # Single global coefficient for the deadline factor.
     deadline:      float = Field(ge=0, le=1)
+    # Single global coefficient added when request is urgent.
+    urgentBonus:   float = Field(default=0.5, ge=0, le=1)
 
     @field_validator("department", "managerAuthor")
     @classmethod
@@ -401,13 +403,13 @@ class PrioritySettingsModel(BaseModel):
         return v
 
 class UrgentSettingsOut(BaseModel):
-    """Параметры бонуса срочности (read-only, из config.json → priority)."""
+    """Параметры срочности для предпросмотра."""
     thresholdHours: float
     bonus: float
 
 class PrioritySettingsResponse(PrioritySettingsModel):
-    # GET дополнительно отдаёт read-only параметры срочности, чтобы предпросмотр на
-    # фронте мог точно повторить формулу бэкенда. Через PUT не редактируются.
+    # GET дополнительно отдаёт параметры срочности, чтобы предпросмотр на фронте мог
+    # точно повторить формулу бэкенда. thresholdHours read-only, bonus = urgentBonus.
     urgent: UrgentSettingsOut
 
 # ── Notifications ──
