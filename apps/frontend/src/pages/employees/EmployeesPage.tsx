@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@app/providers/AuthProvider";
 import { useReferenceData } from "@app/providers/ReferenceDataProvider";
@@ -23,14 +23,19 @@ const assignableRoles: UserRole[] = ["author", "executor", "manager", "top-manag
 export function EmployeesPage() {
   const { currentUser, credentials } = useAuth();
   const { departments, employees, adUsers, refresh } = useReferenceData();
-  const availableDepartments = currentUser?.role === "manager"
-    ? departments.filter((department) => department.id === currentUser.departmentId)
-    : departments;
+  const availableDepartments = useMemo(
+    () => currentUser?.role === "manager"
+      ? departments.filter((department) => department.id === currentUser.departmentId)
+      : departments,
+    [currentUser, departments],
+  );
   const initialDepartmentId = availableDepartments[0]?.id ?? "";
   const [departmentId, setDepartmentId] = useState(initialDepartmentId);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [showAllDepartmentSettings, setShowAllDepartmentSettings] = useState(false);
+  const [departmentDrafts, setDepartmentDrafts] = useState<Record<string, { employeeApplicationDelayMinutes: number; deadlineNotificationRatio: number }>>({});
   const [form, setForm] = useState<EmployeeForm>({
     adUserId: "",
     role: "executor",
@@ -61,8 +66,28 @@ export function EmployeesPage() {
   );
   const selectedAdUser = adUsers.find((user) => user.id === form.adUserId);
   const department = departments.find((item) => item.id === activeDepartmentId);
+  const departmentSettingsItems = useMemo(
+    () => currentUser?.role === "top-manager" && showAllDepartmentSettings
+      ? availableDepartments
+      : availableDepartments.filter((departmentItem) => departmentItem.id === activeDepartmentId),
+    [activeDepartmentId, availableDepartments, currentUser?.role, showAllDepartmentSettings],
+  );
   const totalInDepartment = employees.filter((employee) => employee.departmentId === activeDepartmentId).length;
   const activeInDepartment = employees.filter((employee) => employee.departmentId === activeDepartmentId && employee.isActive).length;
+
+  useEffect(() => {
+    setDepartmentDrafts(
+      Object.fromEntries(
+        availableDepartments.map((departmentItem) => [
+          departmentItem.id,
+          {
+            employeeApplicationDelayMinutes: departmentItem.employeeApplicationDelayMinutes,
+            deadlineNotificationRatio: departmentItem.deadlineNotificationRatio,
+          },
+        ]),
+      ),
+    );
+  }, [availableDepartments]);
 
   const openCreateModal = () => {
     const firstAvailableAdUser = availableAdUsers[0];
@@ -165,6 +190,40 @@ export function EmployeesPage() {
     }
   };
 
+  const updateDepartmentDraft = (
+    targetDepartmentId: string,
+    key: "employeeApplicationDelayMinutes" | "deadlineNotificationRatio",
+    value: number,
+  ) => {
+    const nextValue = key === "deadlineNotificationRatio"
+      ? Math.min(1, Math.max(0, value))
+      : Math.max(0, Math.round(value));
+
+    setDepartmentDrafts((current) => ({
+      ...current,
+      [targetDepartmentId]: {
+        employeeApplicationDelayMinutes: current[targetDepartmentId]?.employeeApplicationDelayMinutes ?? 0,
+        deadlineNotificationRatio: current[targetDepartmentId]?.deadlineNotificationRatio ?? 0,
+        [key]: nextValue,
+      },
+    }));
+    setNotice("");
+  };
+
+  const saveDepartmentSettings = async (targetDepartmentId: string) => {
+    if (!credentials || !departmentDrafts[targetDepartmentId]) {
+      return;
+    }
+
+    try {
+      await apiClient.updateDepartmentSettings(credentials, targetDepartmentId, departmentDrafts[targetDepartmentId]);
+      await refresh();
+      setNotice("Настройки отдела сохранены.");
+    } catch {
+      setNotice("Не удалось сохранить настройки отдела.");
+    }
+  };
+
   return (
     <section className="employees-page">
       <header className="employees-page__header">
@@ -229,6 +288,68 @@ export function EmployeesPage() {
             />
             Подтверждать руководителем
           </label>
+        </section>
+
+        <section className="employees-department-settings" aria-label="Настройки отделов">
+          {currentUser?.role === "top-manager" ? (
+            <label className="employees-department-settings__toggle">
+              <input
+                type="checkbox"
+                checked={showAllDepartmentSettings}
+                onChange={(event) => setShowAllDepartmentSettings(event.target.checked)}
+              />
+              Все отделы
+            </label>
+          ) : null}
+          <div className="employees-department-settings__list">
+            {departmentSettingsItems.map((departmentItem) => {
+              const draft = departmentDrafts[departmentItem.id] ?? {
+                employeeApplicationDelayMinutes: departmentItem.employeeApplicationDelayMinutes,
+                deadlineNotificationRatio: departmentItem.deadlineNotificationRatio,
+              };
+              const hasDepartmentChanges =
+                draft.employeeApplicationDelayMinutes !== departmentItem.employeeApplicationDelayMinutes ||
+                draft.deadlineNotificationRatio !== departmentItem.deadlineNotificationRatio;
+
+              return (
+                <div className="employees-department-setting" key={departmentItem.id}>
+                  <span>
+                    <strong>{departmentItem.name}</strong>
+                    <small>Руководитель меняет только свой отдел, топ-менеджер — любой.</small>
+                  </span>
+                  <label>
+                    Интервал между заявками, минут
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={draft.employeeApplicationDelayMinutes}
+                      onChange={(event) => updateDepartmentDraft(departmentItem.id, "employeeApplicationDelayMinutes", Number(event.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Порог уведомления о сроке
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={draft.deadlineNotificationRatio}
+                      onChange={(event) => updateDepartmentDraft(departmentItem.id, "deadlineNotificationRatio", Number(event.target.value))}
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void saveDepartmentSettings(departmentItem.id)}
+                    disabled={!hasDepartmentChanges}
+                  >
+                    Сохранить
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
         </section>
 
         <div className="employees-table__grid" role="table" aria-label="Сотрудники">

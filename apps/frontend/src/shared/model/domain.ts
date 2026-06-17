@@ -40,6 +40,7 @@ export type PrioritySettings = {
   department: Record<string, number>;
   deadline: number;
   managerAuthor: Record<string, number>;
+  urgentBonus: number;
   urgent: {
     thresholdHours: number;
     bonus: number;

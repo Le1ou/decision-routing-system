@@ -2019,6 +2019,12 @@ components:
           maximum: 1.0
           minimum: 0.0
           title: Deadline
+        urgentBonus:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Urgentbonus
+          default: 0.5
       type: object
       required:
       - department
@@ -2042,6 +2048,12 @@ components:
           maximum: 1.0
           minimum: 0.0
           title: Deadline
+        urgentBonus:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Urgentbonus
+          default: 0.5
         urgent:
           $ref: '#/components/schemas/UrgentSettingsOut'
       type: object
@@ -2167,7 +2179,7 @@ components:
       - thresholdHours
       - bonus
       title: UrgentSettingsOut
-      description: Параметры бонуса срочности (read-only, из config.json → priority).
+      description: Параметры срочности для предпросмотра.
     UserOut:
       properties:
         id:

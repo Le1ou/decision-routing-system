@@ -259,9 +259,14 @@ with DBController.pool.connection() as _conn:
             department     jsonb NOT NULL DEFAULT '{}'::jsonb,
             manager_author jsonb NOT NULL DEFAULT '{}'::jsonb,
             deadline       real  NOT NULL DEFAULT 0.2,
+            urgent_bonus   real  NOT NULL DEFAULT 0.5,
             PRIMARY KEY (id)
         )
     """)
+    _conn.execute(
+        "ALTER TABLE public.priority_settings "
+        "ADD COLUMN IF NOT EXISTS urgent_bonus real NOT NULL DEFAULT 0.5"
+    )
     # Чат заявки: сообщения между автором, исполнителем и руководителем (см. chat_api).
     _conn.execute("""
         CREATE TABLE IF NOT EXISTS public.application_message (
