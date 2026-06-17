@@ -780,7 +780,8 @@ class TestPrioritySettings:
         r = get("/priority-settings", MANAGER)
         assert r.status_code == 200
         body = r.json()
-        assert set(body.keys()) == {"department", "managerAuthor", "deadline", "urgent"}
+        assert set(body.keys()) == {"department", "managerAuthor", "deadline", "urgentBonus", "urgent"}
+        assert isinstance(body["urgentBonus"], (int, float))
         assert {"thresholdHours", "bonus"} <= body["urgent"].keys()
 
     def test_get_executor_403(self):
