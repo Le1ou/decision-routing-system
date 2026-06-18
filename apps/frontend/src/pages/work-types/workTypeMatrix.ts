@@ -76,5 +76,5 @@ export function getPositionGradeSummary(matrix: WorkTypeMatrix, positions: Posit
     })
     .filter(Boolean);
 
-  return selectedPositions.length > 0 ? selectedPositions.join("; ") : "Нет выбранных должностей и грейдов";
+  return selectedPositions.length > 0 ? selectedPositions.join("; ") : "Нет выбранных должностей и позиций";
 }

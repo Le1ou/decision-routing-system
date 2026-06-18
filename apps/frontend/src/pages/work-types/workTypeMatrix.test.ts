@@ -102,6 +102,6 @@ describe("workTypeMatrix", () => {
 
     expect(getMatrixSelectionCount(matrix)).toBe(2);
     expect(getPositionGradeSummary(matrix, positions, grades)).toBe("Инженер: Младший, Старший");
-    expect(getPositionGradeSummary({}, positions, grades)).toBe("Нет выбранных должностей и грейдов");
+    expect(getPositionGradeSummary({}, positions, grades)).toBe("Нет выбранных должностей и позиций");
   });
 });
