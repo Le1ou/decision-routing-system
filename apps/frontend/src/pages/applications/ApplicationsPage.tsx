@@ -634,6 +634,7 @@ export function ApplicationsPage() {
               <h2>Информация о заявке</h2>
               <p><b>Дата и время последнего изменения:</b> {formatDateTime(selectedApplication.updatedAt)}</p>
               <p><b>Дата и время создания заявки:</b> {formatDateTime(selectedApplication.createdAt)}</p>
+              <p><b>Срок исполнения:</b> {formatDateTime(selectedApplication.deadlineAt)}</p>
               <p><b>Дата и время назначения исполнителя:</b> {formatDateTime(selectedApplication.assignedAt)}</p>
               <p><b>Дата и время взятия в работу заявки:</b> {formatDateTime(selectedApplication.startedAt)}</p>
               <p><b>Дата и время закрытия заявки:</b> {formatDateTime(selectedApplication.finishedAt)}</p>
