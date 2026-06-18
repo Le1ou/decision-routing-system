@@ -371,6 +371,14 @@ export function ApplicationsPage() {
               Созданные мной
             </label>
           ) : null}
+          <label>
+            <input
+              type="checkbox"
+              checked={filters.openOnly ?? false}
+              onChange={(event) => setFilters((current) => ({ ...current, openOnly: event.target.checked }))}
+            />
+            Только незакрытые
+          </label>
           {currentUser.role === "executor" ? (
             <label>
               <input
@@ -385,12 +393,12 @@ export function ApplicationsPage() {
             <label>
               <input
                 type="checkbox"
-                checked={filters.delegatedFromAnotherDepartment ?? false}
+                checked={filters.delegatedOnly ?? false}
                 onChange={(event) =>
-                  setFilters((current) => ({ ...current, delegatedFromAnotherDepartment: event.target.checked }))
+                  setFilters((current) => ({ ...current, delegatedOnly: event.target.checked }))
                 }
               />
-              Делегированы из другого отдела
+              Делегированные
             </label>
           ) : null}
         </div>
