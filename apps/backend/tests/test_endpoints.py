@@ -606,7 +606,7 @@ class TestPositions:
         items = get("/positions", MANAGER).json()["items"]
         assert all(isinstance(p["gradeIds"], list) for p in items)
         engineer = next(p for p in items if p["name"] == "Инженер")
-        assert set(engineer["gradeIds"]) == {"0", "1"}      # junior + middle (seed)
+        assert set(engineer["gradeIds"]) == {"0", "1", "2"}  # junior + middle + senior (seed)
 
     def test_grade_ids_match_work_type_positions(self):
         # Сквозная проверка рецепта для фронта: вид работ 1 (easy, junior/middle)
@@ -964,8 +964,8 @@ class TestWorkTypePositions:
 
     def test_create_update_clear_positions_roundtrip(self):
         pos = self._positions()
-        engineer = next(p["id"] for p in pos if p["name"] == "Инженер")
-        senior   = next(p["id"] for p in pos if p["name"] == "Старший инженер")
+        engineer  = next(p["id"] for p in pos if p["name"] == "Инженер")
+        specialist = next(p["id"] for p in pos if p["name"] == "Специалист")
 
         r = post("/work-types", MANAGER,
                  json={"name": "С должностями", "departmentId": str(DEP_IT),
@@ -980,8 +980,8 @@ class TestWorkTypePositions:
         assert _wt()["allowedPositionIds"] == [engineer]
         # Замена списка целиком.
         assert patch(f"/work-types/{wt_id}", MANAGER,
-                     json={"allowedPositionIds": [engineer, senior]}).status_code == 204
-        assert set(_wt()["allowedPositionIds"]) == {engineer, senior}
+                     json={"allowedPositionIds": [engineer, specialist]}).status_code == 204
+        assert set(_wt()["allowedPositionIds"]) == {engineer, specialist}
         # Пустой список снимает ограничение.
         assert patch(f"/work-types/{wt_id}", MANAGER,
                      json={"allowedPositionIds": []}).status_code == 204

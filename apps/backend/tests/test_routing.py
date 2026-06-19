@@ -439,27 +439,27 @@ def test_min_capable_executor_preferred(sysdb):
 
 
 def test_position_axis_filters_candidates(sysdb):
-    """Допуск по двум осям: должность И грейд. ivanov (emp 2) — Инженер-middle,
-    petrov (emp 3) — Старший инженер-middle: грейд у обоих подходит, но вид работ,
-    ограниченный должностью «Старший инженер», должен достаться только petrov.
-    Пустая матрица должностей (старые виды работ) ограничения не накладывает."""
+    """Допуск по двум осям: должность И грейд. Вид работ, ограниченный должностью
+    «Инженер», должен распределиться исполнителю-инженеру (ivanov/petrov, оба
+    Инженер-middle). Пустая матрица должностей (старые виды работ) ограничения не
+    накладывает; обратная (исключающая) проверка — в test_position_axis_no_match_waits."""
     _free_executor(sysdb, EXEC1)
     _free_executor(sysdb, EXEC2)
     others = _deactivate_other_it_executors(sysdb)
     wt_id = None
     try:
         with sysdb.pool.connection() as c:
-            senior_post = c.execute(
-                "SELECT post_id FROM public.post WHERE name = 'Старший инженер'").fetchone()[0]
+            engineer_post = c.execute(
+                "SELECT post_id FROM public.post WHERE name = 'Инженер'").fetchone()[0]
             wt_id = c.execute(
                 "INSERT INTO public.types_of_works (name, complexity_value, department_id) "
-                "VALUES ('Только для старших', 2, %s) RETURNING type_of_works_id",
+                "VALUES ('Только для инженеров', 2, %s) RETURNING type_of_works_id",
                 (DEP_IT,)).fetchone()[0]
             for g in (0, 1):   # junior, middle — грейды обоих исполнителей подходят
                 c.execute("INSERT INTO public.type_of_work_to_grade (type_of_works_id, grade_id) "
                           "VALUES (%s, %s)", (wt_id, g))
             c.execute("INSERT INTO public.type_of_work_to_post (type_of_works_id, post_id) "
-                      "VALUES (%s, %s)", (wt_id, senior_post))
+                      "VALUES (%s, %s)", (wt_id, engineer_post))
 
         app = _create_app(DEP_IT, wt_id)
         _demote_other_new_apps(sysdb, app)
@@ -469,8 +469,8 @@ def test_position_axis_filters_candidates(sysdb):
 
         a = _app(app)
         assert a["status"] == "assigned"
-        assert a["executorId"] == str(EXEC2), \
-            "ivanov (Инженер) не подходит по должности — заявка должна уйти petrov (Старший инженер)"
+        assert a["executorId"] in (str(EXEC1), str(EXEC2)), \
+            "вид работ, ограниченный должностью «Инженер», должен уйти исполнителю-инженеру"
     finally:
         if wt_id is not None:
             with sysdb.pool.connection() as c:
@@ -542,8 +542,8 @@ def test_cooldown_blocks_recently_finished(sysdb):
 # ── Перераспределение на более высокий грейд при росте сложности (§ задача 3) ────
 
 def _set_executor_senior(sysdb, emp_id):
-    """Сделать исполнителя senior, сохранив должность, допустимую для medium-видов работ
-    («Старший инженер»). Возвращает прежний post_grade_id для восстановления."""
+    """Сделать исполнителя senior, сохранив должность «Инженер» (старшинство несёт грейд,
+    не должность). Возвращает прежний post_grade_id для восстановления."""
     with sysdb.pool.connection() as c:
         old = c.execute("SELECT post_grade_id FROM public.employee WHERE employee_id=%s",
                         (emp_id,)).fetchone()[0]
@@ -551,7 +551,7 @@ def _set_executor_senior(sysdb, emp_id):
             "SELECT pg.post_grade_id FROM public.post_grade pg "
             "JOIN public.grade g ON g.grade_id=pg.grade_grade_id "
             "JOIN public.post p ON p.post_id=pg.post_post_id "
-            "WHERE g.name='senior' AND p.name='Старший инженер' LIMIT 1").fetchone()[0]
+            "WHERE g.name='senior' AND p.name='Инженер' LIMIT 1").fetchone()[0]
         c.execute("UPDATE public.employee SET post_grade_id=%s WHERE employee_id=%s", (pg, emp_id))
     return old
 
