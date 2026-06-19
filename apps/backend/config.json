@@ -85,7 +85,7 @@
       "adUserId": "3",
       "fullName": "Петров Пётр Петрович",
       "departmentId": 1,
-      "position": "Старший инженер",
+      "position": "Инженер",
       "inSystem": true,
       "password": "Pa$$w0rd",
       "employee_id": 3,
@@ -107,7 +107,7 @@
       "adUserId": "5",
       "fullName": "Козлов Дмитрий Александрович",
       "departmentId": 3,
-      "position": "Старший инженер",
+      "position": "Инженер",
       "inSystem": true,
       "password": "Kozlov!4",
       "employee_id": 5,
@@ -167,7 +167,7 @@
       "adUserId": "1003",
       "fullName": "Морозов Сергей Игоревич",
       "departmentId": 3,
-      "position": "Старший инженер",
+      "position": "Инженер",
       "inSystem": false,
       "email": "sergey.morozov@kptws.ru"
     }

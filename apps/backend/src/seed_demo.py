@@ -360,13 +360,66 @@ def _settle_demo(db, rnd, now, ceiling, before_notif, before_hist, new_before) -
     return {"expired": expired, "deadlineNotifications": approaching}
 
 
+# Минимальные правдоподобные интервалы жизненного цикла заявки (минуты). Применяются
+# ПОСЛЕ переноса в рабочее окно: монотонное сжатие суток в окно [start,end] и зажим к
+# `ceiling` могут схлопнуть соседние метки почти в одну точку (напр. work_at ↔
+# finished_at), из-за чего заявка выглядит «закрытой через минуту после старта работ».
+# Нормализуем, СДВИГАЯ более ранние метки НАЗАД (в прошлое): так ничего не уезжает в
+# будущее за ceiling, порядок событий и нахождение их в прошлом сохраняются.
+_MIN_CREATE_TO_ASSIGN = timedelta(minutes=15)
+_MIN_ASSIGN_TO_WORK = timedelta(minutes=10)
+_MIN_WORK_TO_FINISH = timedelta(minutes=20)
+_MIN_CREATE_TO_FINISH = timedelta(minutes=20)   # для rejected без стадии работы
+
+
+def _enforce_min_lifecycle_gaps(db) -> int:
+    """Гарантировать минимальные интервалы created→executor→work→finished у всех заявок,
+    сдвигая более ранние метки в прошлое. Возвращает число поправленных заявок."""
+    fixed = 0
+    with db.pool.connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                "SELECT application_id, created_at, executor_at, work_at, finished_at "
+                "FROM public.application").fetchall()
+            for r in rows:
+                created, ea, wa, fin = (r["created_at"], r["executor_at"],
+                                        r["work_at"], r["finished_at"])
+                # От поздней метки к ранней: опускаем предыдущую при нехватке зазора.
+                if fin is not None and wa is not None and wa > fin - _MIN_WORK_TO_FINISH:
+                    wa = fin - _MIN_WORK_TO_FINISH
+                if ea is not None:
+                    upper = ((wa - _MIN_ASSIGN_TO_WORK) if wa is not None
+                             else (fin - _MIN_WORK_TO_FINISH) if fin is not None else None)
+                    if upper is not None and ea > upper:
+                        ea = upper
+                if created is not None:
+                    if ea is not None and created > ea - _MIN_CREATE_TO_ASSIGN:
+                        created = ea - _MIN_CREATE_TO_ASSIGN
+                    elif ea is None and fin is not None and created > fin - _MIN_CREATE_TO_FINISH:
+                        created = fin - _MIN_CREATE_TO_FINISH
+                upd = {}
+                if created != r["created_at"]:
+                    upd["created_at"] = created
+                if ea != r["executor_at"]:
+                    upd["executor_at"] = ea
+                if wa != r["work_at"]:
+                    upd["work_at"] = wa
+                if upd:
+                    assignment = ", ".join(f"{c} = %s" for c in upd)
+                    cur.execute(
+                        f"UPDATE public.application SET {assignment} WHERE application_id = %s",
+                        (*upd.values(), r["application_id"]))
+                    fixed += 1
+    return fixed
+
+
 # (ФИО, № отдела 1..7, (должность, грейд), роль)
 _EXTRA_EMPLOYEES = (
     # ИТ (1): ещё исполнители
     ("Громов Артём Сергеевич",        1, ("Инженер", "junior"),          "executor"),
-    ("Лебедева Ольга Дмитриевна",     1, ("Старший инженер", "senior"),  "executor"),
+    ("Лебедева Ольга Дмитриевна",     1, ("Инженер", "senior"),          "executor"),
     # ОГЭ (2): старший исполнитель (для hard/critical видов работ) и автор
-    ("Соколов Виктор Андреевич",      2, ("Старший инженер", "senior"),  "executor"),
+    ("Соколов Виктор Андреевич",      2, ("Инженер", "senior"),          "executor"),
     ("Морозова Дарья Игоревна",       2, ("Специалист", "junior"),       "author"),
     # Производственный (3)
     ("Волков Степан Олегович",        3, ("Руководитель", "senior"),     "manager"),
@@ -378,7 +431,7 @@ _EXTRA_EMPLOYEES = (
     ("Зайцева Ксения Артёмовна",      4, ("Специалист", "junior"),       "executor"),
     # ОГМ (5)
     ("Крылов Олег Валентинович",      5, ("Руководитель", "senior"),     "manager"),
-    ("Степанов Руслан Маратович",     5, ("Старший инженер", "senior"),  "executor"),
+    ("Степанов Руслан Маратович",     5, ("Инженер", "senior"),          "executor"),
     ("Ефимов Денис Константинович",   5, ("Инженер", "middle"),          "executor"),
     # Складской (6)
     ("Антонова Светлана Борисовна",   6, ("Руководитель", "senior"),     "manager"),
@@ -387,7 +440,7 @@ _EXTRA_EMPLOYEES = (
     # Снабжение (7)
     ("Романов Илья Вячеславович",     7, ("Руководитель", "lead"),       "manager"),
     ("Фомина Алина Денисовна",        7, ("Специалист", "middle"),       "executor"),
-    ("Царёв Максим Леонидович",       7, ("Старший инженер", "middle"),  "executor"),
+    ("Царёв Максим Леонидович",       7, ("Инженер", "senior"),          "executor"),
 )
 
 _APP_TOPICS = (
@@ -825,6 +878,10 @@ def seed_database_demo(db_operator) -> None:
     settled = _settle_demo(db_operator, rnd, now, ceiling, before_notif, before_hist, new_before)
     counts["preExpired"] = settled["expired"]
     counts["preDeadline"] = settled["deadlineNotifications"]
+
+    # Финальная нормализация: убрать «схлопнутые» переносом в окно интервалы жизненного
+    # цикла (напр. заявка «закрыта через минуту после старта работ»).
+    counts["gapsFixed"] = _enforce_min_lifecycle_gaps(db_operator)
 
     print(f"[seed:demo] extra employees → {len(_EXTRA_EMPLOYEES)}, "
           f"generated applications → {counts}, worktime "
