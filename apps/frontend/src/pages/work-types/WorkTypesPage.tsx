@@ -97,7 +97,7 @@ export function WorkTypesPage() {
     }
 
     if (getMatrixSelectionCount(form.matrix) === 0) {
-      nextErrors.complexity = "Выберите хотя бы одну должность и грейд.";
+      nextErrors.complexity = "Выберите хотя бы одну должность и позицию.";
     }
 
     setErrors(nextErrors);
@@ -165,7 +165,7 @@ export function WorkTypesPage() {
     const accessPayload = toWorkTypeAccessPayload(nextMatrix);
 
     if (accessPayload.allowedGradeIds.length === 0) {
-      setNotice("У вида работ должна остаться хотя бы одна допустимая должность и грейд.");
+      setNotice("У вида работ должна остаться хотя бы одна допустимая должность и позиция.");
       return;
     }
 
@@ -233,7 +233,7 @@ export function WorkTypesPage() {
             <div className="work-types-table__row work-types-table__row--head" role="row">
               <span role="columnheader">Название</span>
               <span role="columnheader">Сложность</span>
-              <span role="columnheader">Должности и грейды</span>
+              <span role="columnheader">Должности и позиции</span>
               <span role="columnheader">Использование</span>
               <span role="columnheader">Действия</span>
             </div>
@@ -366,8 +366,8 @@ export function WorkTypesPage() {
               </select>
             </label>
 
-            <div className="work-types-matrix-preview" aria-label="Допустимые должности и грейды">
-              <span>Допустимые должности и грейды</span>
+            <div className="work-types-matrix-preview" aria-label="Допустимые должности и позиции">
+              <span>Допустимые должности и позиции</span>
               <WorkTypeMatrixEditor
                 grades={grades}
                 matrix={form.matrix}
@@ -451,5 +451,5 @@ function getMatrixWarning(matrix: WorkTypeMatrix, positions: Array<{ id: string;
     return (matrix[position.id] ?? []).some((gradeId) => position.gradeIds.length > 0 && !availableGradeIds.has(gradeId));
   });
 
-  return hasUnavailableGrade ? "Выбран грейд, которого нет у должности: автоназначение может не найти исполнителя." : "";
+  return hasUnavailableGrade ? "Выбрана позиция, которой нет у должности: автоназначение может не найти исполнителя." : "";
 }
