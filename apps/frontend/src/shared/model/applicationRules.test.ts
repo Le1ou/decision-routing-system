@@ -105,9 +105,21 @@ describe("applicationRules", () => {
       applicationIdQuery: "A-",
       executorQuery: "ivan",
       createdByMe: true,
-      delegatedFromAnotherDepartment: true,
+      delegatedOnly: true,
     }, user(), {
       getExecutorName: (executorId) => executorId === "executor-1" ? "Ivan Petrov" : "Maria",
     })).toEqual([items[0]]);
+  });
+
+  it("filters closed applications", () => {
+    const items = [
+      application({ id: "new", status: "new" }),
+      application({ id: "assigned", status: "assigned" }),
+      application({ id: "completed", status: "completed" }),
+      application({ id: "rejected", status: "rejected" }),
+    ];
+
+    expect(applyApplicationFilters(items, { openOnly: true }, user()).map((item) => item.id))
+      .toEqual(["new", "assigned"]);
   });
 });

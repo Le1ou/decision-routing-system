@@ -14,8 +14,9 @@ export type ApplicationFilter = {
   executorQuery?: string;
   applicationIdQuery?: string;
   createdByMe?: boolean;
-  delegatedFromAnotherDepartment?: boolean;
+  delegatedOnly?: boolean;
   assignedToMe?: boolean;
+  openOnly?: boolean;
 };
 
 export function canViewApplication(application: Application, user: User) {
@@ -156,7 +157,11 @@ export function applyApplicationFilters(
       return false;
     }
 
-    if (filter.delegatedFromAnotherDepartment && !application.delegationId) {
+    if (filter.openOnly && ["completed", "rejected"].includes(application.status)) {
+      return false;
+    }
+
+    if (filter.delegatedOnly && !application.delegationId) {
       return false;
     }
 
