@@ -50,8 +50,10 @@ def seed_database(db_operator) -> None:
     below, so the IDs are deterministic:
         1=manager 2=executor1 3=executor2 4=executor3
         5=executor4 6=author1 7=author2 8=manager_oge
-    each onboarded entry in config.json MOCK_AD must point its employee_id at
-    the matching id.
+        9=executor5 (ОКК) 10=executor6 (склад)
+    each onboarded entry in config.json MOCK_AD must point its employee_id at the
+    matching id (9,10 — исполнители ОКК/склада, без логинов: нужны, чтобы заявки
+    этих отделов назначались сотруднику своего отдела).
     """
     now = datetime.now(PROJECT_TZ)
 
@@ -137,12 +139,14 @@ def seed_database(db_operator) -> None:
         print(f"[seed] grade → {grade_ids}")
 
         # ── 6. post ───────────────────────────────────────────────────────────
+        # Должность (post) — это РОД деятельности, без «старшинства»: старшинство несёт
+        # ГРЕЙД (grade). Поэтому отдельной должности «Старший инженер» нет — есть один
+        # «Инженер», а сеньорность инженера выражается грейдом (junior…senior).
         post_ids = {}
         for name, is_top in (
-            ("Инженер",         False),
-            ("Старший инженер", False),
-            ("Руководитель",    True),
-            ("Специалист",      False),
+            ("Инженер",      False),
+            ("Руководитель", True),
+            ("Специалист",   False),
         ):
             row = conn.execute(
                 "INSERT INTO public.post (name, is_top) VALUES (%s, %s) RETURNING post_id",
@@ -152,16 +156,16 @@ def seed_database(db_operator) -> None:
         print(f"[seed] post → {post_ids}")
 
         # ── 7. post_grade ─────────────────────────────────────────────────────
+        # Инженер охватывает грейды junior…senior (сеньорность = грейд, не должность).
         pg_ids = {}
         for pg_key, post_name, grade_name in (
-            ("engineer_junior",  "Инженер",         "junior"),
-            ("engineer_middle",  "Инженер",         "middle"),
-            ("senior_middle",    "Старший инженер", "middle"),
-            ("senior_senior",    "Старший инженер", "senior"),
-            ("lead_senior",      "Руководитель",    "senior"),
-            ("lead_lead",        "Руководитель",    "lead"),
-            ("spec_junior",      "Специалист",      "junior"),
-            ("spec_middle",      "Специалист",      "middle"),
+            ("engineer_junior", "Инженер",      "junior"),
+            ("engineer_middle", "Инженер",      "middle"),
+            ("engineer_senior", "Инженер",      "senior"),
+            ("lead_senior",     "Руководитель", "senior"),
+            ("lead_lead",       "Руководитель", "lead"),
+            ("spec_junior",     "Специалист",   "junior"),
+            ("spec_middle",     "Специалист",   "middle"),
         ):
             row = conn.execute(
                 "INSERT INTO public.post_grade (post_post_id, grade_grade_id) VALUES (%s, %s) RETURNING post_grade_id",
@@ -209,12 +213,17 @@ def seed_database(db_operator) -> None:
             # key,        fio,                             dep,   pg_key            role,          is_active
             ("manager",   "Орлова Мария Викторовна",       "it",  "lead_lead",      "top-manager", True),
             ("executor1", "Иванов Иван Иванович",          "it",  "engineer_middle","executor",    True),
-            ("executor2", "Петров Пётр Петрович",          "it",  "senior_middle",  "executor",    True),
+            ("executor2", "Петров Пётр Петрович",          "it",  "engineer_middle","executor",    True),
             ("executor3", "Сидорова Анна Сергеевна",       "oge", "spec_middle",    "executor",    True),
-            ("executor4", "Козлов Дмитрий Александрович",  "prod", "senior_senior", "executor",    True),
+            ("executor4", "Козлов Дмитрий Александрович",  "prod", "engineer_senior","executor",    True),
             ("author1",   "Новикова Елена Владимировна",   "okk",  "spec_junior",   "author",      True),
             ("author2",   "Фёдоров Алексей Николаевич",    "it",  "engineer_junior","author",      True),
             ("manager_oge","Кузнецов Михаил Сергеевич",    "oge", "lead_senior",    "manager",     True),
+            # Исполнители ОКК и склада: без них заявки этих отделов пришлось бы назначать
+            # сотрудникам из чужого отдела (нарушает «исполнитель из отдела заявки»).
+            # Логинов нет (в MOCK_AD не заведены) — id 9,10 не конфликтуют с 1–8.
+            ("executor5", "Семёнова Ольга Андреевна",      "okk",  "spec_middle",   "executor",    True),
+            ("executor6", "Борисов Артём Викторович",      "warehouse", "spec_middle", "executor",  True),
         )
         for emp_key, fio, dep_key, pg_key, role_key, is_active in employees:
             row = conn.execute(
@@ -233,17 +242,18 @@ def seed_database(db_operator) -> None:
         # Виды работ по отделам (docs/requirements-and-type-of-work.md). Обе оси
         # допуска выводятся из сложности вида работ: грейды (type_of_work_to_grade)
         # и должности (type_of_work_to_post). Лёгкие/средние работы доступны всем
-        # исполнительским должностям (реальный отбор делает ось грейдов), сложные и
-        # критичные — только старшим должностям.
+        # исполнительским должностям (реальный отбор делает ось грейдов — старшинство
+        # несёт ГРЕЙД, не должность); сложные исключают «Специалиста». Сеньорность,
+        # необходимую для сложных работ (senior/lead), даёт ось грейдов.
         grades_by_complexity = {
             "easy":     ["junior", "middle"],
             "medium":   ["middle", "senior"],
             "hard":     ["senior", "lead"],
         }
         posts_by_complexity = {
-            "easy":     ["Специалист", "Инженер", "Старший инженер"],
-            "medium":   ["Специалист", "Инженер", "Старший инженер"],
-            "hard":     ["Старший инженер", "Руководитель"],
+            "easy":     ["Специалист", "Инженер"],
+            "medium":   ["Специалист", "Инженер"],
+            "hard":     ["Инженер", "Руководитель"],
         }
         tow_ids = {}
         work_types = (
@@ -490,8 +500,8 @@ def seed_database(db_operator) -> None:
             executor_at=now - timedelta(hours=6),
             work_at=now - timedelta(hours=4),
             assigned_complexity="hard",
-            created_offset_days=0,
-            deadline_offset_days=1,
+            created_offset_days=1,        # создана раньше назначения (executor_at = -6ч)
+            deadline_offset_days=2,       # дедлайн ещё впереди (now+1д)
         )
 
         # ── status: completed ─────────────────────────────────────────────────
@@ -524,7 +534,7 @@ def seed_database(db_operator) -> None:
         insert_app(
             "completed_3", "Фиксация брака в партии №451", "low", "completed",
             "Зафиксировать и описать брак, выявленный при приёмке партии.",
-            "okk", "okk_defect", "author1", "executor3",
+            "okk", "okk_defect", "author1", "executor5",
             executor_at=now - timedelta(days=3),
             work_at=now - timedelta(days=2),
             finished_at=now - timedelta(days=1),
@@ -532,7 +542,7 @@ def seed_database(db_operator) -> None:
             assigned_complexity="easy",
             created_offset_days=5,
             deadline_offset_days=2,
-            closed_by_key="executor3",
+            closed_by_key="executor5",
             archived_at=now - timedelta(hours=12),   # demo: completed + archived (скрыта из списка)
         )
 
@@ -573,7 +583,7 @@ def seed_database(db_operator) -> None:
         insert_app(
             "assigned_okk", "Приёмка покупных деталей от поставщика", "medium", "assigned",
             "Поступила партия комплектующих, требуется входной контроль качества.",
-            "okk", "okk_check_in", "author1", "executor3",
+            "okk", "okk_check_in", "author1", "executor5",
             executor_at=now - timedelta(hours=8),
             assigned_complexity="easy",
             created_offset_days=1,
@@ -581,7 +591,7 @@ def seed_database(db_operator) -> None:
         insert_app(
             "completed_warehouse", "Инвентаризация склада №3", "low", "completed",
             "Плановая инвентаризация остатков на складе №3.",
-            "warehouse", "wh_inventory", "author1", "executor1",
+            "warehouse", "wh_inventory", "author1", "executor6",
             executor_at=now - timedelta(days=4),
             work_at=now - timedelta(days=3),
             finished_at=now - timedelta(days=2),
@@ -589,7 +599,7 @@ def seed_database(db_operator) -> None:
             assigned_complexity="medium",
             created_offset_days=6,
             deadline_offset_days=4,
-            closed_by_key="executor1",
+            closed_by_key="executor6",
         )
         insert_app(
             "new_supply", "Оформить заказ поставщику на подшипники", "medium", "new",
@@ -794,6 +804,11 @@ def seed_demo_notifications(db_operator) -> None:
              now + timedelta(seconds=115)),
         )
         for name, desc, deadline in demos:
+            # Заявка создаётся за ~2 ч до СВОЕГО дедлайна (created < deadline всегда, в т.ч.
+            # у уже просроченной): свежесозданная заявка не может иметь дедлайн в прошлом
+            # раньше момента создания. Доля оставшегося времени (для уведомления о
+            # приближении срока) при этом остаётся малой — демо-эффект сохраняется.
+            created = deadline - timedelta(hours=2)
             app_id = conn.execute(
                 """
                 INSERT INTO public.application
@@ -802,7 +817,7 @@ def seed_demo_notifications(db_operator) -> None:
                 VALUES (%s, %s, %s, %s, %s, %s, false, false, %s, %s, %s)
                 RETURNING application_id
                 """,
-                (name, prio_id, status_id, desc, dep_id, wt_id, deadline, now, now),
+                (name, prio_id, status_id, desc, dep_id, wt_id, deadline, created, created),
             ).fetchone()[0]
             conn.execute(
                 "INSERT INTO public.employee_to_application (role_id, application_id, employee_id) VALUES (%s, %s, %s)",
